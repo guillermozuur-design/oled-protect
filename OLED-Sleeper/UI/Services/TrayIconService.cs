@@ -27,15 +27,16 @@ namespace OLED_Sleeper.UI.Services
         private System.Drawing.Icon? _pausedIcon;
 
         private readonly IMonitorInfoManager _monitorInfoManager;
-        private OverlayWindow? _previewOverlay;
+        private readonly ScreensaverPreview _preview;
         private Views.QuickPanelWindow? _quickPanel;
 
         private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
 
         public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService,
-                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama)
+                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama, ScreensaverPreview preview)
         {
             _panorama = panorama;
+            _preview = preview;
             _workModeService = workModeService;
             _monitorInfoManager = monitorInfoManager;
             _hotkeyService = hotkeyService;
@@ -182,7 +183,7 @@ namespace OLED_Sleeper.UI.Services
 
         private MenuItem CreatePreviewMenuItem()
         {
-            var item = new MenuItem { Header = "Sterren-screensaver bekijken" };
+            var item = new MenuItem { Header = "Sterrenhemel bekijken" };
             item.Click += (_, _) => ShowScreensaverPreview();
             return item;
         }
@@ -191,42 +192,11 @@ namespace OLED_Sleeper.UI.Services
         /// Shows the starfield on the monitor under the mouse, using the real overlay window, until the
         /// mouse is moved. Handy to see what the screensaver looks like without waiting for the idle timer.
         /// </summary>
-        private void ShowScreensaverPreview()
-        {
-            if (_previewOverlay != null) return;
-
-            NativeMethods.GetCursorPos(out var start);
-            var monitor = _monitorInfoManager.GetLatestMonitorsBasicInfo()
-                .FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y)));
-            if (monitor == null) return;
-
-            _previewOverlay = new OverlayWindow(screensaver: true, _panorama);
-            _previewOverlay.Show(monitor.Bounds);
-
-            var startedAt = DateTime.UtcNow;
-            var poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
-            poll.Tick += (_, _) =>
-            {
-                // Ignore the first second: the click that opened the menu still moves the mouse a bit.
-                if ((DateTime.UtcNow - startedAt).TotalSeconds < 1)
-                {
-                    NativeMethods.GetCursorPos(out start);
-                    return;
-                }
-
-                NativeMethods.GetCursorPos(out var now);
-                if (Math.Abs(now.X - start.X) + Math.Abs(now.Y - start.Y) < 25) return;
-
-                poll.Stop();
-                _previewOverlay?.Close();
-                _previewOverlay = null;
-            };
-            poll.Start();
-        }
+        private void ShowScreensaverPreview() => _preview.Show();
 
         private MenuItem CreateShowSettingsMenuItem()
         {
-            var item = new MenuItem { Header = "Show Settings" };
+            var item = new MenuItem { Header = "Instellingen openen" };
             item.Click += (_, _) => _showMainWindowAction?.Invoke();
             return item;
         }
@@ -239,7 +209,7 @@ namespace OLED_Sleeper.UI.Services
         {
             var item = new MenuItem
             {
-                Header = "Run at Startup",
+                Header = "Starten met Windows",
                 IsCheckable = true,
                 IsChecked = StartupHelper.IsRunAtStartupEnabled()
             };
@@ -272,7 +242,7 @@ namespace OLED_Sleeper.UI.Services
         /// <returns>A configured MenuItem for exiting.</returns>
         private MenuItem CreateExitMenuItem()
         {
-            var item = new MenuItem { Header = "Exit" };
+            var item = new MenuItem { Header = "Afsluiten" };
             item.Click += (_, _) => _exitApplicationAction?.Invoke();
             return item;
         }

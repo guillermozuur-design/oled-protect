@@ -193,12 +193,15 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
 
             // General timer: after X minutes without any input, nothing keeps any monitor awake and it goes
             // idle right away (not X minutes plus its own idle timer).
-            bool globalExpired = _globalIdle.HasExpired(systemState.IdleTimeMilliseconds);
+            // While a video plays (a program asks Windows to keep the display on), the limits step aside: the
+            // monitor with the video in the active window stays awake; the other monitors follow their own timers.
+            bool globalExpired = !systemState.DisplayRequired && _globalIdle.HasExpired(systemState.IdleTimeMilliseconds);
             var activityReason = globalExpired ? ActivityReason.None : GetActivityReason(monitor, systemState);
             bool hasActivityNow = activityReason != ActivityReason.None;
 
             // When a limit is what stopped the activity, the quiet period really began at the last input.
-            bool limitCut = globalExpired || !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds);
+            bool limitCut = globalExpired ||
+                            (!systemState.DisplayRequired && !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds));
             var quietSince = limitCut
                 ? DateTime.UtcNow - TimeSpan.FromMilliseconds(systemState.IdleTimeMilliseconds)
                 : DateTime.UtcNow;
@@ -321,7 +324,8 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         /// </summary>
         private static bool IsMousePositionActive(ManagedMonitorState monitor, SystemState state)
         {
-            return MousePresenceCounts(monitor.Settings, monitor.Bounds.Contains(state.CursorPosition), state.IdleTimeMilliseconds);
+            return MousePresenceCounts(monitor.Settings, monitor.Bounds.Contains(state.CursorPosition),
+                                       state.DisplayRequired ? 0 : state.IdleTimeMilliseconds);
         }
 
         /// <summary>
@@ -356,7 +360,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             {
                 Rect intersection = Rect.Intersect(monitor.Bounds, state.ForegroundWindowRect);
                 if (!intersection.IsEmpty && intersection.Width > 0 && intersection.Height > 0)
-                    return WithinStillLimit(monitor.Settings, state.IdleTimeMilliseconds);
+                    return state.DisplayRequired || WithinStillLimit(monitor.Settings, state.IdleTimeMilliseconds);
             }
             return false;
         }
@@ -376,7 +380,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             Rect windowRect = IsDesktopWindow(foregroundWindowHandle)
                 ? Rect.Empty
                 : GetForegroundWindowRect(foregroundWindowHandle);
-            return new SystemState(idleTime, cursorPosition, windowRect, foregroundWindowHandle);
+            return new SystemState(idleTime, cursorPosition, windowRect, foregroundWindowHandle, IsDisplayRequired());
         }
 
         /// <summary>
@@ -411,6 +415,29 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
                 return nativeWindowRect.ToWindowsRect();
             }
         }
+
+        /// <summary>
+        /// Whether any program currently asks Windows to keep the display on (ES_DISPLAY_REQUIRED), as video
+        /// players and browsers do while playing video. Read from the combined system execution state.
+        /// </summary>
+        private static bool IsDisplayRequired()
+        {
+            const int SystemExecutionState = 16;
+            const uint ES_DISPLAY_REQUIRED = 0x00000002;
+            try
+            {
+                return CallNtPowerInformation(SystemExecutionState, nint.Zero, 0, out uint state, sizeof(uint)) == 0
+                       && (state & ES_DISPLAY_REQUIRED) != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [DllImport("powrprof.dll")]
+        private static extern uint CallNtPowerInformation(int informationLevel, nint inputBuffer, uint inputBufferLength,
+                                                          out uint outputBuffer, uint outputBufferLength);
 
         /// <summary>
         /// Gets the system-wide user idle time in milliseconds using the GetLastInputInfo API.
@@ -469,12 +496,19 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             public readonly Rect ForegroundWindowRect;
             public readonly nint ForegroundWindowHandle;
 
-            public SystemState(uint idleTime, Point cursorPosition, Rect windowRect, nint windowHandle)
+            /// <summary>
+            /// True while some program asks Windows to keep the display on — what video players and browsers do
+            /// while a video plays. The "still" limit and the general timer step aside then.
+            /// </summary>
+            public readonly bool DisplayRequired;
+
+            public SystemState(uint idleTime, Point cursorPosition, Rect windowRect, nint windowHandle, bool displayRequired)
             {
                 IdleTimeMilliseconds = idleTime;
                 CursorPosition = cursorPosition;
                 ForegroundWindowRect = windowRect;
                 ForegroundWindowHandle = windowHandle;
+                DisplayRequired = displayRequired;
             }
         }
     }

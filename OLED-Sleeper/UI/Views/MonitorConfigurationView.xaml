@@ -459,7 +459,7 @@
                         IsChecked="{Binding IsActiveOnActiveWindow, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" />
                             <StackPanel Orientation="Horizontal" Margin="26,0,0,10" IsEnabled="{Binding IsStillLimitApplicable}"
                                         ToolTipService.InitialShowDelay="200" ToolTipService.ShowOnDisabled="True"
-                                        ToolTip="Geldt voor de muis en voor het gefocuste venster hierboven: staat de muis hier, of het actieve venster,&#10;maar beweeg je de muis niet en druk je geen toets in, dan gaat dit scherm na deze tijd toch uit.&#10;Muis bewegen of een toets indrukken maakt het weer wakker.">
+                                        ToolTip="Geldt voor de muis en voor het gefocuste venster hierboven: staat de muis hier, of het actieve venster,&#10;maar beweeg je de muis niet en druk je geen toets in, dan gaat dit scherm na deze tijd toch uit.&#10;Muis bewegen of een toets indrukken maakt het weer wakker.&#10;Speelt er een video (YouTube, Netflix, VLC), dan blijft het scherm met het actieve venster gewoon aan.">
                                 <CheckBox Style="{StaticResource ModernCheckBox}" FontSize="13" Content="maar toch uit na"
                                           IsChecked="{Binding UseMouseStillLimit, UpdateSourceTrigger=PropertyChanged}" />
                                 <TextBox Width="46" Height="26" Margin="8,0,0,0" FontSize="13" Padding="4,2" Style="{StaticResource ModernTextBox}"
