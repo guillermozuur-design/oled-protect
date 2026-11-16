@@ -88,7 +88,7 @@ namespace OLED_Sleeper.UI.Services
                 ShowScreensaverPreview,
                 monitor.Bounds,
                 _hotkeyService.HoldKey,
-                $"Houd {modifier} vast \u00b7 tik {key} = volgende \u00b7 loslaten = kiezen \u00b7 Esc = annuleren");
+                $"{modifier} vasthouden + {key} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten");
             _quickPanel.Closed += (_, _) => _quickPanel = null;
             _quickPanel.Show();
         }

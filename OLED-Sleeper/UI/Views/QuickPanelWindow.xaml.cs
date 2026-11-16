@@ -3,17 +3,18 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace OLED_Sleeper.UI.Views
 {
     /// <summary>
-    /// Hold-to-choose quick panel, like Alt+Tab: it opens on the hotkey while the modifier is held, each extra
-    /// tap of the hotkey moves the highlight, number keys or the mouse pick directly, and letting go of the
-    /// modifier applies the highlighted choice and closes. Esc cancels.
+    /// Quick panel in the style of Windows' Win+P: a small panel at the bottom right of the screen you are on.
+    /// The hotkey opens it with the current mode highlighted; every further tap moves the highlight. Letting go
+    /// of the modifier applies the highlighted choice (nothing happens if you did not move on). Afterwards the
+    /// panel stays a few seconds so you can also just click; while the mouse is on it, it stays open. Esc closes.
     ///
     /// The panel never takes keyboard focus (the app you are in keeps it); keys are read with
     /// GetAsyncKeyState, so it works regardless of which window is in front.
@@ -22,12 +23,12 @@ namespace OLED_Sleeper.UI.Views
     public partial class QuickPanelWindow : Window
     {
         public static readonly TimeSpan TimedWorkMode = TimeSpan.FromHours(1);
+        private static readonly TimeSpan Linger = TimeSpan.FromSeconds(3.5);
+        private static readonly TimeSpan CloseAfterChoice = TimeSpan.FromSeconds(0.9);
 
-        private enum Choice { Protect = 0, Work = 1, WorkHour = 2, Preview = 3, OpenApp = 4 }
+        private sealed record Option(string Icon, string Title, string Subtitle, bool IsActive, Action Run);
 
         private const int VK_ESCAPE = 0x1B;
-        private const int VK_1 = 0x31;
-        private const int VK_NUMPAD1 = 0x61;
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
@@ -37,13 +38,16 @@ namespace OLED_Sleeper.UI.Views
         private readonly Action _previewScreensaver;
         private readonly Rect _monitorBounds;
         private readonly int _holdKey;
-        private readonly Border[] _items;
         private readonly DispatcherTimer _poll;
-        private readonly bool[] _numberWasDown = new bool[5];
-        private Choice _selected;
-        private bool _finished;
+        private List<Option> _options = new();
+        private readonly List<Border> _rows = new();
+        private int _index;
+        private int _indexAtPress;
+        private bool _holding = true;
+        private DateTime _closeAt = DateTime.MaxValue;
+        private bool _closing;
 
-        /// <param name="holdKey">Virtual key of the modifier that must stay held (e.g. VK_MENU for Alt).</param>
+        /// <param name="holdKey">Virtual key of the modifier held with the hotkey (e.g. VK_MENU for Alt).</param>
         /// <param name="hint">Short usage hint shown at the bottom.</param>
         public QuickPanelWindow(IWorkModeService workMode, Action openApp, Action previewScreensaver, Rect monitorBounds,
                                 int holdKey, string hint)
@@ -54,91 +58,149 @@ namespace OLED_Sleeper.UI.Views
             _previewScreensaver = previewScreensaver;
             _monitorBounds = monitorBounds;
             _holdKey = holdKey;
-            _items = new[] { Item0, Item1, Item2, Item3, Item4 };
             HintText.Text = hint;
 
-            for (int i = 0; i < _items.Length; i++)
-            {
-                var choice = (Choice)i;
-                _items[i].MouseEnter += (_, _) => Select(choice);
-                _items[i].MouseLeftButtonUp += (_, _) => { Select(choice); Finish(apply: true); };
-            }
-
-            // Start on "the other mode", so a quick tap of the hotkey simply switches.
-            Select(_workMode.IsEnabled ? Choice.Protect : Choice.Work);
-            ShowCurrentState();
+            BuildRows();
+            _index = _indexAtPress = Math.Max(0, _options.FindIndex(o => o.IsActive));
+            Highlight();
 
             SourceInitialized += (_, _) => MakeNonActivating();
-            Loaded += (_, _) => CenterOnMonitor();
+            Loaded += (_, _) => PlaceBottomRight();
 
             _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(25) };
-            _poll.Tick += (_, _) => PollKeys();
+            _poll.Tick += (_, _) => Poll();
             _poll.Start();
         }
 
-        /// <summary>The hotkey was tapped again while the panel is open: move the highlight on.</summary>
-        public void Next() => Select((Choice)(((int)_selected + 1) % _items.Length));
-
-        private void Select(Choice choice)
-        {
-            _selected = choice;
-            for (int i = 0; i < _items.Length; i++) _items[i].Tag = i == (int)choice ? "sel" : null;
-        }
-
-        private void ShowCurrentState()
+        private void BuildRows()
         {
             bool on = _workMode.IsEnabled;
             var until = _workMode.EnabledUntil;
-            Active0.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
-            Active1.Visibility = on && until == null ? Visibility.Visible : Visibility.Collapsed;
-            Active2.Visibility = on && until != null ? Visibility.Visible : Visibility.Collapsed;
-            StatusText.Text = !on ? "bescherming actief"
-                : until != null ? $"werkmodus tot {until.Value.ToLocalTime():HH:mm}"
-                : "werkmodus";
+            _options = new List<Option>
+            {
+                new("", "Bescherming aan", "Stilstaande schermen op zwart, dim of sterren", !on, () => _workMode.SetEnabled(false)),
+                new("", "Werkmodus", "Alle schermen blijven aan", on && until == null, () => _workMode.SetEnabled(true)),
+                new("", until != null ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm}" : "Werkmodus 1 uur",
+                    "Daarna gaat de bescherming vanzelf weer aan", on && until != null, () => _workMode.EnableFor(TimedWorkMode)),
+                new("", "Sterren bekijken", "Op dit scherm, muis bewegen = stoppen", false, _previewScreensaver),
+                new("", "App openen", "Instellingen per scherm", false, _openApp),
+            };
+
+            Rows.Children.Clear();
+            _rows.Clear();
+            for (int i = 0; i < _options.Count; i++)
+            {
+                if (i == 3)
+                    Rows.Children.Add(new Border { Height = 1, Margin = new Thickness(8, 4, 8, 8), Background = (Brush)FindResource("SeparatorColorBrush") });
+
+                var option = _options[i];
+                var row = new Border { Style = (Style)FindResource("Row") };
+                var grid = new DockPanel();
+
+                var icon = new TextBlock
+                {
+                    Text = option.Icon, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 18, Width = 30,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = option.IsActive ? (Brush)FindResource("AccentColorBrush") : (Brush)FindResource("PrimaryForegroundColor")
+                };
+                DockPanel.SetDock(icon, Dock.Left);
+                grid.Children.Add(icon);
+
+                if (option.IsActive)
+                {
+                    var badge = new TextBlock { Text = "actief", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)) };
+                    DockPanel.SetDock(badge, Dock.Right);
+                    grid.Children.Add(badge);
+                }
+
+                var texts = new StackPanel { Margin = new Thickness(6, 0, 0, 0) };
+                texts.Children.Add(new TextBlock { Text = option.Title, FontSize = 14.5, Foreground = (Brush)FindResource("PrimaryForegroundColor") });
+                texts.Children.Add(new TextBlock { Text = option.Subtitle, FontSize = 11, Margin = new Thickness(0, 1, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("SecondaryForegroundColor") });
+                grid.Children.Add(texts);
+
+                row.Child = grid;
+                int index = i;
+                row.MouseEnter += (_, _) => { _index = index; Highlight(); };
+                row.MouseLeftButtonUp += (_, _) => Choose(index);
+                Rows.Children.Add(row);
+                _rows.Add(row);
+            }
         }
 
-        private void PollKeys()
+        /// <summary>The hotkey was tapped again: move the highlight on (and hold-to-choose starts again).</summary>
+        public void Next()
         {
-            if (_finished) return;
+            if (_closing) return;
+            if (!_holding) { _holding = true; _indexAtPress = _index; }
+            _index = (_index + 1) % _options.Count;
+            Highlight();
+        }
 
-            if (IsDown(VK_ESCAPE)) { Finish(apply: false); return; }
+        private void Highlight()
+        {
+            for (int i = 0; i < _rows.Count; i++) _rows[i].Tag = i == _index ? "sel" : null;
+        }
 
-            for (int i = 0; i < _numberWasDown.Length; i++)
+        private void Poll()
+        {
+            if (_closing) return;
+            if (IsDown(VK_ESCAPE)) { CloseNow(); return; }
+
+            if (_holding)
             {
-                bool down = IsDown(VK_1 + i) || IsDown(VK_NUMPAD1 + i);
-                if (down && !_numberWasDown[i]) Select((Choice)i);
-                _numberWasDown[i] = down;
+                if (IsDown(_holdKey)) return;
+                _holding = false;
+                // Let go: do what is highlighted, unless nothing was moved (then just wait for a click).
+                if (_index != _indexAtPress && !_options[_index].IsActive) Choose(_index);
+                else _closeAt = DateTime.UtcNow + Linger;
+                return;
             }
 
-            if (!IsDown(_holdKey)) Finish(apply: true);
+            if (IsMouseOver) _closeAt = DateTime.UtcNow + Linger;
+            else if (DateTime.UtcNow >= _closeAt) CloseNow();
         }
 
-        private void Finish(bool apply)
+        private void Choose(int index)
         {
-            if (_finished) return;
-            _finished = true;
+            if (_closing) return;
+            var option = _options[index];
+
+            if (option.IsActive) { CloseNow(); return; }
+
+            bool isMode = index <= 2;
+            if (!isMode)
+            {
+                CloseNow();
+                option.Run();
+                return;
+            }
+
+            // Mode switch: apply, show the new state for a moment, then close.
+            option.Run();
+            BuildRows();
+            _index = index;
+            Highlight();
+            _holding = false;
+            _closeAt = DateTime.UtcNow + CloseAfterChoice;
+        }
+
+        private void CloseNow()
+        {
+            if (_closing) return;
+            _closing = true;
             _poll.Stop();
-            Close();
-
-            if (!apply) return;
-            switch (_selected)
-            {
-                case Choice.Protect: _workMode.SetEnabled(false); break;
-                case Choice.Work: _workMode.SetEnabled(true); break;
-                case Choice.WorkHour: _workMode.EnableFor(TimedWorkMode); break;
-                case Choice.Preview: _previewScreensaver(); break;
-                case Choice.OpenApp: _openApp(); break;
-            }
+            var fade = new DoubleAnimation(Opacity, 0, TimeSpan.FromMilliseconds(150));
+            fade.Completed += (_, _) => Close();
+            BeginAnimation(OpacityProperty, fade);
         }
 
-        public void Cancel() => Finish(apply: false);
-
-        private void CenterOnMonitor()
+        private void PlaceBottomRight()
         {
             // Monitor bounds are physical pixels; window positions are DIPs.
             var dpi = VisualTreeHelper.GetDpi(this);
-            Left = (_monitorBounds.Left + _monitorBounds.Width / 2) / dpi.DpiScaleX - ActualWidth / 2;
-            Top = (_monitorBounds.Top + _monitorBounds.Height / 2) / dpi.DpiScaleY - ActualHeight / 2;
+            Left = (_monitorBounds.Right) / dpi.DpiScaleX - ActualWidth - 8;
+            Top = (_monitorBounds.Bottom) / dpi.DpiScaleY - ActualHeight - 150; // boven taakbalk en Windows-watermerk
+            BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
         }
 
         private void MakeNonActivating()
