@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 
@@ -14,11 +15,15 @@ namespace OLED_Sleeper.Features.Flights
 
     public sealed record MapPlace(string Name, PlaceKind Kind, double X, double Y);
 
+    /// <summary>An airport: its short code (IATA, else ICAO), a short name and where its label goes, in local km.</summary>
+    public sealed record MapAirport(string Code, string Name, double X, double Y);
+
     /// <summary>The map around the pin: lines and areas per kind, and place names, all in local kilometres.</summary>
     public sealed class MapContent
     {
         public Dictionary<MapKind, List<(double X, double Y)[]>> Shapes { get; } = new();
         public List<MapPlace> Places { get; } = new();
+        public List<MapAirport> Airports { get; } = new();
 
         public void Add(MapKind kind, (double X, double Y)[] points)
         {
@@ -36,7 +41,10 @@ namespace OLED_Sleeper.Features.Flights
     /// </summary>
     public static class MapBuilder
     {
-        public static readonly HashSet<string> Layers = new() { "transportation", "water", "waterway", "aeroway", "boundary", "place" };
+        public static readonly HashSet<string> Layers = new() { "transportation", "water", "waterway", "aeroway", "boundary", "place", "aerodrome_label" };
+
+        /// <summary>Runways are only in the detailed tiles; these are fetched just around the airports.</summary>
+        public const int RunwayZoom = 10;
 
         /// <summary>Lines are cut at the tile edge (plus a hair, so neighbours meet without a gap).</summary>
         private const double EdgeMargin = 2;
@@ -78,6 +86,9 @@ namespace OLED_Sleeper.Features.Flights
                     case "place" when f.Type == VectorTile.GeometryType.Point:
                         AddPlace(content, f, cls, zoom, tileX, tileY, projection);
                         break;
+                    case "aerodrome_label" when f.Type == VectorTile.GeometryType.Point:
+                        AddAirport(content, f, cls, zoom, tileX, tileY, projection);
+                        break;
                 }
             }
         }
@@ -106,6 +117,47 @@ namespace OLED_Sleeper.Features.Flights
             var (x, y) = projection.ToKm(lat, lon);
             if (content.Places.Any(p => p.Name == name && Math.Abs(p.X - x) < 2 && Math.Abs(p.Y - y) < 2)) return;
             content.Places.Add(new MapPlace(name, kind.Value, x, y));
+        }
+
+        private static void AddAirport(MapContent content, VectorTile.Feature f, string? cls, int zoom, int tileX, int tileY, LocalProjection projection)
+        {
+            // Airfields with a code; private strips and the like are left out.
+            string code = f.Tags.TryGetValue("iata", out var iata) && iata.Length > 0 ? iata
+                        : f.Tags.TryGetValue("icao", out var icao) && icao.Length > 0 ? icao : "";
+            if (f.Parts.Count == 0 || code.Length == 0 || cls is "private" or "other") return;
+
+            var (px, py) = f.Parts[0][0];
+            if (px < 0 || py < 0 || px >= f.Extent || py >= f.Extent) return;
+            if (content.Airports.Any(a => a.Code == code)) return;
+            var (lat, lon) = TileMath.ToLatLon(zoom, tileX, tileY, px / f.Extent, py / f.Extent);
+            var (x, y) = projection.ToKm(lat, lon);
+            string name = f.Tags.TryGetValue("name:nl", out var nl) && nl.Length > 0 ? nl
+                        : f.Tags.TryGetValue("name", out var n) ? n : "";
+            content.Airports.Add(new MapAirport(code, ShortAirportName(name), x, y));
+        }
+
+        private static readonly string[] AirportWords =
+            { "Luchthaven", "Vliegveld", "Vliegbasis", "Flughafen", "International Airport", "Regional Airport", "Airport", "Airfield", "Air Base", "Airbase" };
+
+        /// <summary>"Luchthaven Schiphol" becomes "Schiphol", "Rotterdam The Hague Airport" becomes "Rotterdam The Hague".</summary>
+        public static string ShortAirportName(string name)
+        {
+            foreach (var w in AirportWords)
+                name = Regex.Replace(name, $@"(^|\s){Regex.Escape(w)}(?=\s|$)", " ", RegexOptions.IgnoreCase);
+            return Regex.Replace(name, @"\s+", " ").Trim(' ', '-', ',');
+        }
+
+        /// <summary>The detailed tiles that hold the runways of an airport (a few km around its label).</summary>
+        public static HashSet<(int X, int Y)> RunwayTilesFor(MapAirport airport, LocalProjection projection)
+        {
+            const double reachKm = 4;
+            var tiles = new HashSet<(int X, int Y)>();
+            foreach (var (dx, dy) in new[] { (-reachKm, -reachKm), (reachKm, -reachKm), (-reachKm, reachKm), (reachKm, reachKm) })
+            {
+                var (lat, lon) = projection.ToLatLon(airport.X + dx, airport.Y + dy);
+                tiles.Add(TileMath.TileAt(lat, lon, RunwayZoom));
+            }
+            return tiles;
         }
 
         private static void AddAreas(MapContent content, MapKind kind, VectorTile.Feature f, int zoom, int tileX, int tileY, LocalProjection projection)
@@ -254,6 +306,7 @@ namespace OLED_Sleeper.Features.Flights
         public required double RadiusKm { get; init; }
         public required IReadOnlyList<Chunk> Chunks { get; init; }
         public required IReadOnlyList<MapPlace> Places { get; init; }
+        public IReadOnlyList<MapAirport> Airports { get; init; } = Array.Empty<MapAirport>();
         public int PointCount { get; init; }
 
         /// <param name="toleranceKm">Detail that may be dropped (about half a pixel at the normal zoom).</param>
@@ -298,7 +351,7 @@ namespace OLED_Sleeper.Features.Flights
                     chunks.Add(new Chunk(kind, new Rect(minX, minY, maxX - minX, maxY - minY), g));
                 }
             }
-            return new MapGeometry { Projection = projection, RadiusKm = radiusKm, Chunks = chunks, Places = content.Places.ToList(), PointCount = points };
+            return new MapGeometry { Projection = projection, RadiusKm = radiusKm, Chunks = chunks, Places = content.Places.ToList(), Airports = content.Airports.ToList(), PointCount = points };
         }
     }
 
@@ -336,63 +389,75 @@ namespace OLED_Sleeper.Features.Flights
             // Enough around the pin for the slow drift, zoom and turn of the map (see FlightCamera).
             var tiles = MapBuilder.TilesAround(projection, radiusKm * 1.7, zoom);
 
-            string? template = null;
             var content = new MapContent();
             int loaded = 0;
-            var results = await Task.WhenAll(tiles.Select(async t =>
-            {
-                string? file = cacheDirectory != null ? Path.Combine(cacheDirectory, zoom.ToString(), t.X.ToString(), t.Y + ".pbf") : null;
-                byte[]? data = null;
-                try
-                {
-                    if (file != null && File.Exists(file) && DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < CacheLifetime)
-                        data = await File.ReadAllBytesAsync(file);
-                    else
-                    {
-                        template ??= await TileTemplateAsync();
-                        await Downloads.WaitAsync();
-                        try
-                        {
-                            data = await Http.GetByteArrayAsync(template.Replace("{z}", zoom.ToString()).Replace("{x}", t.X.ToString()).Replace("{y}", t.Y.ToString()));
-                        }
-                        finally { Downloads.Release(); }
-                        if (data.Length > 2 && data[0] == 0x1F && data[1] == 0x8B) data = Gunzip(data);
-                        if (file != null)
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                            await File.WriteAllBytesAsync(file, data);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Serilog.Log.Debug("Map tile {Z}/{X}/{Y} not available: {Message}", zoom, t.X, t.Y, ex.Message);
-                    // An old cached copy is better than nothing.
-                    if (data == null && file != null && File.Exists(file)) data = await File.ReadAllBytesAsync(file);
-                }
-                return (t, data);
-            }));
-
+            var results = await Task.WhenAll(tiles.Select(async t => (t, data: await TileAsync(zoom, t.X, t.Y, cacheDirectory))));
             foreach (var (t, data) in results)
+                if (Read(content, data, MapBuilder.Layers, zoom, t, projection)) loaded++;
+
+            // The overview tiles have no runways: take them from the detailed tiles, only around the airports.
+            if (zoom < MapBuilder.RunwayZoom)
             {
-                if (data == null) continue;
-                try
-                {
-                    MapBuilder.AddTile(content, VectorTile.Decode(data, MapBuilder.Layers), zoom, t.X, t.Y, projection);
-                    loaded++;
-                }
-                catch (Exception ex)
-                {
-                    Serilog.Log.Debug("Map tile {Z}/{X}/{Y} could not be read: {Message}", zoom, t.X, t.Y, ex.Message);
-                }
+                var runwayTiles = content.Airports.SelectMany(a => MapBuilder.RunwayTilesFor(a, projection)).Distinct().ToList();
+                var runwayLayers = new HashSet<string> { "aeroway" };
+                var detail = await Task.WhenAll(runwayTiles.Select(async t => (t, data: await TileAsync(MapBuilder.RunwayZoom, t.X, t.Y, cacheDirectory))));
+                foreach (var (t, data) in detail) Read(content, data, runwayLayers, MapBuilder.RunwayZoom, t, projection);
             }
 
             if (loaded == 0) return null;
             // About one pixel at the normal zoom on two 2560-pixel-wide screens; finer detail cannot be seen anyway.
             var map = MapGeometry.From(content, projection, radiusKm, radiusKm / 2560);
-            Serilog.Log.Information("Flight map: {Loaded}/{Total} tiles, {Shapes} shapes ({Points} points after simplifying, {Chunks} chunks), {Places} places.",
-                loaded, tiles.Count, content.ShapeCount, map.PointCount, map.Chunks.Count, content.Places.Count);
+            Serilog.Log.Information("Flight map: {Loaded}/{Total} tiles, {Shapes} shapes ({Points} points after simplifying, {Chunks} chunks), {Places} places, airports: {Airports}.",
+                loaded, tiles.Count, content.ShapeCount, map.PointCount, map.Chunks.Count, content.Places.Count, string.Join(" ", content.Airports.Select(a => a.Code)));
             return map;
+        }
+
+        private static bool Read(MapContent content, byte[]? data, ISet<string> layers, int zoom, (int X, int Y) t, LocalProjection projection)
+        {
+            if (data == null) return false;
+            try
+            {
+                MapBuilder.AddTile(content, VectorTile.Decode(data, layers), zoom, t.X, t.Y, projection);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Debug("Map tile {Z}/{X}/{Y} could not be read: {Message}", zoom, t.X, t.Y, ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>One tile: from the disk cache, else downloaded (and cached). Null when it is not available.</summary>
+        private static async Task<byte[]?> TileAsync(int zoom, int x, int y, string? cacheDirectory)
+        {
+            string? file = cacheDirectory != null ? Path.Combine(cacheDirectory, zoom.ToString(), x.ToString(), y + ".pbf") : null;
+            try
+            {
+                if (file != null && File.Exists(file) && DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < CacheLifetime)
+                    return await File.ReadAllBytesAsync(file);
+
+                string template = await TileTemplateAsync();
+                byte[] data;
+                await Downloads.WaitAsync();
+                try
+                {
+                    data = await Http.GetByteArrayAsync(template.Replace("{z}", zoom.ToString()).Replace("{x}", x.ToString()).Replace("{y}", y.ToString()));
+                }
+                finally { Downloads.Release(); }
+                if (data.Length > 2 && data[0] == 0x1F && data[1] == 0x8B) data = Gunzip(data);
+                if (file != null)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                    await File.WriteAllBytesAsync(file, data);
+                }
+                return data;
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Debug("Map tile {Z}/{X}/{Y} not available: {Message}", zoom, x, y, ex.Message);
+                // An old cached copy is better than nothing.
+                return file != null && File.Exists(file) ? await File.ReadAllBytesAsync(file) : null;
+            }
         }
 
         private static byte[] Gunzip(byte[] data)

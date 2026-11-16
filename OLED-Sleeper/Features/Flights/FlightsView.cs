@@ -24,8 +24,10 @@ namespace OLED_Sleeper.Features.Flights
         // Night-map colours: dim and opaque on black (opaque, so overlapping tile edges never show).
         // Kept dim on purpose: on black an OLED shows even these clearly, and less light means less wear.
         private static readonly Color WaterColor = Color.FromRgb(0x10, 0x22, 0x38);   // coast and big lakes
-        private static readonly Color RunwayAreaColor = Color.FromRgb(0x17, 0x19, 0x1F);
-        private static readonly Color RunwayColor = Color.FromRgb(0x29, 0x2C, 0x34);
+        private static readonly Color RunwayAreaColor = Color.FromRgb(0x1C, 0x1F, 0x27);
+        private static readonly Color RunwayColor = Color.FromRgb(0x3A, 0x3F, 0x4B);
+        private static readonly Color AirportCodeColor = Color.FromRgb(0x5E, 0x6B, 0x82);
+        private static readonly Color AirportNameColor = Color.FromRgb(0x3E, 0x44, 0x50);
         private static readonly Color BorderColor = Color.FromRgb(0x27, 0x20, 0x30);
         private static readonly Color RiverColor = Color.FromRgb(0x12, 0x2A, 0x45);
         private static readonly Color RailColor = Color.FromRgb(0x29, 0x2E, 0x37);
@@ -389,6 +391,18 @@ namespace OLED_Sleeper.Features.Flights
                             break;
                         }
                 }
+            }
+
+            // Airports: the code, with the short name under it, next to the runways.
+            foreach (var airport in _map!.Airports)
+            {
+                var p = m.Transform(new Point(airport.X, airport.Y));
+                if (!outside.Contains(p)) continue;
+                var code = Text(airport.Code, CityFace, 12.5 * ui, AirportCodeColor);
+                var at = p + new Vector(8 * ui, -code.Height);
+                dc.DrawText(code, at);
+                if (airport.Name.Length > 0)
+                    dc.DrawText(Text(airport.Name, LabelFace, 10.5 * ui, AirportNameColor), at + new Vector(0, code.Height * 0.92));
             }
         }
 

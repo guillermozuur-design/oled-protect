@@ -201,6 +201,47 @@ namespace OLED_Sleeper.Tests.Features.Flights
             Assert.Equal("Utrecht", place.Name);
             Assert.Equal(PlaceKind.City, place.Kind);
         }
+
+        [Fact]
+        public void AddTile_KeepsAirportsWithACodeOnce()
+        {
+            var p = new LocalProjection(52.09, 5.12);
+            var point = new List<IReadOnlyList<(double X, double Y)>> { new[] { (2000.0, 2000.0) } };
+            var features = new List<VectorTile.Feature>
+            {
+                new("aerodrome_label", new Dictionary<string, string> { ["class"] = "international", ["iata"] = "AMS", ["icao"] = "EHAM", ["name"] = "Luchthaven Schiphol" }, VectorTile.GeometryType.Point, point, 4096),
+                new("aerodrome_label", new Dictionary<string, string> { ["class"] = "military", ["icao"] = "EHDL", ["name"] = "Vliegbasis Deelen" }, VectorTile.GeometryType.Point, point, 4096),
+                new("aerodrome_label", new Dictionary<string, string> { ["class"] = "private", ["icao"] = "EHXX", ["name"] = "Strip" }, VectorTile.GeometryType.Point, point, 4096),
+                new("aerodrome_label", new Dictionary<string, string> { ["class"] = "public", ["name"] = "Zweefveld" }, VectorTile.GeometryType.Point, point, 4096),
+            };
+
+            var content = new MapContent();
+            MapBuilder.AddTile(content, features, 10, 526, 337, p);
+            MapBuilder.AddTile(content, features, 10, 526, 337, p);
+
+            Assert.Equal(new[] { "AMS", "EHDL" }, content.Airports.Select(a => a.Code));
+            Assert.Equal("Schiphol", content.Airports[0].Name);
+            Assert.Equal("Deelen", content.Airports[1].Name);
+        }
+
+        [Theory]
+        [InlineData("Luchthaven Schiphol", "Schiphol")]
+        [InlineData("Rotterdam The Hague Airport", "Rotterdam The Hague")]
+        [InlineData("Eindhoven Airport", "Eindhoven")]
+        [InlineData("Brussels International Airport", "Brussels")]
+        [InlineData("Lelystad", "Lelystad")]
+        public void ShortAirportName_DropsTheWordAirport(string name, string expected) =>
+            Assert.Equal(expected, MapBuilder.ShortAirportName(name));
+
+        [Fact]
+        public void RunwayTilesFor_CoverTheAirport()
+        {
+            var p = new LocalProjection(52.0, 4.2);
+            var (x, y) = p.ToKm(52.3105, 4.7683); // Schiphol
+            var tiles = MapBuilder.RunwayTilesFor(new MapAirport("AMS", "Schiphol", x, y), p);
+            Assert.InRange(tiles.Count, 1, 4);
+            Assert.Contains(TileMath.TileAt(52.3105, 4.7683, MapBuilder.RunwayZoom), tiles);
+        }
     }
 
     public class FlightCameraTests
