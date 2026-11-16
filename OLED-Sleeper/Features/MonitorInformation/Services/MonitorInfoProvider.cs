@@ -73,15 +73,17 @@ namespace OLED_Sleeper.Features.MonitorInformation.Services
                     {
                         foreach (var physicalMonitor in physicalMonitors)
                         {
-                            if (!NativeMethods.GetCapabilitiesStringLength(physicalMonitor.hPhysicalMonitor, out _)) continue;
+                            // Some monitors (e.g. LG UltraGear OLED over DisplayPort) never return a capabilities
+                            // string but do answer brightness reads and writes. A working brightness read is the
+                            // proof that matters, so it counts as support on its own. One retry, because the
+                            // first DDC/CI transaction after wake-up sometimes fails.
+                            bool brightnessReadable = TryReadMaxBrightness(physicalMonitor.hPhysicalMonitor, out var reportedMax)
+                                || TryReadMaxBrightness(physicalMonitor.hPhysicalMonitor, out reportedMax);
+
+                            if (!brightnessReadable && !NativeMethods.GetCapabilitiesStringLength(physicalMonitor.hPhysicalMonitor, out _)) continue;
 
                             isSupported = true;
-
-                            if (NativeMethods.GetVCPFeatureAndVCPFeatureReply(
-                                    physicalMonitor.hPhysicalMonitor, NativeMethods.VCP_CODE_BRIGHTNESS, nint.Zero, out _, out var reportedMax))
-                            {
-                                maxBrightness = reportedMax;
-                            }
+                            if (brightnessReadable) maxBrightness = reportedMax;
                             break;
                         }
                         NativeMethods.DestroyPhysicalMonitors(count, physicalMonitors);
@@ -103,7 +105,20 @@ namespace OLED_Sleeper.Features.MonitorInformation.Services
         /// </summary>
         /// <param name="hMonitor">Handle to the display monitor.</param>
         /// <returns>The number of physical monitors, or one when the count could not be read.</returns>
-        private static uint CountPhysicalMonitors(nint hMonitor)
+        private static bool TryReadMaxBrightness(nint physicalMonitor, out uint maxBrightness)
+        {
+            if (NativeMethods.GetVCPFeatureAndVCPFeatureReply(physicalMonitor, NativeMethods.VCP_CODE_BRIGHTNESS, nint.Zero, out _, out maxBrightness)
+                && maxBrightness > 0)
+            {
+                return true;
+            }
+
+            Thread.Sleep(50);
+            maxBrightness = 0;
+            return false;
+        }
+
+                private static uint CountPhysicalMonitors(nint hMonitor)
         {
             if (!NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint count) || count == 0)
             {
