@@ -69,7 +69,7 @@ namespace OLED_Sleeper.Features.Flights
             [AircraftKind.Helicopter] = Helicopter(),
         };
 
-        /// <summary>Rotor blades of a helicopter (drawn turning, on top of its body).</summary>
+        /// <summary>The rotor disc of a helicopter, on top of its body.</summary>
         private static readonly Geometry RotorShape = Rotor();
 
         /// <summary>Relative size of each sort of aircraft.</summary>
@@ -87,7 +87,8 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Brush PlaneLowFill = Frozen(new SolidColorBrush(Color.FromRgb(0xF0, 0x8A, 0x3C)));
         private static readonly Brush GroundFill = Frozen(new SolidColorBrush(Color.FromRgb(0x70, 0x70, 0x70)));
         private static readonly Pen PlaneOutline = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0x14, 0x12, 0x0C)), 0.07));
-        private static readonly Brush RotorFill = Frozen(new SolidColorBrush(Color.FromArgb(0x90, 0xE9, 0xB8, 0x2C)));
+        private static readonly Brush RotorFill = Frozen(new SolidColorBrush(Color.FromArgb(0x30, 0xE9, 0xB8, 0x2C)));
+        private static readonly Pen RotorRim = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0x70, 0xE9, 0xB8, 0x2C)), 0.05));
 
         private static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
@@ -128,20 +129,7 @@ namespace OLED_Sleeper.Features.Flights
             return Frozen(body);
         }
 
-        private static Geometry Rotor()
-        {
-            // Two crossing blades, centred on the rotor hub, so turning them around the hub keeps them in place.
-            var g = new GeometryGroup { FillRule = FillRule.Nonzero };
-            foreach (double angle in new[] { 0.0, 90.0 })
-            {
-                var blade = new RectangleGeometry(new Rect(RotorHub.X - 0.95, RotorHub.Y - 0.035, 1.9, 0.07), 0.035, 0.035)
-                {
-                    Transform = new RotateTransform(angle, RotorHub.X, RotorHub.Y)
-                };
-                g.Children.Add(blade);
-            }
-            return Frozen(g);
-        }
+        private static Geometry Rotor() => Frozen(new EllipseGeometry(RotorHub, 0.92, 0.92));
 
         private readonly FlightsSettings _settings;
         private readonly Stopwatch _frameClock = new();
@@ -429,32 +417,6 @@ namespace OLED_Sleeper.Features.Flights
             foreach (var plane in _tracker.Snapshot(now))
             {
                 var p = m.Transform(new Point(plane.X, plane.Y));
-                Color color = ColorFor(plane);
-
-                // Trail: fading line behind the plane, drawn in a few chunks of decreasing brightness.
-                if (plane.Trail.Count > 1)
-                {
-                    var pts = plane.Trail.Select(t => (P: m.Transform(new Point(t.X, t.Y)), t.AgeSeconds)).ToList();
-                    if (pts.Any(t => outside.Contains(t.P)))
-                    {
-                        const int chunk = 6;
-                        for (int start = 0; start < pts.Count - 1; start += chunk)
-                        {
-                            int end = Math.Min(pts.Count - 1, start + chunk);
-                            double age = pts[start].AgeSeconds;
-                            double alpha = 0.32 * Math.Clamp(1 - age / 50, 0, 1);
-                            if (alpha <= 0.01) continue;
-                            var g = new StreamGeometry();
-                            using (var ctx = g.Open())
-                            {
-                                ctx.BeginFigure(pts[start].P, false, false);
-                                for (int k = start + 1; k <= end; k++) ctx.LineTo(pts[k].P, true, true);
-                            }
-                            dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb((byte)(255 * alpha), color.R, color.G, color.B)), 1.1 * ui), g);
-                        }
-                    }
-                }
-
                 if (!outside.Contains(p)) continue;
 
                 double size = (plane.OnGround ? 6 : 9) * ui * SizeOf(plane.Kind);
@@ -467,12 +429,8 @@ namespace OLED_Sleeper.Features.Flights
                 dc.DrawGeometry(fill, PlaneOutline, Shapes[plane.Kind]);
                 if (plane.Kind == AircraftKind.Helicopter && !plane.OnGround)
                 {
-                    // The rotor turns around its hub, calmly (a quarter turn per second looks like slow spinning
-                    // because the four blade ends look alike).
-                    double turn = (now - DateTime.UnixEpoch).TotalSeconds % 4 / 4 * 360;
-                    dc.PushTransform(new RotateTransform(turn, RotorHub.X, RotorHub.Y));
-                    dc.DrawGeometry(RotorFill, null, RotorShape);
-                    dc.Pop();
+                    // A spinning rotor looks like a faint disc; drawn still (thin turning blades this small flicker).
+                    dc.DrawGeometry(RotorFill, RotorRim, RotorShape);
                 }
                 dc.Pop();
 
@@ -486,16 +444,6 @@ namespace OLED_Sleeper.Features.Flights
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }
-        }
-
-        /// <summary>Colour by altitude: warm when low (taking off / landing), cool and pale when high.</summary>
-        private static Color ColorFor(AircraftTracker.Plane plane)
-        {
-            if (plane.OnGround) return Color.FromRgb(0x6A, 0x6A, 0x6A);
-            double metres = (plane.AltitudeFeet ?? 30000) * 0.3048;
-            double t = Math.Clamp((metres - 500) / 9500, 0, 1);
-            Color low = Color.FromRgb(0xF2, 0xC0, 0x7E), high = Color.FromRgb(0xB8, 0xD0, 0xF5);
-            return Color.FromRgb((byte)(low.R + (high.R - low.R) * t), (byte)(low.G + (high.G - low.G) * t), (byte)(low.B + (high.B - low.B) * t));
         }
 
         private FormattedText Text(string text, Typeface face, double size, Color color)
