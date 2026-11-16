@@ -1,4 +1,5 @@
 using OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces;
+using OLED_Sleeper.Features.Sky;
 using OLED_Sleeper.Native;
 using System.Diagnostics.CodeAnalysis;
 using System.Windows;
@@ -11,7 +12,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
 {
     /// <summary>
     /// A borderless, topmost, non-activating window that covers one monitor. It fades in slowly and
-    /// fades out quickly, and shows either plain black or the <see cref="StarfieldView"/> screensaver.
+    /// fades out quickly, and shows either plain black or the <see cref="SkyView"/> night-sky screensaver.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public class OverlayWindow : IOverlayWindow
@@ -38,7 +39,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         };
 
         private readonly DispatcherTimer _topmostTimer;
-        private readonly StarfieldView? _starfield;
+        private readonly SkyView? _starfield;
         private bool _closing;
 
         public OverlayWindow(bool screensaver = false)
@@ -48,7 +49,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
 
             if (screensaver)
             {
-                _starfield = new StarfieldView();
+                _starfield = new SkyView();
                 _window.Content = _starfield;
             }
         }
@@ -63,6 +64,12 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             if (hwnd == nint.Zero) return;
 
             ApplyNoActivateStyle(hwnd);
+            if (_starfield != null && bounds.Width > 0)
+            {
+                // Screens next to each other show neighbouring parts of the same sky.
+                _starfield.PanoramaIndex = Math.Round(bounds.Left / bounds.Width);
+            }
+
             PositionToMonitor(hwnd, bounds);
             _topmostTimer.Start();
 

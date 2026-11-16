@@ -1,0 +1,544 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Threading;
+
+namespace OLED_Sleeper.Features.Sky
+{
+    /// <summary>
+    /// OLED-friendly screensaver showing the real night sky over the Netherlands: the stars you can see with
+    /// the naked eye, faint constellation figures and names, today's planets and Moon, and now and then a
+    /// shooting star (from the radiant of the active meteor shower when there is one).
+    ///
+    /// The sky shown is tonight's sky from 22:00 onwards, sped up so it slowly turns, while the view pans
+    /// gently. Everything keeps moving and almost all pixels stay truly black, so nothing can burn in.
+    /// Two monitors side by side together form one wide panorama.
+    /// </summary>
+    [ExcludeFromCodeCoverage]
+    public sealed class SkyView : FrameworkElement
+    {
+        // --- tuning ---
+        private const double Latitude = 52.1;          // midden van Nederland
+        private const double LongitudeEast = 5.1;
+        private const double TimeLapse = 30;           // de hemel draait 30x sneller dan echt
+        private const double FieldOfView = 100;        // horizontale beeldhoek per scherm, graden
+        private const double PanDegreesPerSecond = 0.015;
+        private const double BaseAltitude = 30;        // kijkhoogte boven de horizon
+        private const double AltitudeSwing = 8;        // langzaam op en neer
+        private const double FrameIntervalMs = 33;
+
+        private static readonly (Astronomy.Body Body, string Name, Color Color, double Radius)[] Planets =
+        {
+            (Astronomy.Body.Mercury, "Mercurius", Color.FromRgb(220, 210, 195), 1.7),
+            (Astronomy.Body.Venus, "Venus", Color.FromRgb(255, 248, 225), 3.2),
+            (Astronomy.Body.Mars, "Mars", Color.FromRgb(255, 150, 105), 2.3),
+            (Astronomy.Body.Jupiter, "Jupiter", Color.FromRgb(250, 232, 205), 2.9),
+            (Astronomy.Body.Saturn, "Saturnus", Color.FromRgb(240, 220, 160), 2.4),
+        };
+
+        // Major meteor showers: (from month/day, to month/day, radiant RA, radiant Dec).
+        private static readonly (int M1, int D1, int M2, int D2, double Ra, double Dec)[] Showers =
+        {
+            (1, 1, 1, 6, 230, 49),     // Quadrantiden
+            (4, 16, 4, 25, 271, 34),   // Lyriden
+            (4, 19, 5, 28, 338, -1),   // Eta Aquariden
+            (7, 17, 8, 24, 48, 58),    // Perseiden
+            (10, 2, 11, 7, 95, 16),    // Orioniden
+            (11, 6, 11, 30, 152, 22),  // Leoniden
+            (12, 4, 12, 20, 112, 33),  // Geminiden
+        };
+
+        private readonly SkyCatalog _catalog = SkyCatalog.Default;
+        private readonly Random _random = new();
+        private readonly DispatcherTimer _timer;
+
+        private (double X, double Y, double Z, int ColorBucket, double Alpha, double Radius, double TwinkleSpeed, double TwinklePhase)[] _stars = Array.Empty<(double, double, double, int, double, double, double, double)>();
+        private readonly List<Meteor> _meteors = new();
+        private SolidColorBrush[,] _starBrushes = new SolidColorBrush[0, 0];
+        private RadialGradientBrush[] _glowBrushes = Array.Empty<RadialGradientBrush>();
+        private Pen _linePen = null!;
+        private Brush _labelBrush = null!;
+        private readonly Dictionary<string, FormattedText> _labelTexts = new();
+        private double _pixelsPerDip = 1;
+
+        private DateTime _lastTick;
+        private double _nextMeteorIn;
+        private DateTime _bodiesComputedAt = DateTime.MinValue;
+        private (string Name, double Ra, double Dec, Color Color, double Radius)[] _bodies = Array.Empty<(string, double, double, Color, double)>();
+        private (double Ra, double Dec, double Illuminated, bool Waxing) _moon;
+        private (double Ra, double Dec, double Longitude) _sun;
+
+        /// <summary>Which screen this is, counted from the left (0, 1, ...). Screens next to each other form one panorama.</summary>
+        public double PanoramaIndex { get; set; }
+
+        public SkyView()
+        {
+            _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(FrameIntervalMs) };
+            _timer.Tick += (_, _) => Tick();
+            Loaded += (_, _) => Start();
+            Unloaded += (_, _) => _timer.Stop();
+        }
+
+        public void Stop() => _timer.Stop();
+
+        /// <summary>
+        /// Prepares a single still frame without starting the animation, with a few shooting stars in flight.
+        /// Used to render a preview image (tests / README); the live screensaver never calls this.
+        /// </summary>
+        public void PrepareStillFrame(int meteors = 2)
+        {
+            _pixelsPerDip = 1;
+            BuildBrushes();
+            BuildStars();
+            ComputeBodies();
+            for (int i = 0; i < meteors; i++)
+            {
+                SpawnMeteor(DateTime.UtcNow);
+                _meteors[^1].Age = _meteors[^1].Life * 0.35;
+            }
+        }
+
+        // ================= setup =================
+
+        private void Start()
+        {
+            _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            BuildBrushes();
+            BuildStars();
+            _lastTick = DateTime.UtcNow;
+            _nextMeteorIn = 3 + _random.NextDouble() * 4;
+            _timer.Start();
+        }
+
+        private static readonly Color[] StarColors =
+        {
+            Color.FromRgb(160, 185, 255), // O/B blauw
+            Color.FromRgb(205, 218, 255), // A wit-blauw
+            Color.FromRgb(248, 247, 255), // F wit
+            Color.FromRgb(255, 242, 228), // G geelwit
+            Color.FromRgb(255, 214, 170), // K oranje
+            Color.FromRgb(255, 185, 135), // M rood-oranje
+        };
+
+        private static int ColorBucket(double bv) => bv switch
+        {
+            < -0.05 => 0,
+            < 0.2 => 1,
+            < 0.45 => 2,
+            < 0.8 => 3,
+            < 1.3 => 4,
+            _ => 5
+        };
+
+        private void BuildBrushes()
+        {
+            const int alphaLevels = 32;
+            _starBrushes = new SolidColorBrush[StarColors.Length, alphaLevels];
+            _glowBrushes = new RadialGradientBrush[StarColors.Length];
+            for (int c = 0; c < StarColors.Length; c++)
+            {
+                var col = StarColors[c];
+                for (int a = 0; a < alphaLevels; a++)
+                {
+                    var b = new SolidColorBrush(Color.FromArgb((byte)(255.0 * a / (alphaLevels - 1)), col.R, col.G, col.B));
+                    b.Freeze();
+                    _starBrushes[c, a] = b;
+                }
+                var glow = new RadialGradientBrush(Color.FromArgb(90, col.R, col.G, col.B), Color.FromArgb(0, col.R, col.G, col.B));
+                glow.Freeze();
+                _glowBrushes[c] = glow;
+            }
+
+            _linePen = new Pen(new SolidColorBrush(Color.FromArgb(26, 120, 150, 215)), 0.8);
+            _linePen.Freeze();
+            _labelBrush = new SolidColorBrush(Color.FromArgb(72, 150, 170, 220));
+            _labelBrush.Freeze();
+        }
+
+        private void BuildStars()
+        {
+            _stars = _catalog.Stars.Select(s =>
+            {
+                double ra = s.Ra * Astronomy.Deg, dec = s.Dec * Astronomy.Deg;
+                double alpha = Math.Clamp(1.05 - 0.15 * s.Magnitude, 0.25, 1.0);
+                double radius = Math.Clamp(2.9 - 0.42 * s.Magnitude, 0.85, 3.6);
+                return (Math.Cos(dec) * Math.Cos(ra), Math.Cos(dec) * Math.Sin(ra), Math.Sin(dec),
+                        ColorBucket(s.ColorIndex), alpha, radius,
+                        1.2 + _random.NextDouble() * 2.5, _random.NextDouble() * Math.PI * 2);
+            }).ToArray();
+        }
+
+        // ================= time & camera =================
+
+        /// <summary>Tonight 22:00 local time, as UTC. Shared by all screens so the panorama lines up.</summary>
+        private static DateTime TonightUtc()
+        {
+            var local = DateTime.Now;
+            var anchor = local.Date.AddHours(22);
+            if (local.Hour < 6) anchor = anchor.AddDays(-1); // na middernacht: nog steeds "vannacht"
+            return anchor.ToUniversalTime();
+        }
+
+        private double CurrentLst(DateTime nowUtc)
+        {
+            double elapsedDays = (nowUtc - DateTime.Today.ToUniversalTime()).TotalDays;
+            double d = Astronomy.DaysSinceJ2000(TonightUtc());
+            return Astronomy.Normalize(Astronomy.LocalSiderealTime(d, LongitudeEast) + 360.98564736629 * elapsedDays * TimeLapse);
+        }
+
+        private readonly struct Camera
+        {
+            public readonly double Fx, Fy, Fz, Rx, Ry, Ux, Uy, Uz, Scale, Cx, Cy;
+
+            public Camera(double azimuthDeg, double altitudeDeg, double width, double height)
+            {
+                double a = azimuthDeg * Astronomy.Deg, h = altitudeDeg * Astronomy.Deg;
+                Fx = Math.Cos(h) * Math.Sin(a); Fy = Math.Cos(h) * Math.Cos(a); Fz = Math.Sin(h);
+                Rx = Math.Cos(a); Ry = -Math.Sin(a);
+                Ux = -Math.Sin(h) * Math.Sin(a); Uy = -Math.Sin(h) * Math.Cos(a); Uz = Math.Cos(h);
+                Scale = width / 2 / (2 * Math.Tan(FieldOfView / 4 * Astronomy.Deg));
+                Cx = width / 2; Cy = height / 2;
+            }
+
+            /// <summary>Stereographic projection of an East-North-Up direction. False when it is behind the viewer.</summary>
+            public bool Project(double e, double n, double u, out Point p)
+            {
+                double denom = 1 + e * Fx + n * Fy + u * Fz;
+                if (denom < 0.08) { p = default; return false; }
+                double x = (e * Rx + n * Ry) / denom;
+                double y = (e * Ux + n * Uy + u * Uz) / denom;
+                p = new Point(Cx + Scale * 2 * x, Cy - Scale * 2 * y);
+                return true;
+            }
+        }
+
+        private Camera CurrentCamera(DateTime nowUtc)
+        {
+            double t = (nowUtc - DateTime.Today.ToUniversalTime()).TotalSeconds;
+            double azimuth = 160 + t * PanDegreesPerSecond + PanoramaIndex * FieldOfView;
+            double altitude = BaseAltitude + AltitudeSwing * Math.Sin(2 * Math.PI * t / 1200);
+            return new Camera(azimuth, altitude, ActualWidth, ActualHeight);
+        }
+
+        // ================= animation =================
+
+        private void Tick()
+        {
+            var now = DateTime.UtcNow;
+            double dt = Math.Min((now - _lastTick).TotalSeconds, 0.25);
+            _lastTick = now;
+
+            if ((now - _bodiesComputedAt).TotalMinutes > 10) ComputeBodies();
+
+            _nextMeteorIn -= dt;
+            if (_nextMeteorIn <= 0)
+            {
+                SpawnMeteor(now);
+                bool shower = ActiveShower() != null;
+                _nextMeteorIn = shower ? 5 + _random.NextDouble() * 9 : 9 + _random.NextDouble() * 14;
+            }
+
+            for (int i = _meteors.Count - 1; i >= 0; i--)
+            {
+                var m = _meteors[i];
+                m.Age += dt;
+                if (m.Age >= m.Life) _meteors.RemoveAt(i);
+            }
+
+            InvalidateVisual();
+        }
+
+        private void ComputeBodies()
+        {
+            double d = Astronomy.DaysSinceJ2000(TonightUtc());
+            _bodies = Planets.Select(p =>
+            {
+                var (ra, dec) = Astronomy.Planet(p.Body, d);
+                return (p.Name, ra, dec, p.Color, p.Radius);
+            }).ToArray();
+            _moon = Astronomy.Moon(d);
+            _sun = Astronomy.Sun(d);
+            _bodiesComputedAt = DateTime.UtcNow;
+        }
+
+        private (double Ra, double Dec)? ActiveShower()
+        {
+            var today = DateTime.Today;
+            foreach (var s in Showers)
+            {
+                var from = new DateTime(today.Year, s.M1, s.D1);
+                var to = new DateTime(today.Year, s.M2, s.D2);
+                if (today >= from && today <= to) return (s.Ra, s.Dec);
+            }
+            return null;
+        }
+
+        private void SpawnMeteor(DateTime nowUtc)
+        {
+            if (ActualWidth <= 0) return;
+
+            var start = new Point(ActualWidth * (0.1 + 0.8 * _random.NextDouble()), ActualHeight * (0.08 + 0.5 * _random.NextDouble()));
+            Vector dir;
+
+            var shower = ActiveShower();
+            Point radiant = default;
+            bool fromRadiant = false;
+            if (shower != null && _random.NextDouble() < 0.75)
+            {
+                var (e, n, u) = Astronomy.ToHorizon(shower.Value.Ra, shower.Value.Dec, CurrentLst(nowUtc), Latitude);
+                fromRadiant = u > -0.1 && CurrentCamera(nowUtc).Project(e, n, u, out radiant);
+            }
+
+            if (fromRadiant && (start - radiant).Length > 40)
+            {
+                dir = start - radiant;
+            }
+            else
+            {
+                double angle = (15 + _random.NextDouble() * 45) * Astronomy.Deg;
+                dir = new Vector(Math.Cos(angle) * (_random.Next(2) == 0 ? -1 : 1), Math.Sin(angle));
+            }
+            dir.Normalize();
+
+            bool fireball = _random.NextDouble() < 0.08;
+            double tint = _random.NextDouble();
+            var color = tint < 0.6 ? Color.FromRgb(235, 242, 255)      // wit
+                      : tint < 0.85 ? Color.FromRgb(200, 255, 215)     // groenig (magnesium)
+                      : Color.FromRgb(255, 236, 190);                  // geelachtig (natrium)
+
+            _meteors.Add(new Meteor
+            {
+                Start = start,
+                Direction = dir,
+                Speed = (fireball ? 380 : 550) + _random.NextDouble() * 550,
+                Length = (fireball ? 260 : 140) + _random.NextDouble() * 170,
+                Life = (fireball ? 1.4 : 0.55) + _random.NextDouble() * 0.6,
+                Width = fireball ? 2.8 : 1.6,
+                Color = color,
+                Age = 0
+            });
+        }
+
+        // ================= rendering =================
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, ActualWidth, ActualHeight));
+            if (_stars.Length == 0 || ActualWidth <= 0) return;
+
+            var now = DateTime.UtcNow;
+            double lst = CurrentLst(now) * Astronomy.Deg;
+            double sinPhi = Math.Sin(Latitude * Astronomy.Deg), cosPhi = Math.Cos(Latitude * Astronomy.Deg);
+            double cosL = Math.Cos(lst), sinL = Math.Sin(lst);
+            var cam = CurrentCamera(now);
+            double seconds = (now - DateTime.Today.ToUniversalTime()).TotalSeconds;
+
+            (double E, double N, double U) ToEnu(double x, double y, double z)
+            {
+                double cosDcosH = x * cosL + y * sinL;
+                double cosDsinH = x * sinL - y * cosL;
+                return (-cosDsinH, z * cosPhi - cosDcosH * sinPhi, z * sinPhi + cosDcosH * cosPhi);
+            }
+
+            (double E, double N, double U) RaDecToEnu(double ra, double dec)
+            {
+                double r = ra * Astronomy.Deg, d = dec * Astronomy.Deg;
+                return ToEnu(Math.Cos(d) * Math.Cos(r), Math.Cos(d) * Math.Sin(r), Math.Sin(d));
+            }
+
+            // Fade out towards the horizon (atmosphere), nothing below it.
+            static double HorizonFade(double u) => Math.Clamp((u - 0.01) / 0.16, 0, 1);
+
+            DrawConstellations(dc, cam, RaDecToEnu);
+            DrawStars(dc, cam, ToEnu, seconds);
+            DrawPlanets(dc, cam, RaDecToEnu);
+            DrawMoon(dc, cam, RaDecToEnu);
+            DrawMeteors(dc);
+
+            void DrawConstellations(DrawingContext ctx, Camera c, Func<double, double, (double E, double N, double U)> conv)
+            {
+                foreach (var line in _catalog.Lines)
+                {
+                    Point? prev = null;
+                    foreach (var (ra, dec) in line)
+                    {
+                        var (e, n, u) = conv(ra, dec);
+                        if (u > 0.04 && c.Project(e, n, u, out var p))
+                        {
+                            if (prev != null && (prev.Value - p).Length < ActualWidth / 3) ctx.DrawLine(_linePen, prev.Value, p);
+                            prev = p;
+                        }
+                        else prev = null;
+                    }
+                }
+
+                foreach (var label in _catalog.Labels)
+                {
+                    var (e, n, u) = conv(label.Ra, label.Dec);
+                    if (u < 0.12 || !c.Project(e, n, u, out var p)) continue;
+                    var text = LabelText(label.Name, 13, _labelBrush);
+                    ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y - text.Height / 2));
+                }
+            }
+
+            void DrawStars(DrawingContext ctx, Camera c, Func<double, double, double, (double E, double N, double U)> conv, double t)
+            {
+                foreach (var s in _stars)
+                {
+                    var (e, n, u) = conv(s.X, s.Y, s.Z);
+                    if (u <= 0.01) continue;
+                    if (!c.Project(e, n, u, out var p)) continue;
+                    if (p.X < -10 || p.Y < -10 || p.X > ActualWidth + 10 || p.Y > ActualHeight + 10) continue;
+
+                    double fade = HorizonFade(u);
+                    // Twinkling (scintillation) is stronger low in the sky, like in reality.
+                    double twinkleDepth = 0.12 + 0.35 * (1 - Math.Clamp(u / 0.5, 0, 1));
+                    double twinkle = 1 - twinkleDepth * (0.5 + 0.5 * Math.Sin(t * s.TwinkleSpeed + s.TwinklePhase));
+                    double alpha = s.Alpha * fade * twinkle;
+                    if (alpha < 0.04) continue;
+
+                    if (s.Radius > 2.0)
+                    {
+                        ctx.PushOpacity(alpha * 0.8);
+                        ctx.DrawEllipse(_glowBrushes[s.ColorBucket], null, p, s.Radius * 4.5, s.Radius * 4.5);
+                        ctx.Pop();
+                    }
+                    ctx.DrawEllipse(StarBrush(s.ColorBucket, alpha), null, p, s.Radius, s.Radius);
+                }
+            }
+
+            void DrawPlanets(DrawingContext ctx, Camera c, Func<double, double, (double E, double N, double U)> conv)
+            {
+                foreach (var body in _bodies)
+                {
+                    var (e, n, u) = conv(body.Ra, body.Dec);
+                    if (u <= 0.01 || !c.Project(e, n, u, out var p)) continue;
+                    double fade = HorizonFade(u);
+
+                    var glow = new RadialGradientBrush(Color.FromArgb((byte)(80 * fade), body.Color.R, body.Color.G, body.Color.B),
+                                                       Color.FromArgb(0, body.Color.R, body.Color.G, body.Color.B));
+                    glow.Freeze();
+                    ctx.DrawEllipse(glow, null, p, body.Radius * 5, body.Radius * 5);
+
+                    var disc = new SolidColorBrush(Color.FromArgb((byte)(235 * fade), body.Color.R, body.Color.G, body.Color.B));
+                    disc.Freeze();
+                    ctx.DrawEllipse(disc, null, p, body.Radius, body.Radius);
+
+                    var text = LabelText(body.Name, 12, new SolidColorBrush(Color.FromArgb(70, body.Color.R, body.Color.G, body.Color.B)));
+                    ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y + body.Radius + 7));
+                }
+            }
+
+            void DrawMoon(DrawingContext ctx, Camera c, Func<double, double, (double E, double N, double U)> conv)
+            {
+                if (_bodiesComputedAt == DateTime.MinValue) return;
+                var (e, n, u) = conv(_moon.Ra, _moon.Dec);
+                if (u <= 0.01 || !c.Project(e, n, u, out var p)) return;
+
+                double fade = HorizonFade(u);
+                const double r = 13; // ongeveer de echte grootte bij deze beeldhoek
+                var moonColor = Color.FromRgb(235, 232, 220);
+
+                var halo = new RadialGradientBrush(Color.FromArgb((byte)(28 * fade * _moon.Illuminated), moonColor.R, moonColor.G, moonColor.B),
+                                                   Color.FromArgb(0, moonColor.R, moonColor.G, moonColor.B));
+                halo.Freeze();
+                ctx.DrawEllipse(halo, null, p, r * 4, r * 4);
+
+                // The dark part, barely visible (earthshine).
+                var dark = new SolidColorBrush(Color.FromArgb((byte)(16 * fade), moonColor.R, moonColor.G, moonColor.B));
+                dark.Freeze();
+                ctx.DrawEllipse(dark, null, p, r, r);
+
+                // Lit part, turned towards the Sun.
+                var (se, sn, su) = conv(_sun.Ra, _sun.Dec);
+                double angle = 0;
+                if (c.Project(se, sn, su, out var sp)) angle = Math.Atan2(sp.Y - p.Y, sp.X - p.X) / Astronomy.Deg;
+                else angle = _moon.Waxing ? 0 : 180;
+
+                var lit = MoonPhaseGeometry(r, _moon.Illuminated);
+                var group = new TransformGroup();
+                group.Children.Add(new RotateTransform(angle));
+                group.Children.Add(new TranslateTransform(p.X, p.Y));
+                lit.Transform = group;
+                var litBrush = new SolidColorBrush(Color.FromArgb((byte)(150 * fade), moonColor.R, moonColor.G, moonColor.B));
+                litBrush.Freeze();
+                ctx.DrawGeometry(litBrush, null, lit);
+
+                var text = LabelText("Maan", 12, new SolidColorBrush(Color.FromArgb(60, moonColor.R, moonColor.G, moonColor.B)));
+                ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y + r + 8));
+            }
+
+            void DrawMeteors(DrawingContext ctx)
+            {
+                const int segments = 16;
+                foreach (var m in _meteors)
+                {
+                    double t = m.Age / m.Life;
+                    // Snel opgloeien, rustiger uitdoven.
+                    double brightness = Math.Pow(Math.Min(1, t / 0.15), 0.6) * Math.Pow(1 - t, 1.4) * 1.25;
+                    brightness = Math.Clamp(brightness, 0, 1);
+                    var head = m.Start + m.Direction * (m.Speed * m.Age);
+                    double tailLength = m.Length * Math.Min(1, t / 0.3 + 0.2);
+
+                    for (int i = 0; i < segments; i++)
+                    {
+                        double f0 = (double)i / segments, f1 = (double)(i + 1) / segments;
+                        var a = head - m.Direction * (tailLength * f0);
+                        var b = head - m.Direction * (tailLength * f1);
+                        double fall = 1 - f0;
+                        var pen = new Pen(new SolidColorBrush(Color.FromArgb((byte)(230 * brightness * fall * fall), m.Color.R, m.Color.G, m.Color.B)),
+                                          Math.Max(0.3, m.Width * (1 - f0 * 0.85)))
+                        { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+                        pen.Freeze();
+                        ctx.DrawLine(pen, a, b);
+                    }
+
+                    var glow = new RadialGradientBrush(Color.FromArgb((byte)(170 * brightness), m.Color.R, m.Color.G, m.Color.B),
+                                                       Color.FromArgb(0, m.Color.R, m.Color.G, m.Color.B));
+                    glow.Freeze();
+                    ctx.DrawEllipse(glow, null, head, m.Width * 4, m.Width * 4);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The lit part of the Moon for a given illuminated fraction, lit side pointing along +X, centred on 0,0.
+        /// </summary>
+        private static Geometry MoonPhaseGeometry(double r, double illuminated)
+        {
+            var disc = new EllipseGeometry(new Point(0, 0), r, r);
+            var rightHalf = new CombinedGeometry(GeometryCombineMode.Intersect, disc, new RectangleGeometry(new Rect(0, -r, r, 2 * r)));
+            double k = Math.Clamp(illuminated, 0, 1);
+            var terminator = new EllipseGeometry(new Point(0, 0), r * Math.Abs(1 - 2 * k), r);
+            return k <= 0.5
+                ? new CombinedGeometry(GeometryCombineMode.Exclude, rightHalf, terminator)
+                : new CombinedGeometry(GeometryCombineMode.Union, rightHalf, terminator);
+        }
+
+        private SolidColorBrush StarBrush(int colorBucket, double alpha)
+        {
+            int levels = _starBrushes.GetLength(1);
+            return _starBrushes[colorBucket, (int)Math.Round(Math.Clamp(alpha, 0, 1) * (levels - 1))];
+        }
+
+        private FormattedText LabelText(string text, double size, Brush brush)
+        {
+            string key = text + "|" + size + "|" + brush.GetHashCode();
+            if (brush == _labelBrush && _labelTexts.TryGetValue(key, out var cached)) return cached;
+
+            var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                new Typeface("Bahnschrift Light"), size, brush, _pixelsPerDip);
+            if (brush == _labelBrush) _labelTexts[key] = formatted;
+            return formatted;
+        }
+
+        private sealed class Meteor
+        {
+            public Point Start;
+            public Vector Direction;
+            public double Speed, Length, Life, Width, Age;
+            public Color Color;
+        }
+    }
+}

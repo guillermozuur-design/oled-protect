@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -38,6 +38,11 @@
 
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Sky\sky.txt" />
+    <None Include="Assets\Sky\LICENSE-d3-celestial.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
