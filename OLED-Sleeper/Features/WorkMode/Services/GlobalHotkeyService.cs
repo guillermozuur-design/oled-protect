@@ -99,6 +99,7 @@ namespace OLED_Sleeper.Features.WorkMode.Services
             {
                 (_modifiers, _key) = (oldMods, oldKey);
                 RegisterCurrent();
+                _suspended = false; // the old one is registered again; a later Resume() must not register it twice
                 Changed?.Invoke();
                 return false;
             }
@@ -140,6 +141,13 @@ namespace OLED_Sleeper.Features.WorkMode.Services
         {
             if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
             {
+                // The hotkey's own key is swallowed, so the app in front would see a lone Alt (or Win) press and
+                // open its menu bar (or the Start menu) on release. A tap of an unassigned key prevents that.
+                if ((_modifiers & (MOD_ALT | MOD_WIN)) != 0)
+                {
+                    keybd_event(VK_MASK, 0, 0, nint.Zero);
+                    keybd_event(VK_MASK, 0, KEYEVENTF_KEYUP, nint.Zero);
+                }
                 Pressed?.Invoke();
                 handled = true;
             }
@@ -209,5 +217,11 @@ namespace OLED_Sleeper.Features.WorkMode.Services
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(nint hWnd, int id);
+
+        private const byte VK_MASK = 0xE8; // unassigned virtual key
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+
+        [DllImport("user32.dll")]
+        private static extern void keybd_event(byte vk, byte scan, uint flags, nint extraInfo);
     }
 }

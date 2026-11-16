@@ -23,7 +23,8 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services.Interfaces
         /// <summary>
         /// Applies a brightness chosen by the brightness schedule (percent, 0-100).
         /// </summary>
-        Task SetScheduledBrightnessAsync(string hardwareId, int percent);
+        /// <returns>False when the monitor did not answer, so the caller can try again later.</returns>
+        Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent);
 
         /// <summary>
         /// Gets a dictionary of all currently dimmed monitors and their original brightness values.

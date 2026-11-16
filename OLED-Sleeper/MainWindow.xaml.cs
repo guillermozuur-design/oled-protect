@@ -114,6 +114,7 @@ namespace OLED_Sleeper
             {
                 GlobalIdleStatus.Text = "vul 1 tot 600 minuten in";
                 GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
+                GlobalIdleCheck.IsChecked = _globalIdle.Enabled;
                 return;
             }
 
@@ -138,14 +139,14 @@ namespace OLED_Sleeper
         {
             var text = GapBox.Text.Trim().Replace(',', '.');
             if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cm)
-                && cm >= 0 && cm <= 30)
+                && cm >= 0 && cm <= 10)
             {
                 _panorama.GapCm = cm;
                 GapStatus.Text = "opgeslagen \u2713  geldt vanaf de volgende keer dat de sterren verschijnen";
             }
             else
             {
-                GapStatus.Text = "vul een getal tussen 0 en 30 in";
+                GapStatus.Text = "vul een getal tussen 0 en 10 in";
             }
             GapBox.Text = _panorama.GapCm.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture);
         }
@@ -153,7 +154,7 @@ namespace OLED_Sleeper
         private void Calibrate_Click(object sender, RoutedEventArgs e)
         {
             var bounds = _monitorInfoManager.GetLatestMonitorsBasicInfo().Select(m => m.Bounds).ToList();
-            if (bounds.Count < 2)
+            if (bounds.Count < 2 || bounds.All(b => OLED_Sleeper.Features.Sky.PanoramaLayout.Position(b).Count < 2))
             {
                 GapStatus.Text = "kalibreren heeft twee schermen naast elkaar nodig";
                 return;

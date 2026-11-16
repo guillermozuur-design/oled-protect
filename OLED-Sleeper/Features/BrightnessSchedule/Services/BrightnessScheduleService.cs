@@ -91,10 +91,14 @@ namespace OLED_Sleeper.Features.BrightnessSchedule.Services
                     lock (_lock)
                     {
                         if (_lastApplied.TryGetValue(setting.HardwareId, out var last) && last == target.Value) continue;
-                        _lastApplied[setting.HardwareId] = target.Value;
                     }
 
-                    await _dimmingService.SetScheduledBrightnessAsync(setting.HardwareId, target.Value);
+                    // Only remember it when it worked: a monitor in standby or a failed DDC/CI write is retried
+                    // on the next check (30 s) instead of staying wrong until the next step of the schedule.
+                    if (await _dimmingService.SetScheduledBrightnessAsync(setting.HardwareId, target.Value))
+                    {
+                        lock (_lock) _lastApplied[setting.HardwareId] = target.Value;
+                    }
                 }
             }
             catch (Exception ex)

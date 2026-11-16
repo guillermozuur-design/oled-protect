@@ -190,11 +190,18 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         private void ProcessSingleMonitor(ManagedMonitorState monitor, SystemState systemState)
         {
             var timerState = _monitorStates[monitor.Settings.HardwareId];
-            // General timer: after X minutes without any input, nothing keeps any monitor awake.
-            var activityReason = _globalIdle.HasExpired(systemState.IdleTimeMilliseconds)
-                ? ActivityReason.None
-                : GetActivityReason(monitor, systemState);
+
+            // General timer: after X minutes without any input, nothing keeps any monitor awake and it goes
+            // idle right away (not X minutes plus its own idle timer).
+            bool globalExpired = _globalIdle.HasExpired(systemState.IdleTimeMilliseconds);
+            var activityReason = globalExpired ? ActivityReason.None : GetActivityReason(monitor, systemState);
             bool hasActivityNow = activityReason != ActivityReason.None;
+
+            // When a limit is what stopped the activity, the quiet period really began at the last input.
+            bool limitCut = globalExpired || !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds);
+            var quietSince = limitCut
+                ? DateTime.UtcNow - TimeSpan.FromMilliseconds(systemState.IdleTimeMilliseconds)
+                : DateTime.UtcNow;
 
             var eventArgs = new MonitorIdleStateEventArgs(
                 monitor.Settings.HardwareId, monitor.DisplayNumber, monitor.Bounds,
@@ -203,11 +210,14 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             switch (timerState.CurrentState)
             {
                 case MonitorStateMachine.Active:
-                    HandleActiveState(timerState, hasActivityNow);
+                    HandleActiveState(timerState, hasActivityNow, quietSince);
+                    if (timerState.CurrentState == MonitorStateMachine.Counting)
+                        HandleCountingState(timerState, monitor, hasActivityNow, eventArgs, globalExpired);
                     break;
 
                 case MonitorStateMachine.Counting:
-                    HandleCountingState(timerState, monitor, hasActivityNow, eventArgs);
+                    if (limitCut && quietSince < timerState.ActivityStoppedTimestamp) timerState.ActivityStoppedTimestamp = quietSince;
+                    HandleCountingState(timerState, monitor, hasActivityNow, eventArgs, globalExpired);
                     break;
 
                 case MonitorStateMachine.Idle:
@@ -223,12 +233,12 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         /// </summary>
         /// <param name="timerState">The timer state for the monitor.</param>
         /// <param name="hasActivityNow">Whether activity is currently detected.</param>
-        private void HandleActiveState(MonitorTimerState timerState, bool hasActivityNow)
+        private void HandleActiveState(MonitorTimerState timerState, bool hasActivityNow, DateTime quietSince)
         {
             if (!hasActivityNow)
             {
                 timerState.CurrentState = MonitorStateMachine.Counting;
-                timerState.ActivityStoppedTimestamp = DateTime.UtcNow;
+                timerState.ActivityStoppedTimestamp = quietSince;
             }
         }
 
@@ -239,7 +249,8 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         /// <param name="monitor">The managed monitor.</param>
         /// <param name="hasActivityNow">Whether activity is currently detected.</param>
         /// <param name="eventArgs">Monitor idle state event arguments.</param>
-        private void HandleCountingState(MonitorTimerState timerState, ManagedMonitorState monitor, bool hasActivityNow, MonitorIdleStateEventArgs eventArgs)
+        private void HandleCountingState(MonitorTimerState timerState, ManagedMonitorState monitor, bool hasActivityNow, MonitorIdleStateEventArgs eventArgs,
+                                         bool forceIdle = false)
         {
             if (hasActivityNow)
             {
@@ -248,7 +259,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             else
             {
                 var elapsed = DateTime.UtcNow - timerState.ActivityStoppedTimestamp;
-                if (elapsed.TotalMilliseconds >= monitor.Settings.IdleTimeMilliseconds)
+                if (forceIdle || elapsed.TotalMilliseconds >= monitor.Settings.IdleTimeMilliseconds)
                 {
                     timerState.CurrentState = MonitorStateMachine.Idle;
                     Log.Information("Monitor #{DisplayNumber} has become idle after {Seconds}s of inactivity.",

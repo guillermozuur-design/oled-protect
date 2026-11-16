@@ -27,19 +27,19 @@ namespace OLED_Sleeper.Features.Sky
         public PanoramaSettings(IAppDataFileStore fileStore)
         {
             _fileStore = fileStore;
-            _gapCm = Math.Clamp(_fileStore.Read<Stored>(FileName)?.GapCm ?? DefaultGapCm, 0, 30);
+            _gapCm = Math.Clamp(_fileStore.Read<Stored>(FileName)?.GapCm ?? DefaultGapCm, 0, 10);
         }
 
         /// <summary>Fires when the gap changed.</summary>
         public event Action? Changed;
 
-        /// <summary>Space between two neighbouring screens, in centimetres (0-30).</summary>
+        /// <summary>Space between two neighbouring screens, in centimetres (0-10).</summary>
         public double GapCm
         {
             get => _gapCm;
             set
             {
-                var clamped = Math.Clamp(value, 0, 30);
+                var clamped = Math.Clamp(value, 0, 10);
                 if (Math.Abs(clamped - _gapCm) < 0.001) return;
                 _gapCm = clamped;
                 _fileStore.TryWrite(FileName, new Stored { GapCm = clamped });
@@ -49,6 +49,46 @@ namespace OLED_Sleeper.Features.Sky
 
         /// <summary>The gap in pixels for a screen with these bounds (physical pixels).</summary>
         public double GapPixels(Rect bounds) => GapCm * ScreenPhysicalSize.PixelsPerCm(bounds);
+
+        /// <summary>
+        /// The gap as a fraction of the screen's width. Unlike pixels this does not depend on Windows' display
+        /// scaling, so it can be applied to a view measured in device-independent units.
+        /// </summary>
+        public double GapFraction(Rect bounds) => bounds.Width > 0 ? GapPixels(bounds) / bounds.Width : 0;
+    }
+
+    /// <summary>
+    /// Where a screen sits in the row of screens beside it: its position from the left and how many there are.
+    /// Uses the real monitor rectangles (physical pixels), so display scaling and screens stacked above each
+    /// other do not confuse it.
+    /// </summary>
+    [ExcludeFromCodeCoverage]
+    public static class PanoramaLayout
+    {
+        public static (int Index, int Count) Position(Rect bounds)
+        {
+            var monitors = new List<Rect>();
+            EnumDisplayMonitors(nint.Zero, nint.Zero, (nint h, nint dc, ref RECT r, nint data) =>
+            {
+                monitors.Add(new Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top));
+                return true;
+            }, nint.Zero);
+
+            // Same row = overlapping by at least half the height.
+            var row = monitors.Where(m => Math.Min(m.Bottom, bounds.Bottom) - Math.Max(m.Top, bounds.Top) > bounds.Height / 2).ToList();
+            if (row.Count == 0) return (0, 1);
+            double center = bounds.Left + bounds.Width / 2;
+            int index = row.Count(m => m.Left + m.Width / 2 < center - 1);
+            return (index, row.Count);
+        }
+
+        private delegate bool MonitorEnumProc(nint hMonitor, nint hdc, ref RECT rect, nint data);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT { public int Left, Top, Right, Bottom; }
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc callback, nint data);
     }
 
     /// <summary>

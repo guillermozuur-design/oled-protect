@@ -99,9 +99,11 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             _workModeService.Changed += OnWorkModeChanged;
         }
 
-        private void OnWorkModeChanged(bool enabled)
+        private void OnWorkModeChanged(bool _)
         {
-            _monitorIdleDetectionService.SetPaused(enabled);
+            // Read the current state instead of trusting the event argument: an expiry on the timer thread and a
+            // click on the UI thread can deliver their events in either order.
+            _monitorIdleDetectionService.SetPaused(_workModeService.IsEnabled);
         }
 
         /// <summary>

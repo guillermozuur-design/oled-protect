@@ -29,11 +29,13 @@ namespace OLED_Sleeper.UI.Views
             _gapCm = settings.GapCm;
 
             var screens = monitorBounds.OrderBy(b => b.Left).ToList();
-            double pxPerCm = screens.Count > 0 ? ScreenPhysicalSize.PixelsPerCm(screens[0]) : 43;
 
             for (int i = 0; i < screens.Count; i++)
             {
-                var canvas = new CalibrationCanvas { Index = i, Count = screens.Count, PixelsPerCm = pxPerCm, GapCm = _gapCm };
+                var (index, count) = PanoramaLayout.Position(screens[i]);
+                // Centimetres as a fraction of this screen's width: independent of Windows' display scaling.
+                double fractionPerCm = ScreenPhysicalSize.PixelsPerCm(screens[i]) / screens[i].Width;
+                var canvas = new CalibrationCanvas { Index = index, Count = count, FractionPerCm = fractionPerCm, GapCm = _gapCm };
                 var window = BuildWindow(canvas, screens[i], showControls: i == 0);
                 _windows.Add((window, canvas));
             }
@@ -63,7 +65,7 @@ namespace OLED_Sleeper.UI.Views
 
             if (showControls)
             {
-                var slider = new Slider { Minimum = 0, Maximum = 8, Width = 420, SmallChange = 0.1, LargeChange = 0.5, Value = _gapCm, IsSnapToTickEnabled = true, TickFrequency = 0.1 };
+                var slider = new Slider { Minimum = 0, Maximum = 10, Width = 420, SmallChange = 0.1, LargeChange = 0.5, Value = _gapCm, IsSnapToTickEnabled = true, TickFrequency = 0.1 };
                 slider.ValueChanged += (_, e) => SetGap(e.NewValue);
                 canvas.Slider = slider;
                 info.Children.Add(slider);
@@ -117,7 +119,7 @@ namespace OLED_Sleeper.UI.Views
 
         private void SetGap(double cm)
         {
-            _gapCm = Math.Round(Math.Clamp(cm, 0, 8), 1);
+            _gapCm = Math.Round(Math.Clamp(cm, 0, 10), 1);
             foreach (var (_, canvas) in _windows)
             {
                 canvas.GapCm = _gapCm;
@@ -140,7 +142,7 @@ namespace OLED_Sleeper.UI.Views
 
             public int Index { get; init; }
             public int Count { get; init; }
-            public double PixelsPerCm { get; init; }
+            public double FractionPerCm { get; init; }
             public TextBlock? ValueText { get; set; }
             public Slider? Slider { get; set; }
 
@@ -161,7 +163,7 @@ namespace OLED_Sleeper.UI.Views
                 if (w <= 0) return;
                 dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, w, h));
 
-                double gap = _gapCm * PixelsPerCm;
+                double gap = _gapCm * FractionPerCm * w;
                 double offset = Index * (w + gap);                 // this screen's place in the big picture
                 double seamX = w + gap / 2;                        // middle of the first bezel, in panorama pixels
 

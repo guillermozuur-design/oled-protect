@@ -11,8 +11,8 @@ namespace OLED_Sleeper.Features.Sky
     /// best-known constellation figures and names, today's planets and Moon, and now and then a slow shooting
     /// star (from the radiant of the active meteor shower when there is one).
     ///
-    /// The sky shown is tonight's sky from 22:00 onwards, sped up so it slowly turns, while the view pans
-    /// gently. Everything keeps moving and almost all pixels stay truly black, so nothing can burn in.
+    /// The stars turn sped up (time-lapse) while the view pans gently; planets and Moon are at their real
+    /// position of today. Everything keeps moving and almost all pixels stay truly black, so nothing can burn in.
     ///
     /// Screens next to each other form one wide panorama. Shooting stars are worked out from the clock alone
     /// (same seed on every screen), so a shooting star that leaves one screen carries on across the next one
@@ -76,7 +76,7 @@ namespace OLED_Sleeper.Features.Sky
 
         private (double X, double Y, double Z, int ColorBucket, double Alpha, double Radius, double TwinkleSpeed, double TwinklePhase)[] _stars = Array.Empty<(double, double, double, int, double, double, double, double)>();
         private SolidColorBrush[,] _starBrushes = new SolidColorBrush[0, 0];
-        private RadialGradientBrush[] _glowBrushes = Array.Empty<RadialGradientBrush>();
+        private RadialGradientBrush[,] _glowBrushes = new RadialGradientBrush[0, 0];
         private Pen _linePen = null!;
         private Brush _labelBrush = null!;
         private readonly Dictionary<string, FormattedText> _labelTexts = new();
@@ -100,8 +100,12 @@ namespace OLED_Sleeper.Features.Sky
         /// </summary>
         public double GapPixels { get; set; }
 
-        private double Stride => ActualWidth + GapPixels;
-        private double TotalWidth => ActualWidth * Math.Max(1, PanoramaCount) + GapPixels * (Math.Max(1, PanoramaCount) - 1);
+        /// <summary>The same gap as a fraction of the screen width (used when set; independent of display scaling).</summary>
+        public double GapFraction { get; set; } = -1;
+
+        private double Gap => GapFraction >= 0 ? GapFraction * ActualWidth : GapPixels;
+        private double Stride => ActualWidth + Gap;
+        private double TotalWidth => ActualWidth * Math.Max(1, PanoramaCount) + Gap * (Math.Max(1, PanoramaCount) - 1);
 
         public SkyView()
         {
@@ -176,7 +180,8 @@ namespace OLED_Sleeper.Features.Sky
         {
             const int alphaLevels = 32;
             _starBrushes = new SolidColorBrush[StarColors.Length, alphaLevels];
-            _glowBrushes = new RadialGradientBrush[StarColors.Length];
+            const int glowLevels = 16;
+            _glowBrushes = new RadialGradientBrush[StarColors.Length, glowLevels];
             for (int c = 0; c < StarColors.Length; c++)
             {
                 var col = StarColors[c];
@@ -186,9 +191,12 @@ namespace OLED_Sleeper.Features.Sky
                     b.Freeze();
                     _starBrushes[c, a] = b;
                 }
-                var glow = new RadialGradientBrush(Color.FromArgb(90, col.R, col.G, col.B), Color.FromArgb(0, col.R, col.G, col.B));
-                glow.Freeze();
-                _glowBrushes[c] = glow;
+                for (int g = 0; g < glowLevels; g++)
+                {
+                    var glow = new RadialGradientBrush(Color.FromArgb((byte)(72.0 * g / (glowLevels - 1)), col.R, col.G, col.B), Color.FromArgb(0, col.R, col.G, col.B));
+                    glow.Freeze();
+                    _glowBrushes[c, g] = glow;
+                }
             }
 
             _linePen = new Pen(new SolidColorBrush(Color.FromArgb(24, 120, 150, 215)), 0.8);
@@ -212,21 +220,19 @@ namespace OLED_Sleeper.Features.Sky
 
         // ================= time & camera =================
 
-        /// <summary>Tonight 22:00 local time, as UTC. Shared by all screens so the panorama lines up.</summary>
-        private static DateTime TonightUtc()
-        {
-            var local = DateTime.Now;
-            var anchor = local.Date.AddHours(22);
-            if (local.Hour < 6) anchor = anchor.AddDays(-1); // na middernacht: nog steeds "vannacht"
-            return anchor.ToUniversalTime();
-        }
-
+        /// <summary>
+        /// The sidereal time shown: real time sped up <see cref="TimeLapse"/> times, counted continuously from a
+        /// fixed moment so the sky never jumps (not at midnight, not at 06:00).
+        /// </summary>
         private static double CurrentLst(DateTime nowUtc)
         {
-            double elapsedDays = (nowUtc - DateTime.Today.ToUniversalTime()).TotalDays;
-            double d = Astronomy.DaysSinceJ2000(TonightUtc());
-            return Astronomy.Normalize(Astronomy.LocalSiderealTime(d, LongitudeEast) + 360.98564736629 * elapsedDays * TimeLapse);
+            double anchorDays = Astronomy.DaysSinceJ2000(new DateTime(2026, 1, 1, 21, 0, 0, DateTimeKind.Utc));
+            double elapsedDays = Astronomy.DaysSinceJ2000(nowUtc) - anchorDays;
+            return Astronomy.Normalize(Astronomy.LocalSiderealTime(anchorDays, LongitudeEast) + 360.98564736629 * elapsedDays * TimeLapse);
         }
+
+        /// <summary>Seconds on a continuous clock (no reset at midnight), for the slow camera movements.</summary>
+        private static double ContinuousSeconds(DateTime nowUtc) => (nowUtc - DateTime.UnixEpoch).TotalSeconds % 1_000_000;
 
         private readonly struct Camera
         {
@@ -259,7 +265,7 @@ namespace OLED_Sleeper.Features.Sky
 
         private Camera CameraFor(DateTime nowUtc, double panoramaIndex)
         {
-            double t = (nowUtc - DateTime.Today.ToUniversalTime()).TotalSeconds;
+            double t = ContinuousSeconds(nowUtc);
             double altitude = BaseAltitude + AltitudeSwing * Math.Sin(2 * Math.PI * t / 1200);
             double azimuth = 160 + t * PanDegreesPerSecond;
 
@@ -281,7 +287,7 @@ namespace OLED_Sleeper.Features.Sky
 
         private void ComputeBodies()
         {
-            double d = Astronomy.DaysSinceJ2000(TonightUtc());
+            double d = Astronomy.DaysSinceJ2000(DateTime.UtcNow);
             _bodies = Planets.Select(p =>
             {
                 var (ra, dec) = Astronomy.Planet(p.Body, d);
@@ -396,7 +402,7 @@ namespace OLED_Sleeper.Features.Sky
             double sinPhi = Math.Sin(Latitude * Astronomy.Deg), cosPhi = Math.Cos(Latitude * Astronomy.Deg);
             double cosL = Math.Cos(lst), sinL = Math.Sin(lst);
             var cam = CameraFor(now, PanoramaIndex);
-            double seconds = (now - DateTime.Today.ToUniversalTime()).TotalSeconds;
+            double seconds = ContinuousSeconds(now);
 
             (double E, double N, double U) ToEnu(double x, double y, double z)
             {
@@ -464,9 +470,9 @@ namespace OLED_Sleeper.Features.Sky
 
                     if (s.Radius > 2.0)
                     {
-                        ctx.PushOpacity(alpha * 0.8);
-                        ctx.DrawEllipse(_glowBrushes[s.ColorBucket], null, p, s.Radius * 4.5, s.Radius * 4.5);
-                        ctx.Pop();
+                        int levels = _glowBrushes.GetLength(1);
+                        var glow = _glowBrushes[s.ColorBucket, (int)Math.Round(Math.Clamp(alpha, 0, 1) * (levels - 1))];
+                        ctx.DrawEllipse(glow, null, p, s.Radius * 4.5, s.Radius * 4.5);
                     }
                     ctx.DrawEllipse(StarBrush(s.ColorBucket, alpha), null, p, s.Radius, s.Radius);
                 }
@@ -602,16 +608,21 @@ namespace OLED_Sleeper.Features.Sky
             ctx.DrawEllipse(glow, null, p, r * glowSize, r * glowSize);
 
             // Saturn's rings: tilted ellipse, back half behind the planet, front half in front of it.
+            bool saturn = name == "Saturnus";
+            Geometry? ring = null, backHalf = null, frontHalf = null;
+            SolidColorBrush? ringBrush = null;
+            if (saturn)
+            {
             var ringTilt = new RotateTransform(-18, p.X, p.Y);
             var ringOuter = new EllipseGeometry(p, r * 2.3, r * 0.85) { Transform = ringTilt };
             var ringInner = new EllipseGeometry(p, r * 1.45, r * 0.52) { Transform = ringTilt };
-            var ring = new CombinedGeometry(GeometryCombineMode.Exclude, ringOuter, ringInner);
-            var ringBrush = new SolidColorBrush(Color.FromArgb(A(170), 215, 195, 150));
+            ring = new CombinedGeometry(GeometryCombineMode.Exclude, ringOuter, ringInner);
+            ringBrush = new SolidColorBrush(Color.FromArgb(A(170), 215, 195, 150));
             ringBrush.Freeze();
-            var backHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y - r * 3, r * 6, r * 3)) { Transform = ringTilt };
-            var frontHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y, r * 6, r * 3)) { Transform = ringTilt };
-            if (name == "Saturnus")
-                ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, backHalf));
+            backHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y - r * 3, r * 6, r * 3)) { Transform = ringTilt };
+            frontHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y, r * 6, r * 3)) { Transform = ringTilt };
+            ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, backHalf));
+            }
 
             // The globe, lit from the upper left.
             var globe = new RadialGradientBrush
@@ -646,9 +657,9 @@ namespace OLED_Sleeper.Features.Sky
                 cap.Freeze();
                 ctx.DrawEllipse(cap, null, new Point(p.X, p.Y - r * 0.78), r * 0.35, r * 0.16);
             }
-            else if (name == "Saturnus")
+            else if (saturn)
             {
-                ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, frontHalf));
+                ctx.DrawGeometry(ringBrush!, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring!, frontHalf!));
             }
         }
 
@@ -674,12 +685,13 @@ namespace OLED_Sleeper.Features.Sky
 
         private FormattedText LabelText(string text, double size, Brush brush)
         {
-            string key = text + "|" + size;
-            if (brush == _labelBrush && _labelTexts.TryGetValue(key, out var cached)) return cached;
+            string key = text + "|" + size + "|" + ((brush as SolidColorBrush)?.Color.ToString() ?? "");
+            if (_labelTexts.TryGetValue(key, out var cached)) return cached;
 
+            if (brush.CanFreeze) brush.Freeze();
             var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                 new Typeface("Bahnschrift Light"), size, brush, _pixelsPerDip);
-            if (brush == _labelBrush) _labelTexts[key] = formatted;
+            _labelTexts[key] = formatted;
             return formatted;
         }
     }

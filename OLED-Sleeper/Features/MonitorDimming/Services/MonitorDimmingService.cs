@@ -51,11 +51,14 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
         /// </summary>
         /// <param name="hardwareId">The monitor.</param>
         /// <param name="percent">Brightness in percent, 0-100.</param>
-        public async Task SetScheduledBrightnessAsync(string hardwareId, int percent)
+        /// <returns>True when the scheduled level is in place (or will be on wake-up); false when the monitor did not answer.</returns>
+        public async Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent)
         {
-            if (string.IsNullOrEmpty(hardwareId)) return;
+            if (string.IsNullOrEmpty(hardwareId)) return false;
 
-            await WithMonitorGateAsync(hardwareId, async () =>
+            bool ok = false;
+            // DDC/CI writes and the fade's pauses are slow: never run them on the caller's thread.
+            await Task.Run(() => WithMonitorGateAsync(hardwareId, async () =>
             {
                 var target = await ScaleToMonitorRangeAsync(hardwareId, percent);
 
@@ -63,10 +66,11 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
                 {
                     _originalBrightnessStore.ReplaceOriginal(hardwareId, target);
                     Log.Information("Monitor {HardwareId} is dimmed; it will wake to scheduled brightness {Brightness}.", hardwareId, target);
+                    ok = true;
                     return;
                 }
 
-                await WithSessionAsync(hardwareId, session =>
+                var outcome = await WithSessionAsync(hardwareId, session =>
                 {
                     var current = session.GetBrightness();
                     if (current is null) return false;
@@ -74,7 +78,9 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
                     Log.Information("Schedule: monitor {HardwareId} brightness {From} -> {To}.", hardwareId, current.Value, target);
                     return FadeBrightness(session, hardwareId, current.Value, target);
                 });
-            });
+                ok = outcome == MonitorAccessOutcome.Succeeded;
+            }));
+            return ok;
         }
 
         /// <inheritdoc />
@@ -86,7 +92,9 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
                 return;
             }
 
-            await WithMonitorGateAsync(hardwareId, () => DimCoreAsync(hardwareId, dimLevel));
+            // DDC/CI writes and the fade's pauses are slow: never run them on the caller's thread
+            // (the idle loop calls this while holding its lock; work mode calls it from the UI thread).
+            await Task.Run(() => WithMonitorGateAsync(hardwareId, () => DimCoreAsync(hardwareId, dimLevel)));
         }
 
         /// <inheritdoc />
@@ -98,7 +106,7 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
                 return;
             }
 
-            await WithMonitorGateAsync(hardwareId, () => UndimCoreAsync(hardwareId));
+            await Task.Run(() => WithMonitorGateAsync(hardwareId, () => UndimCoreAsync(hardwareId)));
         }
 
         /// <inheritdoc />

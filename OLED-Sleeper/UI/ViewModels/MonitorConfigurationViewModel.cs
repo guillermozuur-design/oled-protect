@@ -444,15 +444,16 @@ namespace OLED_Sleeper.UI.ViewModels
             IsActiveOnActiveWindow = settings.IsActiveOnActiveWindow;
             UseMouseStillLimit = settings.UseMouseStillLimit;
             MouseStillMinutes = settings.MouseStillMinutes;
-            UseBrightnessSchedule = settings.UseBrightnessSchedule && IsDimBehaviorEnabled;
+            // Keep the stored choice even if the DDC/CI probe failed this time; the section is just disabled then.
+            UseBrightnessSchedule = settings.UseBrightnessSchedule;
             LoadSchedule(settings.BrightnessSchedule);
         }
 
-        private void LoadSchedule(IEnumerable<BrightnessScheduleEntry> entries)
+        private void LoadSchedule(IEnumerable<BrightnessScheduleEntry>? entries)
         {
             _suppressScheduleChanges = true;
             ScheduleEntries.Clear();
-            foreach (var entry in entries)
+            foreach (var entry in entries ?? Enumerable.Empty<BrightnessScheduleEntry>())
             {
                 ScheduleEntries.Add(new ScheduleEntryViewModel(entry, OnScheduleChanged));
             }
