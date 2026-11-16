@@ -14,12 +14,15 @@ Toegevoegd in deze versie:
 | Functie | Wat | Waar in de code |
 |---|---|---|
 | **Fade** | Zwart overlay faded in 1,5 s in en 0,25 s uit. Dimmen gaat in 8 stapjes (~0,7 s). | `Features/MonitorBlackout/Services/OverlayWindow.cs`, `MonitorDimmingService.FadeBrightness` |
-| **Sterren-screensaver** | Derde gedrag "Sterren": zwarte hemel, twinkelende sterren die langzaam omlaag drijven en af en toe een vallende ster. Bijna alle pixels echt uit, niets staat stil. | `Features/MonitorBlackout/Services/StarfieldView.cs` |
-| **Helderheid op tijden** | Per scherm een schema, bv. 08:00 → 80%, 19:00 → 50%, 23:00 → 30%. Wordt alleen geschreven op het moment dat het schema verspringt, dus zelf bijstellen blijft staan tot de volgende tijd. Is een scherm op dat moment gedimd, dan wordt het bij wakker worden op de schema-waarde gezet. | `Features/BrightnessSchedule/` |
-| **Werkmodus** | **Ctrl+Alt+O** (of tray-menu "Werkmodus (alles aan)"): alle schermen meteen wakker en blijven aan, bv. bij video of lezen over twee schermen. Nog eens drukken = bescherming weer aan. Tray-icoon krijgt een oranje pauze-badge + melding. Start altijd uit. | `Features/WorkMode/`, `UI/Services/TrayIconService.cs` |
-| **Screensaver bekijken** | Tray-menu "Sterren-screensaver bekijken": toont de sterren op het scherm onder de muis tot je de muis beweegt. | `TrayIconService.ShowScreensaverPreview` |
+| **Sterrenhemel** | Gedrag "Sterren": de echte hemel boven Nederland van vannacht (vanaf 22:00) met echte sterren (helderder dan mag 4,5), sterrenbeelden met Nederlandse namen, planeten en de maan (met fase) op hun echte plek. Hemel draait 30× versneld en de blik pant langzaam; twee schermen naast elkaar vormen één panorama. Af en toe een vallende ster, tijdens een meteorenzwerm (Leoniden, Perseïden, …) vanuit de echte radiant. Bijna alle pixels echt zwart, niets staat stil. | `Features/Sky/` |
+| **Helderheid op tijden** | Per scherm een schema, bv. 08:00 → 80%, 19:00 → 50%, 23:00 → 30%. Wordt alleen geschreven als het schema verspringt; zelf bijstellen blijft staan tot de volgende tijd. Is een scherm gedimd, dan wordt het bij wakker worden op de schema-waarde gezet. | `Features/BrightnessSchedule/` |
+| **Snelmenu (Alt+`)** | Zoals Alt+Tab: houd **Alt** vast en tik **`** (toets onder Esc). Elke tik = volgende keuze, **loslaten = kiezen**, Esc = annuleren, of 1–5 / muis. Keuzes: Bescherming aan, Werkmodus, Werkmodus 1 uur, Sterren bekijken, App openen. Snel één keer tikken = wisselen tussen bescherming en werkmodus. | `UI/Views/QuickPanelWindow.xaml(.cs)` |
+| **Werkmodus** | Alle schermen meteen wakker en blijven aan (video, lezen over twee schermen). Ook "1 uur", daarna gaat de bescherming vanzelf weer aan. Tray-icoon krijgt een oranje pauze-badge + melding. Start altijd uit. | `Features/WorkMode/` |
+| **Sneltoets instelbaar** | Onderaan het hoofdvenster: klik op het vak en druk je combinatie. Opgeslagen in `Data/hotkey.json`. Is Alt+` bij een ander programma in gebruik, dan Ctrl+Alt+O. | `GlobalHotkeyService`, `MainWindow.xaml.cs` |
+| **DDC/CI-fix** | Origineel keurde de LG UltraGear-schermen af (geven geen "capabilities string"); nu telt een werkende helderheidsuitlezing als ondersteuning. | `MonitorInfoProvider.ProbeDdcCi` |
 
 Nieuwe teksten in de app zijn Nederlands, de rest van de originele UI is nog Engels.
+Waarnemerslocatie staat vast op midden-Nederland (52,1° N, 5,1° O) in `SkyView.cs`.
 
 ## Bouwen en starten
 
@@ -27,33 +30,40 @@ Er staat geen .NET SDK systeembreed; de SDK staat lokaal in `.tmp\dotnet` (gitig
 zet de juiste omgevingsvariabelen en roept die `dotnet` aan.
 
 ```powershell
-# testen (192 tests)
+# testen (200 tests)
 powershell -File .tmp\dn.ps1 test OLED-Sleeper.sln
 
-# portable build (instellingen naast de exe, los van de geïnstalleerde versie)
+# portable build (instellingen in artifacts\portable\Data)
 powershell -File .tmp\dn.ps1 publish OLED-Sleeper\OLED-Sleeper.csproj -c Release -r win-x64 --self-contained false -p:Portable=true -o artifacts\portable
 artifacts\portable\OLED-Sleeper.exe
+
+# plaatje van de sterrenhemel renderen (zonder de app)
+$env:SKY_SNAPSHOT="$PWD\.tmp\sky.png"; powershell -File .tmp\dn.ps1 test OLED-Sleeper.sln --filter SkyViewRenderTests
 ```
 
-Is `.tmp` weg, installeer de SDK opnieuw lokaal:
-`.tmp\dotnet-install.ps1 -Channel 8.0 -InstallDir .tmp\dotnet -NoPath` (script van https://dot.net/v1/dotnet-install.ps1).
+Is `.tmp` weg, installeer de SDK opnieuw lokaal met `dotnet-install.ps1 -Channel 8.0 -InstallDir .tmp\dotnet -NoPath`
+(script van https://dot.net/v1/dotnet-install.ps1).
 
-Let op: deze versie en de geïnstalleerde originele OLED Sleeper kunnen niet tegelijk draaien (zelfde
-single-instance mutex). Sluit de oude eerst via het tray-icoon → Exit.
+Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.json` en `constellations.json`
+uit [d3-celestial](https://github.com/ofrohn/d3-celestial/tree/master/data) naar `.tmp\sky` en draai
+`python -I tools\make_sky_data.py .tmp\sky OLED-Sleeper\Assets\Sky\sky.txt`.
 
-## Status
+## Status (16-11-2026)
 
-- Bouwt, 192 unit tests groen (169 origineel + 23 nieuw: schema-berekening, fade, schema tijdens dimmen, werkmodus, pauze).
-- Nog niet getest op de echte schermen: zie de checklist hieronder.
-
-### Handmatige checklist
-- [ ] Tray → "Sterren-screensaver bekijken": sterren zichtbaar, weg bij muisbeweging
-- [ ] Scherm 2 op "Sterren", korte idle-tijd: fade-in, en snel weg als muis erheen gaat
-- [ ] Blackout: zachte fade
-- [ ] Ctrl+Alt+O: alles wakker, icoon met pauze-badge, nog eens = weer actief
-- [ ] Helderheid op tijden: tijd net in de toekomst zetten en kijken of hij verspringt
+- Draait vanaf `artifacts\portable\OLED-Sleeper.exe`; de oude geïnstalleerde versie is verwijderd.
+- 200 unit tests groen, waaronder astronomie tegen echte gebeurtenissen (grote conjunctie Jupiter/Saturnus
+  21-12-2020, lente-equinox 2000, nieuwe/volle maan april 2024, hoogte Poolster).
+- Live getest: DDC/CI op beide schermen, snelmenu (vasthouden + tikken + loslaten, snelle tik), werkmodus
+  1 uur, sneltoets-instelling, knoppen in het schema-blok.
+- Nog niet live gezien: de sterrenhemel op de echte schermen (wel als render), maan/planeten in beeld,
+  fade bij dimmen, helderheidsschema dat op een tijdstip verspringt.
+- Niet automatisch opstarten met Windows: zet dat aan via tray → "Run at Startup".
 
 ## Ideeën voor later
-- Werkmodus automatisch uit na X uur
-- Sneltoets instelbaar maken
+- Waarnemerslocatie en tijdversnelling instelbaar
 - Rest van de UI vertalen
+- Echte installer (Inno Setup-script staat in `installer/`)
+
+## Licenties
+- Code: MIT (origineel Quorthon13, zie `LICENSE`).
+- Sterrendata: d3-celestial © 2015 Olaf Frohn, BSD-3-Clause (`OLED-Sleeper/Assets/Sky/LICENSE-d3-celestial.txt`).

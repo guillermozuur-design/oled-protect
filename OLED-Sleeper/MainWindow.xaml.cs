@@ -28,8 +28,9 @@ namespace OLED_Sleeper
         {
             if (HotkeyBox.IsKeyboardFocused) return;
             HotkeyBox.Text = _hotkeyService.HotkeyText;
-            if (!_hotkeyService.IsRegistered)
-                HotkeyStatus.Text = "in gebruik door een ander programma, kies een andere";
+            HotkeyStatus.Text = _hotkeyService.IsRegistered
+                ? "ingedrukt houden, tik = volgende, loslaten = kiezen"
+                : "in gebruik door een ander programma, kies een andere";
         }
 
         private void HotkeyBox_GotFocus(object sender, KeyboardFocusChangedEventArgs e)
