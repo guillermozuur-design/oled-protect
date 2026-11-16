@@ -453,8 +453,22 @@
                          Visibility="{Binding ActiveConditionsError, Converter={StaticResource ErrorVisibilityConverter}}" />
                         </StackPanel>
                         <StackPanel Margin="0,8,0,0">
-                            <CheckBox Margin="0,0,0,8" Style="{StaticResource ModernCheckBox}" Content="Mouse cursor is on this monitor"
+                            <CheckBox Margin="0,0,0,6" Style="{StaticResource ModernCheckBox}" Content="Mouse cursor is on this monitor"
                         IsChecked="{Binding IsActiveOnMousePosition, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" />
+                            <StackPanel Orientation="Horizontal" Margin="26,0,0,10" IsEnabled="{Binding IsActiveOnMousePosition}"
+                                        ToolTipService.InitialShowDelay="200" ToolTipService.ShowOnDisabled="True"
+                                        ToolTip="Laat je de muis op dit scherm staan en doe je niks, dan gaat het na deze tijd toch uit.&#10;Muis bewegen of een toets indrukken maakt het weer wakker.">
+                                <CheckBox Style="{StaticResource ModernCheckBox}" FontSize="13" Content="toch uit na"
+                                          IsChecked="{Binding UseMouseStillLimit, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Width="46" Height="26" Margin="8,0,0,0" FontSize="13" Padding="4,2" Style="{StaticResource ModernTextBox}"
+                                         IsEnabled="{Binding UseMouseStillLimit}"
+                                         Text="{Binding MouseStillMinutes, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
+                                <TextBlock Text="min zonder beweging" FontSize="13" Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource SecondaryForegroundColor}" />
+                                <TextBlock Text="{Binding MouseStillError}" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource DestructiveColorBrush}"
+                                           Visibility="{Binding MouseStillError, Converter={StaticResource ErrorVisibilityConverter}}" />
+                            </StackPanel>
                             <CheckBox Margin="0,0,0,8" Style="{StaticResource ModernCheckBox}" Content="Application is focused on this monitor"
                         IsChecked="{Binding IsActiveOnActiveWindow, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" />
                             <CheckBox Margin="0,0,0,0" Style="{StaticResource ModernCheckBox}" Content="System has user input"

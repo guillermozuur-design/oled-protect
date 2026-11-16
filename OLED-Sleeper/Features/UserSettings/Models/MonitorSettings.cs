@@ -55,6 +55,17 @@ namespace OLED_Sleeper.Features.UserSettings.Models
         public bool IsActiveOnMousePosition { get; set; } = true;
 
         /// <summary>
+        /// When true, a mouse that just sits on this monitor only keeps it awake for
+        /// <see cref="MouseStillMinutes"/> without any input; after that the monitor goes idle anyway.
+        /// </summary>
+        public bool UseMouseStillLimit { get; set; } = false;
+
+        /// <summary>
+        /// Minutes without any mouse movement or key press after which a parked mouse no longer keeps the monitor awake.
+        /// </summary>
+        public int MouseStillMinutes { get; set; } = 10;
+
+        /// <summary>
         /// Gets or sets a value indicating whether the active window should reset idle state.
         /// </summary>
         public bool IsActiveOnActiveWindow { get; set; } = false;

@@ -246,6 +246,7 @@ namespace OLED_Sleeper.UI.ViewModels
             {
                 _isActiveOnMousePosition = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(MouseStillError));
                 OnPropertyChanged(nameof(ActiveConditionsError));
                 UpdateDirtyState();
             }
@@ -267,6 +268,33 @@ namespace OLED_Sleeper.UI.ViewModels
                 OnPropertyChanged(nameof(ActiveConditionsError));
                 UpdateDirtyState();
             }
+        }
+
+        // --- Mouse still limit ---
+        private bool _useMouseStillLimit;
+        private bool _initialUseMouseStillLimit;
+        private int? _mouseStillMinutes;
+        private int? _initialMouseStillMinutes;
+
+        public bool UseMouseStillLimit
+        {
+            get => _useMouseStillLimit;
+            set { _useMouseStillLimit = value; OnPropertyChanged(); OnPropertyChanged(nameof(MouseStillError)); UpdateDirtyState(); }
+        }
+
+        public int? MouseStillMinutes
+        {
+            get => _mouseStillMinutes;
+            set { _mouseStillMinutes = value; OnPropertyChanged(); OnPropertyChanged(nameof(MouseStillError)); UpdateDirtyState(); }
+        }
+
+        public string MouseStillError => ValidateMouseStill() ?? string.Empty;
+
+        private string? ValidateMouseStill()
+        {
+            if (!IsManaged || !IsActiveOnMousePosition || !UseMouseStillLimit) return null;
+            if (MouseStillMinutes is null or < 1 or > 600) return "Kies 1 tot 600 minuten.";
+            return null;
         }
 
         // --- Brightness schedule ---
@@ -343,6 +371,8 @@ namespace OLED_Sleeper.UI.ViewModels
                        IsActiveOnInput != _initialIsActiveOnInput ||
                        IsActiveOnMousePosition != _initialIsActiveOnMousePosition ||
                        IsActiveOnActiveWindow != _initialIsActiveOnActiveWindow ||
+                       UseMouseStillLimit != _initialUseMouseStillLimit ||
+                       MouseStillMinutes != _initialMouseStillMinutes ||
                        UseBrightnessSchedule != _initialUseBrightnessSchedule ||
                        ScheduleSignature() != _initialScheduleSignature;
 
@@ -363,6 +393,8 @@ namespace OLED_Sleeper.UI.ViewModels
             _initialIsActiveOnInput = IsActiveOnInput;
             _initialIsActiveOnMousePosition = IsActiveOnMousePosition;
             _initialIsActiveOnActiveWindow = IsActiveOnActiveWindow;
+            _initialUseMouseStillLimit = UseMouseStillLimit;
+            _initialMouseStillMinutes = MouseStillMinutes;
             _initialUseBrightnessSchedule = UseBrightnessSchedule;
             _initialScheduleSignature = ScheduleSignature();
             UpdateDirtyState();
@@ -382,6 +414,8 @@ namespace OLED_Sleeper.UI.ViewModels
             IsActiveOnInput = _initialIsActiveOnInput;
             IsActiveOnMousePosition = _initialIsActiveOnMousePosition;
             IsActiveOnActiveWindow = _initialIsActiveOnActiveWindow;
+            UseMouseStillLimit = _initialUseMouseStillLimit;
+            MouseStillMinutes = _initialMouseStillMinutes;
             UseBrightnessSchedule = _initialUseBrightnessSchedule;
             LoadSchedule(ParseSignature(_initialScheduleSignature));
             UpdateDirtyState();
@@ -402,6 +436,8 @@ namespace OLED_Sleeper.UI.ViewModels
             IsActiveOnInput = settings.IsActiveOnInput;
             IsActiveOnMousePosition = settings.IsActiveOnMousePosition;
             IsActiveOnActiveWindow = settings.IsActiveOnActiveWindow;
+            UseMouseStillLimit = settings.UseMouseStillLimit;
+            MouseStillMinutes = settings.MouseStillMinutes;
             UseBrightnessSchedule = settings.UseBrightnessSchedule && IsDimBehaviorEnabled;
             LoadSchedule(settings.BrightnessSchedule);
         }
@@ -474,6 +510,8 @@ namespace OLED_Sleeper.UI.ViewModels
                 IsActiveOnInput = IsActiveOnInput,
                 IsActiveOnMousePosition = IsActiveOnMousePosition,
                 IsActiveOnActiveWindow = IsActiveOnActiveWindow,
+                UseMouseStillLimit = UseMouseStillLimit,
+                MouseStillMinutes = MouseStillMinutes ?? 10,
                 UseBrightnessSchedule = UseBrightnessSchedule,
                 BrightnessSchedule = ScheduleEntries.Select(e => e.ToEntry()).ToList()
             };
@@ -491,6 +529,7 @@ namespace OLED_Sleeper.UI.ViewModels
             get
             {
                 if (ValidateSchedule() != null) return false;
+                if (ValidateMouseStill() != null) return false;
                 if (!IsManaged) return true; // Unmanaged monitors are always "valid"
 
                 return ValidateIdleValue() == null && ValidateActiveConditions() == null && ValidateBehavior() == null;

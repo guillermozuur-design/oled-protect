@@ -304,7 +304,21 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         /// </summary>
         private static bool IsMousePositionActive(ManagedMonitorState monitor, SystemState state)
         {
-            return monitor.Settings.IsActiveOnMousePosition && monitor.Bounds.Contains(state.CursorPosition);
+            return MousePresenceCounts(monitor.Settings, monitor.Bounds.Contains(state.CursorPosition), state.IdleTimeMilliseconds);
+        }
+
+        /// <summary>
+        /// Whether the mouse being on a monitor counts as activity. With the "still" limit switched on, a mouse
+        /// that has been parked there without any input for longer than the limit no longer keeps it awake.
+        /// </summary>
+        /// <param name="settings">The monitor's settings.</param>
+        /// <param name="cursorOnMonitor">Whether the cursor is on this monitor.</param>
+        /// <param name="systemIdleMilliseconds">Time since the last mouse movement or key press anywhere.</param>
+        public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor, uint systemIdleMilliseconds)
+        {
+            if (!settings.IsActiveOnMousePosition || !cursorOnMonitor) return false;
+            if (!settings.UseMouseStillLimit) return true;
+            return systemIdleMilliseconds < (long)Math.Max(1, settings.MouseStillMinutes) * 60_000;
         }
 
         /// <summary>

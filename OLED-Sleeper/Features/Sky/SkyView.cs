@@ -25,9 +25,9 @@ namespace OLED_Sleeper.Features.Sky
         private const double Latitude = 52.1;          // midden van Nederland
         private const double LongitudeEast = 5.1;
         private const double TimeLapse = 30;           // de hemel draait 30x sneller dan echt
-        private const double FieldOfView = 100;        // horizontale beeldhoek per scherm, graden
+        private const double FieldOfView = 75;         // horizontale beeldhoek per scherm, graden (2 schermen = 150)
         private const double PanDegreesPerSecond = 0.015;
-        private const double BaseAltitude = 46;        // kijkhoogte: onderrand ligt dan ~10-17 graden boven de horizon
+        private const double BaseAltitude = 42;        // kijkhoogte: onderrand ligt dan ~12-24 graden boven de horizon
         private const double AltitudeSwing = 6;        // langzaam op en neer
         private const double FrameIntervalMs = 33;
 
@@ -45,11 +45,12 @@ namespace OLED_Sleeper.Features.Sky
 
         private static readonly (Astronomy.Body Body, string Name, Color Color, double Radius)[] Planets =
         {
-            (Astronomy.Body.Mercury, "Mercurius", Color.FromRgb(220, 210, 195), 1.7),
-            (Astronomy.Body.Venus, "Venus", Color.FromRgb(255, 248, 225), 3.2),
-            (Astronomy.Body.Mars, "Mars", Color.FromRgb(255, 150, 105), 2.3),
-            (Astronomy.Body.Jupiter, "Jupiter", Color.FromRgb(250, 232, 205), 2.9),
-            (Astronomy.Body.Saturn, "Saturnus", Color.FromRgb(240, 220, 160), 2.4),
+            // Groter dan echt (dan zouden het puntjes zijn), zodat je ze herkent.
+            (Astronomy.Body.Mercury, "Mercurius", Color.FromRgb(215, 205, 190), 3.0),
+            (Astronomy.Body.Venus, "Venus", Color.FromRgb(255, 246, 220), 5.0),
+            (Astronomy.Body.Mars, "Mars", Color.FromRgb(232, 120, 72), 4.2),
+            (Astronomy.Body.Jupiter, "Jupiter", Color.FromRgb(236, 214, 182), 6.5),
+            (Astronomy.Body.Saturn, "Saturnus", Color.FromRgb(230, 206, 150), 5.0),
         };
 
         // Major meteor showers: (from month/day, to month/day, radiant RA, radiant Dec).
@@ -213,14 +214,17 @@ namespace OLED_Sleeper.Features.Sky
         {
             public readonly double Fx, Fy, Fz, Rx, Ry, Ux, Uy, Uz, Scale, Cx, Cy;
 
-            public Camera(double azimuthDeg, double altitudeDeg, double width, double height)
+            /// <param name="totalWidth">Width of the whole panorama (all screens side by side).</param>
+            /// <param name="fieldOfView">Horizontal field of view of the whole panorama, degrees.</param>
+            /// <param name="centerX">Where the panorama centre falls in this screen's pixels.</param>
+            public Camera(double azimuthDeg, double altitudeDeg, double totalWidth, double fieldOfView, double centerX, double height)
             {
                 double a = azimuthDeg * Astronomy.Deg, h = altitudeDeg * Astronomy.Deg;
                 Fx = Math.Cos(h) * Math.Sin(a); Fy = Math.Cos(h) * Math.Cos(a); Fz = Math.Sin(h);
                 Rx = Math.Cos(a); Ry = -Math.Sin(a);
                 Ux = -Math.Sin(h) * Math.Sin(a); Uy = -Math.Sin(h) * Math.Cos(a); Uz = Math.Cos(h);
-                Scale = width / 2 / (2 * Math.Tan(FieldOfView / 4 * Astronomy.Deg));
-                Cx = width / 2; Cy = height / 2;
+                Scale = totalWidth / 2 / (2 * Math.Tan(fieldOfView / 4 * Astronomy.Deg));
+                Cx = centerX; Cy = height / 2;
             }
 
             /// <summary>Stereographic projection of an East-North-Up direction. False when it is behind the viewer.</summary>
@@ -238,9 +242,15 @@ namespace OLED_Sleeper.Features.Sky
         private Camera CameraFor(DateTime nowUtc, double panoramaIndex)
         {
             double t = (nowUtc - DateTime.Today.ToUniversalTime()).TotalSeconds;
-            double azimuth = 160 + t * PanDegreesPerSecond + panoramaIndex * FieldOfView;
             double altitude = BaseAltitude + AltitudeSwing * Math.Sin(2 * Math.PI * t / 1200);
-            return new Camera(azimuth, altitude, ActualWidth, ActualHeight);
+            double azimuth = 160 + t * PanDegreesPerSecond;
+
+            // One camera for the whole panorama: all screens side by side form one wide picture and each screen
+            // shows its own slice of it. That way the screens join seamlessly, also above and below the middle.
+            int screens = Math.Max(1, PanoramaCount);
+            double totalWidth = ActualWidth * screens;
+            double centerX = totalWidth / 2 - panoramaIndex * ActualWidth;
+            return new Camera(azimuth, altitude, totalWidth, FieldOfView * screens, centerX, ActualHeight);
         }
 
         // ================= animation =================
@@ -345,11 +355,8 @@ namespace OLED_Sleeper.Features.Sky
             var (e, n, u) = Astronomy.ToHorizon(radiant.Ra, radiant.Dec, CurrentLst(atUtc), Latitude);
             if (u < -0.1) return null;
 
-            for (int screen = 0; screen < Math.Max(1, PanoramaCount); screen++)
-            {
-                if (CameraFor(atUtc, screen).Project(e, n, u, out var p) && p.X >= 0 && p.X <= ActualWidth)
-                    return new Point(p.X + screen * ActualWidth, p.Y);
-            }
+            double totalWidth = ActualWidth * Math.Max(1, PanoramaCount);
+            if (CameraFor(atUtc, 0).Project(e, n, u, out var p) && p.X >= 0 && p.X <= totalWidth) return p;
             return null;
         }
 
@@ -449,17 +456,11 @@ namespace OLED_Sleeper.Features.Sky
                     if (u <= 0.01 || !c.Project(e, n, u, out var p)) continue;
                     double fade = HorizonFade(u);
 
-                    var glow = new RadialGradientBrush(Color.FromArgb((byte)(80 * fade), body.Color.R, body.Color.G, body.Color.B),
-                                                       Color.FromArgb(0, body.Color.R, body.Color.G, body.Color.B));
-                    glow.Freeze();
-                    ctx.DrawEllipse(glow, null, p, body.Radius * 5, body.Radius * 5);
+                    DrawPlanet(ctx, body.Name, p, body.Radius, body.Color, fade);
 
-                    var disc = new SolidColorBrush(Color.FromArgb((byte)(235 * fade), body.Color.R, body.Color.G, body.Color.B));
-                    disc.Freeze();
-                    ctx.DrawEllipse(disc, null, p, body.Radius, body.Radius);
-
-                    var text = LabelText(body.Name, 12, new SolidColorBrush(Color.FromArgb(70, body.Color.R, body.Color.G, body.Color.B)));
-                    ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y + body.Radius + 7));
+                    double labelGap = body.Name == "Saturnus" ? body.Radius * 1.2 : body.Radius;
+                    var text = LabelText(body.Name, 12, new SolidColorBrush(Color.FromArgb(80, body.Color.R, body.Color.G, body.Color.B)));
+                    ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y + labelGap + 9));
                 }
             }
 
@@ -537,6 +538,72 @@ namespace OLED_Sleeper.Features.Sky
                     glow.Freeze();
                     ctx.DrawEllipse(glow, null, head, m.Width * 4, m.Width * 4);
                 }
+            }
+        }
+
+        /// <summary>
+        /// A small planet: a shaded little globe with a soft glow, plus what makes each one recognisable —
+        /// Saturn's rings, Jupiter's cloud bands, the rusty colour of Mars, the brilliance of Venus.
+        /// </summary>
+        private static void DrawPlanet(DrawingContext ctx, string name, Point p, double r, Color c, double fade)
+        {
+            byte A(double a) => (byte)Math.Clamp(a * fade, 0, 255);
+            static Color Shade(Color col, double f) => Color.FromRgb((byte)(col.R * f), (byte)(col.G * f), (byte)(col.B * f));
+
+            // Glow around it; Venus is by far the brightest.
+            double glowSize = name == "Venus" ? 7 : 4.5;
+            var glow = new RadialGradientBrush(Color.FromArgb(A(name == "Venus" ? 110 : 70), c.R, c.G, c.B), Color.FromArgb(0, c.R, c.G, c.B));
+            glow.Freeze();
+            ctx.DrawEllipse(glow, null, p, r * glowSize, r * glowSize);
+
+            // Saturn's rings: tilted ellipse, back half behind the planet, front half in front of it.
+            var ringTilt = new RotateTransform(-18, p.X, p.Y);
+            var ringOuter = new EllipseGeometry(p, r * 2.3, r * 0.85) { Transform = ringTilt };
+            var ringInner = new EllipseGeometry(p, r * 1.45, r * 0.52) { Transform = ringTilt };
+            var ring = new CombinedGeometry(GeometryCombineMode.Exclude, ringOuter, ringInner);
+            var ringBrush = new SolidColorBrush(Color.FromArgb(A(170), 215, 195, 150));
+            ringBrush.Freeze();
+            var backHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y - r * 3, r * 6, r * 3)) { Transform = ringTilt };
+            var frontHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y, r * 6, r * 3)) { Transform = ringTilt };
+            if (name == "Saturnus")
+                ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, backHalf));
+
+            // The globe, lit from the upper left.
+            var globe = new RadialGradientBrush
+            {
+                GradientOrigin = new Point(0.35, 0.3),
+                Center = new Point(0.4, 0.35),
+                RadiusX = 0.75,
+                RadiusY = 0.75
+            };
+            var bright = name == "Mars" ? Color.FromRgb(250, 160, 110) : Color.FromRgb((byte)Math.Min(255, c.R + 20), (byte)Math.Min(255, c.G + 20), (byte)Math.Min(255, c.B + 20));
+            globe.GradientStops.Add(new GradientStop(Color.FromArgb(A(255), bright.R, bright.G, bright.B), 0));
+            globe.GradientStops.Add(new GradientStop(Color.FromArgb(A(245), c.R, c.G, c.B), 0.55));
+            var dark = Shade(c, 0.45);
+            globe.GradientStops.Add(new GradientStop(Color.FromArgb(A(235), dark.R, dark.G, dark.B), 1));
+            globe.Freeze();
+            ctx.DrawEllipse(globe, null, p, r, r);
+
+            if (name == "Jupiter")
+            {
+                // Two faint brownish cloud bands across the disc.
+                ctx.PushClip(new EllipseGeometry(p, r, r));
+                var band = new SolidColorBrush(Color.FromArgb(A(95), 150, 105, 70));
+                band.Freeze();
+                ctx.DrawRectangle(band, null, new Rect(p.X - r, p.Y - r * 0.38, r * 2, r * 0.22));
+                ctx.DrawRectangle(band, null, new Rect(p.X - r, p.Y + r * 0.18, r * 2, r * 0.26));
+                ctx.Pop();
+            }
+            else if (name == "Mars")
+            {
+                // A small white polar cap.
+                var cap = new SolidColorBrush(Color.FromArgb(A(150), 255, 245, 240));
+                cap.Freeze();
+                ctx.DrawEllipse(cap, null, new Point(p.X, p.Y - r * 0.78), r * 0.35, r * 0.16);
+            }
+            else if (name == "Saturnus")
+            {
+                ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, frontHalf));
             }
         }
 
