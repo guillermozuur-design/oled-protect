@@ -253,6 +253,21 @@
                                 </Border>
 
                                 <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" x:Name="AddAppButton" Content="+ Andere app kiezen" Style="{StaticResource SubtleButton}"
+                                                    Click="AddApp_Click" VerticalAlignment="Top" />
+                                            <StackPanel>
+                                                <TextBlock Text="Apps die het scherm aan houden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}"
+                                                           Text="Zolang een aangevinkte app openstaat, blijft het scherm waar hij op staat aan (of alle schermen) — ook als een timer verloopt." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <StackPanel x:Name="AppRows" Margin="0,12,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
                                     <DockPanel>
                                         <CheckBox x:Name="StartupCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />
                                         <StackPanel>

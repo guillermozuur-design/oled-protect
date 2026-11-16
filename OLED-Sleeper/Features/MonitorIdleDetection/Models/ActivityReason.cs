@@ -1,4 +1,4 @@
-﻿namespace OLED_Sleeper.Features.MonitorIdleDetection.Models
+namespace OLED_Sleeper.Features.MonitorIdleDetection.Models
 {
     /// <summary>
     /// Defines the specific reason why a monitor is considered active during idle detection.
@@ -24,6 +24,9 @@
         /// <summary>
         /// System input (keyboard or mouse activity) was detected.
         /// </summary>
-        SystemInput
+        SystemInput,
+
+        /// <summary>An app the user chose ("apps die het scherm aan houden") is open on this screen or everywhere.</summary>
+        KeepAwakeApp
     }
 }

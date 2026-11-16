@@ -1,4 +1,5 @@
 using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.Features.KeepAwakeApps;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.Sky;
@@ -9,6 +10,7 @@ using OLED_Sleeper.UI.Services;
 using OLED_Sleeper.UI.ViewModels;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -29,13 +31,15 @@ namespace OLED_Sleeper
         private readonly IWorkModeService _workMode;
         private readonly IMonitorSettingsFileService _settingsFile;
         private readonly ScreensaverPreview _preview;
+        private readonly KeepAwakeAppsSettings _keepAwakeApps;
         private readonly DispatcherTimer _headerTimer;
         private readonly DispatcherTimer _autoSaveTimer;
 
         public MainWindow(GlobalHotkeyService hotkeyService, PanoramaSettings panorama, IMonitorInfoManager monitorInfoManager,
                           GlobalIdleSettings globalIdle, IWorkModeService workMode, IMonitorSettingsFileService settingsFile,
-                          ScreensaverPreview preview)
+                          ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps)
         {
+            _keepAwakeApps = keepAwakeApps;
             InitializeComponent();
             _hotkeyService = hotkeyService;
             _panorama = panorama;
@@ -62,7 +66,7 @@ namespace OLED_Sleeper
             _autoSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
             _autoSaveTimer.Tick += (_, _) => AutoSave();
 
-            Loaded += (_, _) => { ShowHotkey(); RefreshHeader(); };
+            Loaded += (_, _) => { ShowHotkey(); RefreshHeader(); BuildAppRows(); };
             IsVisibleChanged += (_, _) =>
             {
                 // Only tick while the window is on screen.
@@ -295,6 +299,111 @@ namespace OLED_Sleeper
             {
                 StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
             }
+        }
+
+        // ================= apps that keep the screen awake =================
+
+        private void BuildAppRows()
+        {
+            AppRows.Children.Clear();
+            var rules = _keepAwakeApps.Rules;
+            foreach (var rule in rules)
+            {
+                var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+
+                var scope = new ComboBox
+                {
+                    Width = 140,
+                    Margin = new Thickness(12, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    IsEnabled = rule.Enabled,
+                    ItemsSource = new[] { "dit scherm", "alle schermen" },
+                    SelectedIndex = rule.Scope == KeepAwakeScope.AllScreens ? 1 : 0,
+                    ToolTip = "Dit scherm = het scherm waar het venster van de app op staat. Alle schermen = zolang de app openstaat."
+                };
+                DockPanel.SetDock(scope, Dock.Right);
+
+                if (!rule.IsPreset)
+                {
+                    var remove = new Button
+                    {
+                        Content = "\uE711",
+                        FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                        FontSize = 10,
+                        Margin = new Thickness(8, 0, 0, 0),
+                        Padding = new Thickness(8, 6, 8, 6),
+                        Style = (Style)FindResource("SubtleButton"),
+                        ToolTip = "Verwijderen"
+                    };
+                    DockPanel.SetDock(remove, Dock.Right);
+                    remove.Click += (_, _) => UpdateRules(list => list.RemoveAll(r => !r.IsPreset && r.Name == rule.Name));
+                    row.Children.Add(remove);
+                }
+                row.Children.Add(scope);
+
+                var toggle = new CheckBox
+                {
+                    Style = (Style)FindResource("Switch"),
+                    IsChecked = rule.Enabled,
+                    Content = rule.IsPreset ? rule.Name : $"{rule.Name}  ({string.Join(", ", rule.ProcessNames)})",
+                    FontSize = 13.5,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                row.Children.Add(toggle);
+
+                toggle.Click += (_, _) => UpdateRules(list =>
+                {
+                    var r = list.First(x => x.Name == rule.Name && x.IsPreset == rule.IsPreset);
+                    r.Enabled = toggle.IsChecked == true;
+                });
+                scope.SelectionChanged += (_, _) => UpdateRules(list =>
+                {
+                    var r = list.First(x => x.Name == rule.Name && x.IsPreset == rule.IsPreset);
+                    r.Scope = scope.SelectedIndex == 1 ? KeepAwakeScope.AllScreens : KeepAwakeScope.ThisScreen;
+                }, rebuild: false);
+
+                AppRows.Children.Add(row);
+            }
+        }
+
+        private void UpdateRules(Action<List<KeepAwakeRule>> change, bool rebuild = true)
+        {
+            var list = _keepAwakeApps.Rules.ToList();
+            change(list);
+            _keepAwakeApps.SetRules(list);
+            if (rebuild) BuildAppRows();
+        }
+
+        /// <summary>Shows the programs that have a window open right now; clicking one adds it (switched on).</summary>
+        private void AddApp_Click(object sender, RoutedEventArgs e)
+        {
+            var known = _keepAwakeApps.Rules;
+            var apps = AppWindowScanner.Scan()
+                .GroupBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Process: g.Key, Title: g.First().Title))
+                .Where(a => !known.Any(r => r.Matches(a.Process)))
+                .OrderBy(a => a.Process, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var menu = new ContextMenu { PlacementTarget = AddAppButton, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            if (apps.Count == 0)
+            {
+                menu.Items.Add(new MenuItem { Header = "Geen andere open programma's gevonden — open de app eerst", IsEnabled = false });
+            }
+            foreach (var (process, title) in apps)
+            {
+                string shortTitle = title.Length > 50 ? title[..50] + "…" : title;
+                var item = new MenuItem { Header = $"{process}  —  {shortTitle}" };
+                item.Click += (_, _) => UpdateRules(list => list.Add(new KeepAwakeRule
+                {
+                    Name = process,
+                    ProcessNames = new List<string> { process },
+                    Enabled = true,
+                    Scope = KeepAwakeScope.ThisScreen
+                }));
+                menu.Items.Add(item);
+            }
+            menu.IsOpen = true;
         }
 
         // ================= title bar =================

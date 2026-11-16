@@ -32,6 +32,7 @@ onofficiële versie met veel uitbreidingen.
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
 - **Snelmenu** zoals Win+P: houd **Alt** vast en tik **`** (toets onder Esc), tik verder om te kiezen, loslaten = toepassen. Sneltoets is instelbaar.
 - **Alle schermen uit als je weg bent** na X minuten — behalve het scherm waarop een video speelt.
+- **Apps die het scherm aan houden**: vink apps aan (VLC, Netflix-app, OBS, Zoom, Teams, …) of kies zelf een open programma. Zolang die app openstaat blijft het scherm waar hij op staat aan — of alle schermen — wat de timers ook zeggen.
 - Start verborgen met Windows; staat in het systeemvak.
 
 ## Installeren
@@ -55,7 +56,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 209 tests
+dotnet test OLED-Sleeper.sln                       # 217 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
@@ -73,6 +74,7 @@ Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.js
 |---|---|
 | Sterrenhemel (catalogus, astronomie, weergave, panorama) | `OLED-Sleeper/Features/Sky/` |
 | Wanneer is een scherm stil (incl. limieten, video-uitzondering) | `OLED-Sleeper/Features/MonitorIdleDetection/` |
+| Apps die het scherm aan houden | `OLED-Sleeper/Features/KeepAwakeApps/` |
 | Zwart / fade | `OLED-Sleeper/Features/MonitorBlackout/` |
 | Dimmen en helderheid (DDC/CI) | `OLED-Sleeper/Features/MonitorDimming/`, `Features/BrightnessSchedule/` |
 | Werkmodus en sneltoets | `OLED-Sleeper/Features/WorkMode/` |

@@ -91,6 +91,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<IMonitorLayoutService, MonitorLayoutService>();
             services.AddSingleton<IMonitorSettingsFileService, MonitorSettingsFileService>();
             services.AddSingleton<GlobalIdleSettings>();
+            services.AddSingleton<OLED_Sleeper.Features.KeepAwakeApps.KeepAwakeAppsSettings>();
             services.AddSingleton<IMonitorIdleDetectionService, MonitorIdleDetectionService>();
             services.AddSingleton<MainViewModel>();
             services.AddSingleton<MainWindow>();

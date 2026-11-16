@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.KeepAwakeApps;
 using OLED_Sleeper.Features.MonitorBehavior.Commands;
 using OLED_Sleeper.Features.MonitorIdleDetection.Models;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
@@ -45,11 +46,38 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         // === Construction ===
 
         private readonly GlobalIdleSettings _globalIdle;
+        private readonly KeepAwakeAppsSettings? _keepAwakeApps;
 
-        public MonitorIdleDetectionService(IMediator mediator, GlobalIdleSettings? globalIdle = null)
+        // Snapshot of the chosen apps' windows, refreshed about once a second (scanning windows every 200 ms
+        // would be wasteful; apps do not open or move that fast).
+        private DateTime _appsScannedAt = DateTime.MinValue;
+        private bool _appKeepsAllAwake;
+        private IReadOnlyList<Rect> _appAreas = Array.Empty<Rect>();
+
+        public MonitorIdleDetectionService(IMediator mediator, GlobalIdleSettings? globalIdle = null,
+                                           KeepAwakeAppsSettings? keepAwakeApps = null)
         {
             _mediator = mediator;
             _globalIdle = globalIdle ?? new GlobalIdleSettings();
+            _keepAwakeApps = keepAwakeApps;
+        }
+
+        private void RefreshAppWindows()
+        {
+            if (_keepAwakeApps == null || (DateTime.UtcNow - _appsScannedAt).TotalMilliseconds < 1000) return;
+            _appsScannedAt = DateTime.UtcNow;
+
+            var rules = _keepAwakeApps.ActiveRules;
+            if (rules.Count == 0)
+            {
+                _appKeepsAllAwake = false;
+                _appAreas = Array.Empty<Rect>();
+                return;
+            }
+
+            var (all, areas) = KeepAwakeEvaluator.Evaluate(AppWindowScanner.Scan(), rules);
+            _appKeepsAllAwake = all;
+            _appAreas = areas;
         }
 
         // === Service Lifecycle ===
@@ -170,6 +198,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         private void ProcessMonitors()
         {
             var systemState = GetSystemState();
+            RefreshAppWindows();
 
             lock (_lock)
             {
@@ -196,12 +225,19 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             // While a video plays (a program asks Windows to keep the display on), the limits step aside: the
             // monitor with the video in the active window stays awake; the other monitors follow their own timers.
             bool globalExpired = !systemState.DisplayRequired && _globalIdle.HasExpired(systemState.IdleTimeMilliseconds);
-            var activityReason = globalExpired ? ActivityReason.None : GetActivityReason(monitor, systemState);
+
+            // A chosen app ("apps die het scherm aan houden") beats every timer, like a playing video.
+            bool appKeepsAwake = _appKeepsAllAwake || KeepAwakeEvaluator.KeepsScreenAwake(monitor.Bounds, _appAreas);
+            if (appKeepsAwake) globalExpired = false;
+
+            var activityReason = appKeepsAwake ? ActivityReason.KeepAwakeApp
+                : globalExpired ? ActivityReason.None
+                : GetActivityReason(monitor, systemState);
             bool hasActivityNow = activityReason != ActivityReason.None;
 
             // When a limit is what stopped the activity, the quiet period really began at the last input.
-            bool limitCut = globalExpired ||
-                            (!systemState.DisplayRequired && !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds));
+            bool limitCut = !appKeepsAwake && (globalExpired ||
+                            (!systemState.DisplayRequired && !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds)));
             var quietSince = limitCut
                 ? DateTime.UtcNow - TimeSpan.FromMilliseconds(systemState.IdleTimeMilliseconds)
                 : DateTime.UtcNow;
