@@ -14,10 +14,24 @@ namespace OLED_Sleeper
 
         private readonly GlobalHotkeyService _hotkeyService;
 
-        public MainWindow(GlobalHotkeyService hotkeyService)
+        private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
+
+        private readonly OLED_Sleeper.Features.MonitorInformation.Services.Interfaces.IMonitorInfoManager _monitorInfoManager;
+
+        public MainWindow(GlobalHotkeyService hotkeyService, OLED_Sleeper.Features.Sky.PanoramaSettings panorama,
+                          OLED_Sleeper.Features.MonitorInformation.Services.Interfaces.IMonitorInfoManager monitorInfoManager,
+                          OLED_Sleeper.Features.MonitorIdleDetection.Services.GlobalIdleSettings globalIdle)
         {
+            _globalIdle = globalIdle;
             InitializeComponent();
             _hotkeyService = hotkeyService;
+            _panorama = panorama;
+            _monitorInfoManager = monitorInfoManager;
+            _panorama.Changed += () => Dispatcher.BeginInvoke(() =>
+                GapBox.Text = _panorama.GapCm.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture));
+            GapBox.Text = _panorama.GapCm.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture);
+            GlobalIdleCheck.IsChecked = _globalIdle.Enabled;
+            GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
             _hotkeyService.Changed += () => Dispatcher.BeginInvoke(ShowHotkey);
             Loaded += (_, _) => ShowHotkey();
         }
@@ -80,6 +94,74 @@ namespace OLED_Sleeper
         }
 
         #endregion Hotkey setting
+
+        #region General timer
+
+        private readonly OLED_Sleeper.Features.MonitorIdleDetection.Services.GlobalIdleSettings _globalIdle;
+
+        private void GlobalIdle_Changed(object sender, RoutedEventArgs e) => CommitGlobalIdle();
+
+        private void GlobalIdleBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) CommitGlobalIdle();
+        }
+
+        private void GlobalIdleBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitGlobalIdle();
+
+        private void CommitGlobalIdle()
+        {
+            if (!int.TryParse(GlobalIdleBox.Text.Trim(), out var minutes) || minutes < 1 || minutes > 600)
+            {
+                GlobalIdleStatus.Text = "vul 1 tot 600 minuten in";
+                GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
+                return;
+            }
+
+            _globalIdle.Set(GlobalIdleCheck.IsChecked == true, minutes);
+            GlobalIdleStatus.Text = _globalIdle.Enabled
+                ? $"opgeslagen \u2713  na {minutes} min zonder muis of toets gaan alle bewaakte schermen uit"
+                : "uit: alleen de instellingen per scherm gelden";
+        }
+
+        #endregion General timer
+
+        #region Panorama gap
+
+        private void GapBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) CommitGap();
+        }
+
+        private void GapBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitGap();
+
+        private void CommitGap()
+        {
+            var text = GapBox.Text.Trim().Replace(',', '.');
+            if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cm)
+                && cm >= 0 && cm <= 30)
+            {
+                _panorama.GapCm = cm;
+                GapStatus.Text = "opgeslagen \u2713  geldt vanaf de volgende keer dat de sterren verschijnen";
+            }
+            else
+            {
+                GapStatus.Text = "vul een getal tussen 0 en 30 in";
+            }
+            GapBox.Text = _panorama.GapCm.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture);
+        }
+
+        private void Calibrate_Click(object sender, RoutedEventArgs e)
+        {
+            var bounds = _monitorInfoManager.GetLatestMonitorsBasicInfo().Select(m => m.Bounds).ToList();
+            if (bounds.Count < 2)
+            {
+                GapStatus.Text = "kalibreren heeft twee schermen naast elkaar nodig";
+                return;
+            }
+            new OLED_Sleeper.UI.Views.GapCalibration(_panorama, bounds).Show();
+        }
+
+        #endregion Panorama gap
 
         #endregion Constructor
 

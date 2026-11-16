@@ -10,6 +10,13 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
     public class OverlayWindowFactory : IOverlayWindowFactory
     {
         /// <inheritdoc />
-        public IOverlayWindow Create(bool screensaver = false) => new OverlayWindow(screensaver);
+        private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
+
+        public OverlayWindowFactory(OLED_Sleeper.Features.Sky.PanoramaSettings panorama)
+        {
+            _panorama = panorama;
+        }
+
+        public IOverlayWindow Create(bool screensaver = false) => new OverlayWindow(screensaver, _panorama);
     }
 }

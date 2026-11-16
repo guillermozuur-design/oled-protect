@@ -9,7 +9,7 @@
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
         d:DataContext="{d:DesignInstance viewModels1:MainViewModel}"
-        Height="840" Width="820" MinHeight="640" MinWidth="700"
+        Height="960" Width="820" MinHeight="760" MinWidth="700"
         FontFamily="Bahnschrift"
         Background="{StaticResource PrimaryBackgroundColor}"
         WindowStyle="None"
@@ -148,6 +148,8 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Background="{StaticResource SecondaryBackgroundColor}" MouseDown="TitleBar_MouseDown">
@@ -218,6 +220,51 @@
                         <TextBlock x:Name="HotkeyStatus" Margin="12,0,12,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
                                    Foreground="{StaticResource SecondaryForegroundColor}"
                                    Text="ingedrukt houden, tik = volgende, loslaten = kiezen" />
+                    </DockPanel>
+                </Border>
+
+                <!-- General timer -->
+                <Border Grid.Row="5" Margin="15,0,15,15" Padding="15,10"
+                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
+                    <DockPanel>
+                        <CheckBox x:Name="GlobalIdleCheck" VerticalAlignment="Center" Click="GlobalIdle_Changed"
+                                  Foreground="{StaticResource PrimaryForegroundColor}" FontSize="14"
+                                  Content="Alle schermen na" />
+                        <TextBox x:Name="GlobalIdleBox" Width="50" Height="30" Margin="10,0,0,0" FontSize="14"
+                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                 Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
+                                 BorderBrush="{StaticResource SeparatorColorBrush}" CaretBrush="{StaticResource PrimaryForegroundColor}"
+                                 LostKeyboardFocus="GlobalIdleBox_LostFocus" KeyDown="GlobalIdleBox_KeyDown" />
+                        <TextBlock Text="min zonder muis of toets" Margin="10,0,0,0" FontSize="14" VerticalAlignment="Center"
+                                   Foreground="{StaticResource PrimaryForegroundColor}" />
+                        <TextBlock x:Name="GlobalIdleStatus" Margin="14,0,0,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="{StaticResource SecondaryForegroundColor}"
+                                   Text="dan gaan alle bewaakte schermen naar hun stand, ook met muis of venster erop" />
+                    </DockPanel>
+                </Border>
+
+                <!-- Space between the screens, for the sky panorama -->
+                <Border Grid.Row="4" Margin="15,0,15,15" Padding="15,10"
+                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
+                    <DockPanel>
+                        <TextBlock Text="Ruimte tussen schermen" Foreground="{StaticResource PrimaryForegroundColor}" FontSize="14"
+                                   VerticalAlignment="Center" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <TextBox x:Name="GapBox" Width="70" Height="30" FontSize="14"
+                                     HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                     Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
+                                     BorderBrush="{StaticResource SeparatorColorBrush}" CaretBrush="{StaticResource PrimaryForegroundColor}"
+                                     LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
+                                     ToolTip="Meet de afstand tussen het beeld van het ene en het andere scherm (randen samen)." />
+                            <TextBlock Text="cm" Margin="8,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                            <Button Content="Kalibreren" Margin="14,0,0,0" Padding="14,4" Click="Calibrate_Click" Cursor="Hand"
+                                    Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
+                                    BorderBrush="{StaticResource SeparatorColorBrush}"
+                                    ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
+                        </StackPanel>
+                        <TextBlock x:Name="GapStatus" Margin="12,0,12,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="{StaticResource SecondaryForegroundColor}"
+                                   Text="sterren lopen dan 'achter de rand langs' van scherm naar scherm" />
                     </DockPanel>
                 </Border>
             </Grid>

@@ -44,9 +44,12 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
 
         // === Construction ===
 
-        public MonitorIdleDetectionService(IMediator mediator)
+        private readonly GlobalIdleSettings _globalIdle;
+
+        public MonitorIdleDetectionService(IMediator mediator, GlobalIdleSettings? globalIdle = null)
         {
             _mediator = mediator;
+            _globalIdle = globalIdle ?? new GlobalIdleSettings();
         }
 
         // === Service Lifecycle ===
@@ -187,7 +190,10 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         private void ProcessSingleMonitor(ManagedMonitorState monitor, SystemState systemState)
         {
             var timerState = _monitorStates[monitor.Settings.HardwareId];
-            var activityReason = GetActivityReason(monitor, systemState);
+            // General timer: after X minutes without any input, nothing keeps any monitor awake.
+            var activityReason = _globalIdle.HasExpired(systemState.IdleTimeMilliseconds)
+                ? ActivityReason.None
+                : GetActivityReason(monitor, systemState);
             bool hasActivityNow = activityReason != ActivityReason.None;
 
             var eventArgs = new MonitorIdleStateEventArgs(
@@ -317,6 +323,15 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor, uint systemIdleMilliseconds)
         {
             if (!settings.IsActiveOnMousePosition || !cursorOnMonitor) return false;
+            return WithinStillLimit(settings, systemIdleMilliseconds);
+        }
+
+        /// <summary>
+        /// The "still" limit, shared by the mouse and the focused-window condition: with it switched on, they
+        /// only keep a monitor awake while there was mouse movement or a key press in the last few minutes.
+        /// </summary>
+        public static bool WithinStillLimit(MonitorSettings settings, uint systemIdleMilliseconds)
+        {
             if (!settings.UseMouseStillLimit) return true;
             return systemIdleMilliseconds < (long)Math.Max(1, settings.MouseStillMinutes) * 60_000;
         }
@@ -330,7 +345,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             {
                 Rect intersection = Rect.Intersect(monitor.Bounds, state.ForegroundWindowRect);
                 if (!intersection.IsEmpty && intersection.Width > 0 && intersection.Height > 0)
-                    return true;
+                    return WithinStillLimit(monitor.Settings, state.IdleTimeMilliseconds);
             }
             return false;
         }

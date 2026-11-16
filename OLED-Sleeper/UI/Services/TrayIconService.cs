@@ -30,8 +30,12 @@ namespace OLED_Sleeper.UI.Services
         private OverlayWindow? _previewOverlay;
         private Views.QuickPanelWindow? _quickPanel;
 
-        public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService)
+        private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
+
+        public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService,
+                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama)
         {
+            _panorama = panorama;
             _workModeService = workModeService;
             _monitorInfoManager = monitorInfoManager;
             _hotkeyService = hotkeyService;
@@ -196,7 +200,7 @@ namespace OLED_Sleeper.UI.Services
                 .FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y)));
             if (monitor == null) return;
 
-            _previewOverlay = new OverlayWindow(screensaver: true);
+            _previewOverlay = new OverlayWindow(screensaver: true, _panorama);
             _previewOverlay.Show(monitor.Bounds);
 
             var startedAt = DateTime.UtcNow;

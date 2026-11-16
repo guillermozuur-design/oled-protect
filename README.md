@@ -19,7 +19,9 @@ Toegevoegd in deze versie:
 | **Snelmenu (Alt+`)** | Zoals Win+P: paneel rechtsonder met alle keuzes, huidige stand gemarkeerd. Houd **Alt** vast en tik **`**: eerste tik opent, elke volgende tik schuift door, **loslaten = kiezen** (niet doorgeschoven = niets veranderen). Daarna blijft het paneel een paar tellen staan om te klikken (langer zolang de muis erop staat). Esc sluit. Keuzes: Bescherming aan, Werkmodus, Werkmodus 1 uur, Sterren bekijken, App openen. | `UI/Views/QuickPanelWindow.xaml(.cs)` |
 | **Werkmodus** | Alle schermen meteen wakker en blijven aan (video, lezen over twee schermen). Ook "1 uur", daarna gaat de bescherming vanzelf weer aan. Tray-icoon krijgt een oranje pauze-badge + melding. Start altijd uit. | `Features/WorkMode/` |
 | **Sneltoets instelbaar** | Onderaan het hoofdvenster: klik op het vak en druk je combinatie. Opgeslagen in `Data/hotkey.json`. Is Alt+` bij een ander programma in gebruik, dan Ctrl+Alt+O. | `GlobalHotkeyService`, `MainWindow.xaml.cs` |
-| **Muis-limiet** | Per scherm onder "Mouse cursor is on this monitor": *toch uit na X min zonder beweging*. Een geparkeerde muis houdt het scherm dan niet eindeloos wakker; muis bewegen of typen maakt het weer wakker. | `MonitorIdleDetectionService.MousePresenceCounts` |
+| **Limiet per scherm** | Onder de "Consider active when"-vinkjes: *maar toch uit na X min zonder muis of toets*. Geldt voor de muis én het gefocuste venster: die houden het scherm dan niet eindeloos wakker. | `MonitorIdleDetectionService.WithinStillLimit` |
+| **Algemene timer** | Hoofdvenster: *Alle schermen na X min zonder muis of toets*. Daarna gaan alle bewaakte schermen naar hun stand, wat er per scherm ook is ingesteld. Zet de schermuitschakeling van Windows zelf dan op "Nooit" of veel langer. | `GlobalIdleSettings` |
+| **Ruimte tussen schermen** | Hoofdvenster: afstand tussen de schermen in cm (standaard 2,0). Wordt meegerekend als "verborgen hemel", zodat lijnen en vallende sterren achter de rand langs lopen. Knop **Kalibreren**: schuine lijnen over beide schermen, schuiven met ←/→, muiswiel of schuifbalk tot ze recht doorlopen, Enter = opslaan. | `Features/Sky/PanoramaSettings.cs`, `UI/Views/GapCalibration.cs` |
 | **DDC/CI-fix** | Origineel keurde de LG UltraGear-schermen af (geven geen "capabilities string"); nu telt een werkende helderheidsuitlezing als ondersteuning. | `MonitorInfoProvider.cs` |
 
 Nieuwe teksten in de app zijn Nederlands, de rest van de originele UI is nog Engels.
@@ -31,7 +33,7 @@ Er staat geen .NET SDK systeembreed; de SDK staat lokaal in `.tmp\dotnet` (gitig
 zet de juiste omgevingsvariabelen en roept die `dotnet` aan.
 
 ```powershell
-# testen (204 tests)
+# testen (208 tests)
 powershell -File .tmp\dn.ps1 test OLED-Sleeper.sln
 
 # portable build (instellingen in artifacts\portable\Data)
@@ -52,11 +54,11 @@ uit [d3-celestial](https://github.com/ofrohn/d3-celestial/tree/master/data) naar
 ## Status (16-11-2026)
 
 - Draait vanaf `artifacts\portable\OLED-Sleeper.exe`; de oude geïnstalleerde versie is verwijderd.
-- 204 unit tests groen, waaronder astronomie tegen echte gebeurtenissen (grote conjunctie Jupiter/Saturnus
+- 208 unit tests groen, waaronder astronomie tegen echte gebeurtenissen (grote conjunctie Jupiter/Saturnus
   21-12-2020, lente-equinox 2000, nieuwe/volle maan april 2024, hoogte Poolster).
 - Live getest: DDC/CI op beide schermen, snelmenu (vasthouden + tikken + loslaten, snelle tik), werkmodus
   1 uur, sneltoets-instelling, knoppen in het schema-blok.
-- Nog niet live gezien: de sterrenhemel op de echte schermen (wel als render), maan/planeten in beeld,
+- Nog niet live gezien: kalibratiescherm, algemene timer, limiet per scherm, de sterrenhemel op de echte schermen (wel als render), maan/planeten in beeld,
   fade bij dimmen, helderheidsschema dat op een tijdstip verspringt.
 - Niet automatisch opstarten met Windows: zet dat aan via tray → "Run at Startup".
 

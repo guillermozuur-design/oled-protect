@@ -91,6 +91,15 @@ namespace OLED_Sleeper.Features.Sky
         /// <summary>How many screens wide the panorama is (shooting stars can cross all of them).</summary>
         public int PanoramaCount { get; set; } = 1;
 
+        /// <summary>
+        /// Pixels of "hidden sky" between two screens, matching the physical bezels, so lines and shooting
+        /// stars continue behind the gap instead of jumping.
+        /// </summary>
+        public double GapPixels { get; set; }
+
+        private double Stride => ActualWidth + GapPixels;
+        private double TotalWidth => ActualWidth * Math.Max(1, PanoramaCount) + GapPixels * (Math.Max(1, PanoramaCount) - 1);
+
         public SkyView()
         {
             _lines = _catalog.Lines.Where(l => FamousConstellations.Contains(l.Abbreviation)).Select(l => l.Points).ToArray();
@@ -247,10 +256,10 @@ namespace OLED_Sleeper.Features.Sky
 
             // One camera for the whole panorama: all screens side by side form one wide picture and each screen
             // shows its own slice of it. That way the screens join seamlessly, also above and below the middle.
-            int screens = Math.Max(1, PanoramaCount);
-            double totalWidth = ActualWidth * screens;
-            double centerX = totalWidth / 2 - panoramaIndex * ActualWidth;
-            return new Camera(azimuth, altitude, totalWidth, FieldOfView * screens, centerX, ActualHeight);
+            // The field of view grows with the total width (bezel gaps included), so every pixel covers the same angle.
+            double totalWidth = TotalWidth;
+            double centerX = totalWidth / 2 - panoramaIndex * Stride;
+            return new Camera(azimuth, altitude, totalWidth, FieldOfView * totalWidth / ActualWidth, centerX, ActualHeight);
         }
 
         // ================= animation =================
@@ -303,7 +312,7 @@ namespace OLED_Sleeper.Features.Sky
             long nowSlot = (long)Math.Floor((nowUtc - DateTime.UnixEpoch).TotalSeconds);
             var shower = ActiveShower();
             double chance = shower != null ? ShowerChancePerSecond : MeteorChancePerSecond;
-            double totalWidth = ActualWidth * Math.Max(1, PanoramaCount);
+            double totalWidth = TotalWidth;
 
             for (long slot = nowSlot - (long)Math.Ceiling(MaxMeteorLife); slot <= nowSlot; slot++)
             {
@@ -355,7 +364,7 @@ namespace OLED_Sleeper.Features.Sky
             var (e, n, u) = Astronomy.ToHorizon(radiant.Ra, radiant.Dec, CurrentLst(atUtc), Latitude);
             if (u < -0.1) return null;
 
-            double totalWidth = ActualWidth * Math.Max(1, PanoramaCount);
+            double totalWidth = TotalWidth;
             if (CameraFor(atUtc, 0).Project(e, n, u, out var p) && p.X >= 0 && p.X <= totalWidth) return p;
             return null;
         }
@@ -506,7 +515,7 @@ namespace OLED_Sleeper.Features.Sky
             void DrawMeteors(DrawingContext ctx, DateTime at)
             {
                 const int segments = 18;
-                double offsetX = PanoramaIndex * ActualWidth; // panorama -> this screen
+                double offsetX = PanoramaIndex * Stride; // panorama -> this screen
 
                 foreach (var m in ActiveMeteors(at))
                 {

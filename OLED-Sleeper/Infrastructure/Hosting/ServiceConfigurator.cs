@@ -80,6 +80,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<IMonitorDimmingService, MonitorDimmingService>();
             services.AddSingleton<IWorkModeService, WorkModeService>();
             services.AddSingleton<GlobalHotkeyService>();
+            services.AddSingleton<OLED_Sleeper.Features.Sky.PanoramaSettings>();
             services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
             services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
             services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();
@@ -88,6 +89,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<IMonitorInfoProvider, MonitorInfoProvider>();
             services.AddSingleton<IMonitorLayoutService, MonitorLayoutService>();
             services.AddSingleton<IMonitorSettingsFileService, MonitorSettingsFileService>();
+            services.AddSingleton<GlobalIdleSettings>();
             services.AddSingleton<IMonitorIdleDetectionService, MonitorIdleDetectionService>();
             services.AddSingleton<MainViewModel>();
             services.AddSingleton<MainWindow>();

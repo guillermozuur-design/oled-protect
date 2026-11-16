@@ -247,6 +247,7 @@ namespace OLED_Sleeper.UI.ViewModels
                 _isActiveOnMousePosition = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(MouseStillError));
+                OnPropertyChanged(nameof(IsStillLimitApplicable));
                 OnPropertyChanged(nameof(ActiveConditionsError));
                 UpdateDirtyState();
             }
@@ -265,6 +266,8 @@ namespace OLED_Sleeper.UI.ViewModels
             {
                 _isActiveOnActiveWindow = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(MouseStillError));
+                OnPropertyChanged(nameof(IsStillLimitApplicable));
                 OnPropertyChanged(nameof(ActiveConditionsError));
                 UpdateDirtyState();
             }
@@ -290,9 +293,12 @@ namespace OLED_Sleeper.UI.ViewModels
 
         public string MouseStillError => ValidateMouseStill() ?? string.Empty;
 
+        /// <summary>The limit only means something when the mouse or focused-window condition is on.</summary>
+        public bool IsStillLimitApplicable => IsActiveOnMousePosition || IsActiveOnActiveWindow;
+
         private string? ValidateMouseStill()
         {
-            if (!IsManaged || !IsActiveOnMousePosition || !UseMouseStillLimit) return null;
+            if (!IsManaged || !IsStillLimitApplicable || !UseMouseStillLimit) return null;
             if (MouseStillMinutes is null or < 1 or > 600) return "Kies 1 tot 600 minuten.";
             return null;
         }

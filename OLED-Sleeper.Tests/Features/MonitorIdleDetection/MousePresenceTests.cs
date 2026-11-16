@@ -23,6 +23,14 @@ namespace OLED_Sleeper.Tests.Features.MonitorIdleDetection
         }
 
         [Fact]
+        public void StillLimit_WhenOff_NeverStopsActivity_WhenOn_StopsAfterTheLimit()
+        {
+            Assert.True(MonitorIdleDetectionService.WithinStillLimit(Settings(false), uint.MaxValue));
+            Assert.True(MonitorIdleDetectionService.WithinStillLimit(Settings(true, 5), 4 * 60_000));
+            Assert.False(MonitorIdleDetectionService.WithinStillLimit(Settings(true, 5), 5 * 60_000));
+        }
+
+        [Fact]
         public void MouseOnAnotherMonitor_NeverCounts()
         {
             Assert.False(MonitorIdleDetectionService.MousePresenceCounts(Settings(false), false, 0));

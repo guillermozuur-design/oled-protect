@@ -42,8 +42,11 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         private readonly SkyView? _starfield;
         private bool _closing;
 
-        public OverlayWindow(bool screensaver = false)
+        private readonly PanoramaSettings? _panorama;
+
+        public OverlayWindow(bool screensaver = false, PanoramaSettings? panorama = null)
         {
+            _panorama = panorama;
             _topmostTimer = new DispatcherTimer { Interval = TopmostReassertInterval };
             _topmostTimer.Tick += (_, _) => ReassertTopmost();
 
@@ -70,6 +73,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
                 double virtualLeft = SystemParameters.VirtualScreenLeft;
                 _starfield.PanoramaIndex = Math.Round((bounds.Left - virtualLeft) / bounds.Width);
                 _starfield.PanoramaCount = Math.Max(1, (int)Math.Round(SystemParameters.VirtualScreenWidth / bounds.Width));
+                _starfield.GapPixels = _panorama?.GapPixels(bounds) ?? 0;
             }
 
             PositionToMonitor(hwnd, bounds);

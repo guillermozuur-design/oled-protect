@@ -21,13 +21,13 @@ namespace OLED_Sleeper.Tests.Features.Sky
             {
                 try
                 {
-                    const int w = 2560, h = 1440, screens = 2;
+                    const int w = 2560, h = 1440, screens = 2, gap = 86; // 2 cm bij 43 px/cm
                     var visual = new DrawingVisual();
                     using (var dcAll = visual.RenderOpen())
                     {
                         for (int s = 0; s < screens; s++)
                         {
-                            var view = new SkyView { PanoramaIndex = s, PanoramaCount = screens };
+                            var view = new SkyView { PanoramaIndex = s, PanoramaCount = screens, GapPixels = gap };
                             view.Measure(new Size(w, h));
                             view.Arrange(new Rect(0, 0, w, h));
                             view.PrepareStillFrame();
@@ -35,11 +35,11 @@ namespace OLED_Sleeper.Tests.Features.Sky
                             view.UpdateLayout();
                             var part = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
                             part.Render(view);
-                            dcAll.DrawImage(part, new Rect(s * w, 0, w, h));
-                            dcAll.DrawLine(new Pen(Brushes.DimGray, 2), new Point(s * w, 0), new Point(s * w, 40)); // naad-markering
+                            dcAll.DrawImage(part, new Rect(s * (w + gap), 0, w, h));
+                            if (s > 0) dcAll.DrawRectangle(new SolidColorBrush(Color.FromRgb(40, 40, 40)), null, new Rect(s * (w + gap) - gap, 0, gap, h)); // de schermrand
                         }
                     }
-                    var bitmap = new RenderTargetBitmap(w * screens, h, 96, 96, PixelFormats.Pbgra32);
+                    var bitmap = new RenderTargetBitmap(w * screens + gap * (screens - 1), h, 96, 96, PixelFormats.Pbgra32);
                     bitmap.Render(visual);
 
                     int bw = bitmap.PixelWidth;
