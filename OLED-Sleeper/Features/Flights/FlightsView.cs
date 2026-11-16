@@ -32,7 +32,8 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Color MinorColor = Color.FromRgb(0x23, 0x25, 0x29);
         private static readonly Color MajorColor = Color.FromRgb(0x27, 0x26, 0x24);
         private static readonly Color MotorwayColor = Color.FromRgb(0x40, 0x33, 0x1F);
-        private static readonly Color PinColor = Color.FromRgb(0x7F, 0xA7, 0xFF);
+        private static readonly Brush PinDot = Frozen(new SolidColorBrush(Color.FromRgb(0x5A, 0x7C, 0xC8)));
+        private static readonly Pen PinRing = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0x2A, 0x3A, 0x5E)), 1.0));
 
         private static readonly Typeface LabelFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         private static readonly Typeface CityFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -389,23 +390,9 @@ namespace OLED_Sleeper.Features.Flights
 
         private static void DrawPin(DrawingContext dc, Point p, double ui, DateTime now)
         {
-            // A slow "ping" ring around the pin, like a radar.
-            double phase = (now - DateTime.UnixEpoch).TotalSeconds % 4.0 / 4.0;
-            var ring = new Pen(new SolidColorBrush(Color.FromArgb((byte)(110 * (1 - phase)), PinColor.R, PinColor.G, PinColor.B)), 1.2 * ui);
-            dc.DrawEllipse(null, ring, p, (5 + 28 * phase) * ui, (5 + 28 * phase) * ui);
-
-            // The pin: a drop shape with its point on the spot.
-            var head = p - new Vector(0, 13 * ui);
-            var pin = new StreamGeometry();
-            using (var ctx = pin.Open())
-            {
-                double r = 5.5 * ui;
-                ctx.BeginFigure(p, true, true);
-                ctx.LineTo(head + new Vector(-r * 0.86, r * 0.5), true, true);
-                ctx.ArcTo(head + new Vector(r * 0.86, r * 0.5), new Size(r, r), 0, true, SweepDirection.Clockwise, true, true);
-            }
-            dc.DrawGeometry(new SolidColorBrush(Color.FromRgb(0x5A, 0x7C, 0xC8)), null, pin);
-            dc.DrawEllipse(new SolidColorBrush(Color.FromRgb(0x10, 0x16, 0x24)), null, head, 2.1 * ui, 2.1 * ui);
+            // Your spot: a small, calm dot with a thin ring (it drifts along with the map).
+            dc.DrawEllipse(null, PinRing, p, 5.5 * ui, 5.5 * ui);
+            dc.DrawEllipse(PinDot, null, p, 2.2 * ui, 2.2 * ui);
         }
 
         private void DrawPlanes(DrawingContext dc, Matrix m, double rotation, double ui, Rect bounds, DateTime now)
