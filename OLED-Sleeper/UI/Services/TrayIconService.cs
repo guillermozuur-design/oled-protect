@@ -1,5 +1,9 @@
 using Hardcodet.Wpf.TaskbarNotification;
+using OLED_Sleeper.Features.MonitorBlackout.Services;
+using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.WorkMode.Services;
+using OLED_Sleeper.Native;
+using System.Windows.Threading;
 using OLED_Sleeper.Infrastructure.Helpers;
 using OLED_Sleeper.UI.Services.Interfaces;
 using Serilog;
@@ -22,9 +26,13 @@ namespace OLED_Sleeper.UI.Services
         private System.Drawing.Icon? _normalIcon;
         private System.Drawing.Icon? _pausedIcon;
 
-        public TrayIconService(IWorkModeService workModeService)
+        private readonly IMonitorInfoManager _monitorInfoManager;
+        private OverlayWindow? _previewOverlay;
+
+        public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager)
         {
             _workModeService = workModeService;
+            _monitorInfoManager = monitorInfoManager;
         }
 
         /// <summary>
@@ -105,6 +113,7 @@ namespace OLED_Sleeper.UI.Services
 
             contextMenu.Items.Add(CreateWorkModeMenuItem());
             contextMenu.Items.Add(new Separator());
+            contextMenu.Items.Add(CreatePreviewMenuItem());
             contextMenu.Items.Add(CreateShowSettingsMenuItem());
             contextMenu.Items.Add(CreateStartupMenuItem());
             contextMenu.Items.Add(new Separator());
@@ -128,6 +137,50 @@ namespace OLED_Sleeper.UI.Services
             };
             _workModeMenuItem.Click += (_, _) => _workModeService.SetEnabled(_workModeMenuItem.IsChecked);
             return _workModeMenuItem;
+        }
+
+        private MenuItem CreatePreviewMenuItem()
+        {
+            var item = new MenuItem { Header = "Sterren-screensaver bekijken" };
+            item.Click += (_, _) => ShowScreensaverPreview();
+            return item;
+        }
+
+        /// <summary>
+        /// Shows the starfield on the monitor under the mouse, using the real overlay window, until the
+        /// mouse is moved. Handy to see what the screensaver looks like without waiting for the idle timer.
+        /// </summary>
+        private void ShowScreensaverPreview()
+        {
+            if (_previewOverlay != null) return;
+
+            NativeMethods.GetCursorPos(out var start);
+            var monitor = _monitorInfoManager.GetLatestMonitorsBasicInfo()
+                .FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y)));
+            if (monitor == null) return;
+
+            _previewOverlay = new OverlayWindow(screensaver: true);
+            _previewOverlay.Show(monitor.Bounds);
+
+            var startedAt = DateTime.UtcNow;
+            var poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+            poll.Tick += (_, _) =>
+            {
+                // Ignore the first second: the click that opened the menu still moves the mouse a bit.
+                if ((DateTime.UtcNow - startedAt).TotalSeconds < 1)
+                {
+                    NativeMethods.GetCursorPos(out start);
+                    return;
+                }
+
+                NativeMethods.GetCursorPos(out var now);
+                if (Math.Abs(now.X - start.X) + Math.Abs(now.Y - start.Y) < 25) return;
+
+                poll.Stop();
+                _previewOverlay?.Close();
+                _previewOverlay = null;
+            };
+            poll.Start();
         }
 
         private MenuItem CreateShowSettingsMenuItem()

@@ -1,9 +1,13 @@
-﻿using OLED_Sleeper.Features.MonitorBehavior.Models;
+using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.UI.Helpers;
 using OLED_Sleeper.UI.Models;
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.UI.Commands;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows.Input;
 
 namespace OLED_Sleeper.UI.ViewModels
 {
@@ -66,7 +70,8 @@ namespace OLED_Sleeper.UI.ViewModels
             {
                 string baseTooltip = "Choose how the monitor reacts after the idle timer expires.\n\n" +
                                     "• Blackout: Turns the monitor completely black.\n" +
-                                     "• Dim: Reduces the monitor's brightness using DDC/CI.";
+                                     "• Dim: Reduces the monitor's brightness using DDC/CI.\n" +
+                                     "• Sterren: OLED-vriendelijke screensaver met vallende sterren.";
 
                 if (_monitorInfo.Capabilities?.IsSupported != true)
                 {
@@ -264,12 +269,52 @@ namespace OLED_Sleeper.UI.ViewModels
             }
         }
 
+        // --- Brightness schedule ---
+        private bool _useBrightnessSchedule;
+        private bool _initialUseBrightnessSchedule;
+        private string _initialScheduleSignature = string.Empty;
+        private bool _suppressScheduleChanges;
+
+        public bool UseBrightnessSchedule
+        {
+            get => _useBrightnessSchedule;
+            set
+            {
+                _useBrightnessSchedule = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ScheduleError));
+                UpdateDirtyState();
+            }
+        }
+
+        public ObservableCollection<ScheduleEntryViewModel> ScheduleEntries { get; } = new();
+
+        public ICommand AddScheduleEntryCommand { get; }
+
+        public ICommand RemoveScheduleEntryCommand { get; }
+
+        public string ScheduleError => ValidateSchedule() ?? string.Empty;
+
+        public string ScheduleTooltip =>
+            (IsDimBehaviorEnabled ? "" : "DIT SCHERM ONDERSTEUNT GEEN DDC/CI-HELDERHEID.\n\n") +
+            "Stel per tijdstip de helderheid van dit scherm in.\n" +
+            "Vanaf elke tijd geldt die helderheid, tot de volgende tijd.\n" +
+            "Na de laatste tijd van de dag loopt hij door tot de eerste van de volgende dag.\n\n" +
+            "Een helderheid die je zelf op het scherm verandert, blijft staan\n" +
+            "tot het volgende tijdstip in het schema.";
+
         #endregion Properties
 
         /// <param name="monitorInfo">The monitor information model.</param>
         public MonitorConfigurationViewModel(MonitorInfo monitorInfo)
         {
             _monitorInfo = monitorInfo;
+
+            AddScheduleEntryCommand = new RelayCommand(AddScheduleEntry);
+            RemoveScheduleEntryCommand = new RelayCommand(p =>
+            {
+                if (p is ScheduleEntryViewModel entry && ScheduleEntries.Remove(entry)) OnScheduleChanged();
+            });
 
             ApplySettings(new MonitorSettings());
             MarkAsSaved();
@@ -297,7 +342,9 @@ namespace OLED_Sleeper.UI.ViewModels
                        SelectedTimeUnit != _initialSelectedTimeUnit ||
                        IsActiveOnInput != _initialIsActiveOnInput ||
                        IsActiveOnMousePosition != _initialIsActiveOnMousePosition ||
-                       IsActiveOnActiveWindow != _initialIsActiveOnActiveWindow;
+                       IsActiveOnActiveWindow != _initialIsActiveOnActiveWindow ||
+                       UseBrightnessSchedule != _initialUseBrightnessSchedule ||
+                       ScheduleSignature() != _initialScheduleSignature;
 
             OnPropertyChanged(nameof(IsDirty));
         }
@@ -316,6 +363,8 @@ namespace OLED_Sleeper.UI.ViewModels
             _initialIsActiveOnInput = IsActiveOnInput;
             _initialIsActiveOnMousePosition = IsActiveOnMousePosition;
             _initialIsActiveOnActiveWindow = IsActiveOnActiveWindow;
+            _initialUseBrightnessSchedule = UseBrightnessSchedule;
+            _initialScheduleSignature = ScheduleSignature();
             UpdateDirtyState();
         }
 
@@ -333,6 +382,8 @@ namespace OLED_Sleeper.UI.ViewModels
             IsActiveOnInput = _initialIsActiveOnInput;
             IsActiveOnMousePosition = _initialIsActiveOnMousePosition;
             IsActiveOnActiveWindow = _initialIsActiveOnActiveWindow;
+            UseBrightnessSchedule = _initialUseBrightnessSchedule;
+            LoadSchedule(ParseSignature(_initialScheduleSignature));
             UpdateDirtyState();
         }
 
@@ -351,6 +402,58 @@ namespace OLED_Sleeper.UI.ViewModels
             IsActiveOnInput = settings.IsActiveOnInput;
             IsActiveOnMousePosition = settings.IsActiveOnMousePosition;
             IsActiveOnActiveWindow = settings.IsActiveOnActiveWindow;
+            UseBrightnessSchedule = settings.UseBrightnessSchedule && IsDimBehaviorEnabled;
+            LoadSchedule(settings.BrightnessSchedule);
+        }
+
+        private void LoadSchedule(IEnumerable<BrightnessScheduleEntry> entries)
+        {
+            _suppressScheduleChanges = true;
+            ScheduleEntries.Clear();
+            foreach (var entry in entries)
+            {
+                ScheduleEntries.Add(new ScheduleEntryViewModel(entry, OnScheduleChanged));
+            }
+            _suppressScheduleChanges = false;
+            OnScheduleChanged();
+        }
+
+        private void AddScheduleEntry()
+        {
+            var last = ScheduleEntries.LastOrDefault();
+            var lastTime = last == null ? null : BrightnessScheduleCalculator.ParseTime(last.Start);
+            var start = lastTime?.AddHours(2) ?? new TimeOnly(8, 0);
+            ScheduleEntries.Add(new ScheduleEntryViewModel(
+                new BrightnessScheduleEntry { Start = start.ToString("HH:mm"), Brightness = last?.Brightness ?? 70 },
+                OnScheduleChanged));
+            OnScheduleChanged();
+        }
+
+        private void OnScheduleChanged()
+        {
+            if (_suppressScheduleChanges) return;
+            OnPropertyChanged(nameof(ScheduleError));
+            UpdateDirtyState();
+        }
+
+        private string ScheduleSignature() =>
+            string.Join(";", ScheduleEntries.Select(e => $"{e.Start}={e.Brightness}"));
+
+        private static List<BrightnessScheduleEntry> ParseSignature(string signature) =>
+            signature.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Split('='))
+                .Where(kv => kv.Length == 2)
+                .Select(kv => new BrightnessScheduleEntry { Start = kv[0], Brightness = int.TryParse(kv[1], out var b) ? b : 70 })
+                .ToList();
+
+        private string? ValidateSchedule()
+        {
+            if (!UseBrightnessSchedule) return null;
+            if (ScheduleEntries.Count == 0) return "Voeg minstens één tijd toe.";
+            if (ScheduleEntries.Any(e => !e.IsStartValid)) return "Gebruik tijden als 08:00 of 19:30.";
+            var times = ScheduleEntries.Select(e => BrightnessScheduleCalculator.ParseTime(e.Start)).ToList();
+            if (times.Distinct().Count() != times.Count) return "Elke tijd mag maar één keer voorkomen.";
+            return null;
         }
 
         /// <summary>
@@ -370,7 +473,9 @@ namespace OLED_Sleeper.UI.ViewModels
                 IdleUnit = SelectedTimeUnit,
                 IsActiveOnInput = IsActiveOnInput,
                 IsActiveOnMousePosition = IsActiveOnMousePosition,
-                IsActiveOnActiveWindow = IsActiveOnActiveWindow
+                IsActiveOnActiveWindow = IsActiveOnActiveWindow,
+                UseBrightnessSchedule = UseBrightnessSchedule,
+                BrightnessSchedule = ScheduleEntries.Select(e => e.ToEntry()).ToList()
             };
         }
 
@@ -385,6 +490,7 @@ namespace OLED_Sleeper.UI.ViewModels
         {
             get
             {
+                if (ValidateSchedule() != null) return false;
                 if (!IsManaged) return true; // Unmanaged monitors are always "valid"
 
                 return ValidateIdleValue() == null && ValidateActiveConditions() == null && ValidateBehavior() == null;

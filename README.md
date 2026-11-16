@@ -1,59 +1,59 @@
-﻿# OLED Sleeper 😴 – Blackout or Dim Secondary Monitors on Windows
+﻿# OLED Sleeper (eigen versie)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Aangepaste versie van [OLED Sleeper 2.2.0](https://github.com/Quorthon13/OLED-Sleeper) (MIT, Quorthon13),
+voor 2× LG UltraGear+ OLED (2560×1440, DDC/CI werkt). Doel: inbranden voorkomen als één scherm stilstaat
+terwijl je op het andere werkt.
 
-OLED Sleeper is a lightweight Windows tool to blackout or dim idle monitors, helping users prevent OLED burn-in and temporarily sleep secondary monitors for focus, gaming, or distraction-free work.
+## Wat het doet
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/0f7c9110-094c-4fdb-8109-62fdd11e87cd" alt="OLED Sleeper Demonstration"> 
-</p>
+Origineel: per scherm bijhouden of het idle is (muis op dat scherm / actief venster / systeeminput) en na
+de ingestelde tijd **blackout** of **dimmen** (DDC/CI).
 
----
+Toegevoegd in deze versie:
 
-## The Problem
+| Functie | Wat | Waar in de code |
+|---|---|---|
+| **Fade** | Zwart overlay faded in 1,5 s in en 0,25 s uit. Dimmen gaat in 8 stapjes (~0,7 s). | `Features/MonitorBlackout/Services/OverlayWindow.cs`, `MonitorDimmingService.FadeBrightness` |
+| **Sterren-screensaver** | Derde gedrag "Sterren": zwarte hemel, twinkelende sterren die langzaam omlaag drijven en af en toe een vallende ster. Bijna alle pixels echt uit, niets staat stil. | `Features/MonitorBlackout/Services/StarfieldView.cs` |
+| **Helderheid op tijden** | Per scherm een schema, bv. 08:00 → 80%, 19:00 → 50%, 23:00 → 30%. Wordt alleen geschreven op het moment dat het schema verspringt, dus zelf bijstellen blijft staan tot de volgende tijd. Is een scherm op dat moment gedimd, dan wordt het bij wakker worden op de schema-waarde gezet. | `Features/BrightnessSchedule/` |
+| **Werkmodus** | **Ctrl+Alt+O** (of tray-menu "Werkmodus (alles aan)"): alle schermen meteen wakker en blijven aan, bv. bij video of lezen over twee schermen. Nog eens drukken = bescherming weer aan. Tray-icoon krijgt een oranje pauze-badge + melding. Start altijd uit. | `Features/WorkMode/`, `UI/Services/TrayIconService.cs` |
+| **Screensaver bekijken** | Tray-menu "Sterren-screensaver bekijken": toont de sterren op het scherm onder de muis tot je de muis beweegt. | `TrayIconService.ShowScreensaverPreview` |
 
-Many users have multi-monitor setups but want to turn off or dim secondary monitors temporarily without putting the entire computer to sleep. OLED and other displays can also suffer from burn-in or image retention if static images stay on screen too long. Windows’ built-in power settings are all-or-nothing — there’s no per-monitor control.
+Nieuwe teksten in de app zijn Nederlands, de rest van de originele UI is nog Engels.
 
-## The Solution
+## Bouwen en starten
 
-OLED Sleeper monitors each screen for activity. When a monitor is idle for a set time, it will either black it out or dim its brightness based on your preference. 
+Er staat geen .NET SDK systeembreed; de SDK staat lokaal in `.tmp\dotnet` (gitignored). `.tmp\dn.ps1`
+zet de juiste omgevingsvariabelen en roept die `dotnet` aan.
 
-<p align="center">
-  <img width="500" height="410" alt="oled-sleeper-002" src="https://github.com/user-attachments/assets/20022234-fe5f-4573-a4e4-ff5ef07b622b" />
-</p>
+```powershell
+# testen (192 tests)
+powershell -File .tmp\dn.ps1 test OLED-Sleeper.sln
 
----
+# portable build (instellingen naast de exe, los van de geïnstalleerde versie)
+powershell -File .tmp\dn.ps1 publish OLED-Sleeper\OLED-Sleeper.csproj -c Release -r win-x64 --self-contained false -p:Portable=true -o artifacts\portable
+artifacts\portable\OLED-Sleeper.exe
+```
 
-## Features
+Is `.tmp` weg, installeer de SDK opnieuw lokaal:
+`.tmp\dotnet-install.ps1 -Channel 8.0 -InstallDir .tmp\dotnet -NoPath` (script van https://dot.net/v1/dotnet-install.ps1).
 
-* **Three Idle Detection Modes:** Customize how the application determines if a monitor is idle:
-    * **Mouse:** Tracks cursor movement specifically on the target monitor.
-    * **Focused Application:** Tracks activity within the active window currently displayed on that monitor.
-    * **System-Wide Input:** Tracks overall keyboard and mouse input across the entire system (similar to standard Windows idle detection).
-* **Per-Monitor Control:** Blackout or dim any monitor independently.
-* **Two Action Modes:** Full blackout or dimming (DDC/CI supported).
-* **Instant Wake-Up:** Restore the monitor immediately when activity is detected.
-* **Native WPF Application:** Built from the ground up using native Win32 calls. Requires no external dependencies or third-party tools.
+Let op: deze versie en de geïnstalleerde originele OLED Sleeper kunnen niet tegelijk draaien (zelfde
+single-instance mutex). Sluit de oude eerst via het tray-icoon → Exit.
 
----
+## Status
 
-## Requirements
+- Bouwt, 192 unit tests groen (169 origineel + 23 nieuw: schema-berekening, fade, schema tijdens dimmen, werkmodus, pauze).
+- Nog niet getest op de echte schermen: zie de checklist hieronder.
 
-* **Operating System:** Windows 10 or 11
-* **DDC/CI Support (for Dimming Mode):** Dimming requires a monitor that supports DDC/CI brightness control via VCP codes. Most modern monitors support this, but it is not guaranteed on all displays.
+### Handmatige checklist
+- [ ] Tray → "Sterren-screensaver bekijken": sterren zichtbaar, weg bij muisbeweging
+- [ ] Scherm 2 op "Sterren", korte idle-tijd: fade-in, en snel weg als muis erheen gaat
+- [ ] Blackout: zachte fade
+- [ ] Ctrl+Alt+O: alles wakker, icoon met pauze-badge, nog eens = weer actief
+- [ ] Helderheid op tijden: tijd net in de toekomst zetten en kijken of hij verspringt
 
----
-
-## How to Use
-
-1. Download the latest installer or the portable zip from the [Releases page](https://github.com/Quorthon13/OLED-Sleeper/releases).
-2. Run the installer and follow the on-screen prompts. During installation, you will be prompted to configure automatic startup and create shortcuts. For the portable version, just extract the zip anywhere and run it.
-3. Open OLED Sleeper from your Start Menu or desktop shortcut.
-4. Use the interface to select your target monitors, choose your preferred idle detection mode, and set your idle timers.
-5. Apply your settings. The application will minimize to the system tray and run in the background.
-
----
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Ideeën voor later
+- Werkmodus automatisch uit na X uur
+- Sneltoets instelbaar maken
+- Rest van de UI vertalen
