@@ -54,17 +54,14 @@ namespace OLED_Sleeper.Features.Flights
                             {
                                 "motorway" => MapKind.Motorway,
                                 "trunk" or "primary" => MapKind.Major,
-                                "secondary" or "tertiary" => MapKind.Minor,
-                                "rail" when !f.Tags.ContainsKey("service") => MapKind.Rail,
                                 _ => null
                             };
                             if (kind != null) AddLines(content, kind.Value, f, zoom, tileX, tileY, projection);
                             break;
                         }
-                    case "waterway" when f.Type == VectorTile.GeometryType.Line && (cls == "river" || cls == "canal"):
-                        AddLines(content, MapKind.River, f, zoom, tileX, tileY, projection);
-                        break;
-                    case "water" when f.Type == VectorTile.GeometryType.Polygon && cls != "swimming_pool":
+                    // Only the outline of the land: the sea coast and the shores of big lakes. Rivers, canals,
+                    // ditches and ponds stay black.
+                    case "water" when f.Type == VectorTile.GeometryType.Polygon && (cls == "ocean" || (cls == "lake" && IsBig(f))):
                         // Water as an outline only (coast, banks, lake shores): black inside, kind to OLED. Cutting
                         // the rings like lines also removes the artificial edges where a tile cut the polygon.
                         AddLines(content, MapKind.Water, f, zoom, tileX, tileY, projection);
@@ -83,6 +80,14 @@ namespace OLED_Sleeper.Features.Flights
                         break;
                 }
             }
+        }
+
+        /// <summary>A lake of a few kilometres or more (IJsselmeer, Markermeer, Veerse Meer), not a pond.</summary>
+        private static bool IsBig(VectorTile.Feature f)
+        {
+            // At zoom 9-10 a tile is 25-50 km wide; 1/8 of it is 3-6 km.
+            double minSize = f.Extent / 8.0;
+            return f.Parts.Any(r => r.Count > 3 && (r.Max(p => p.X) - r.Min(p => p.X) > minSize || r.Max(p => p.Y) - r.Min(p => p.Y) > minSize));
         }
 
         private static void AddPlace(MapContent content, VectorTile.Feature f, string? cls, int zoom, int tileX, int tileY, LocalProjection projection)

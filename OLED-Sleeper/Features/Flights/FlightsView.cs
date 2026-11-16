@@ -22,15 +22,16 @@ namespace OLED_Sleeper.Features.Flights
         private const double MapFramesPerSecond = 20;
 
         // Night-map colours: dim and opaque on black (opaque, so overlapping tile edges never show).
-        private static readonly Color WaterColor = Color.FromRgb(0x15, 0x2C, 0x48);
-        private static readonly Color RunwayAreaColor = Color.FromRgb(0x22, 0x25, 0x2D);
-        private static readonly Color RunwayColor = Color.FromRgb(0x3C, 0x41, 0x4C);
-        private static readonly Color BorderColor = Color.FromRgb(0x3B, 0x30, 0x47);
+        // Kept dim on purpose: on black an OLED shows even these clearly, and less light means less wear.
+        private static readonly Color WaterColor = Color.FromRgb(0x10, 0x22, 0x38);   // coast and big lakes
+        private static readonly Color RunwayAreaColor = Color.FromRgb(0x17, 0x19, 0x1F);
+        private static readonly Color RunwayColor = Color.FromRgb(0x29, 0x2C, 0x34);
+        private static readonly Color BorderColor = Color.FromRgb(0x27, 0x20, 0x30);
         private static readonly Color RiverColor = Color.FromRgb(0x12, 0x2A, 0x45);
         private static readonly Color RailColor = Color.FromRgb(0x29, 0x2E, 0x37);
         private static readonly Color MinorColor = Color.FromRgb(0x23, 0x25, 0x29);
-        private static readonly Color MajorColor = Color.FromRgb(0x3A, 0x39, 0x36);
-        private static readonly Color MotorwayColor = Color.FromRgb(0x5E, 0x4B, 0x2E);
+        private static readonly Color MajorColor = Color.FromRgb(0x27, 0x26, 0x24);
+        private static readonly Color MotorwayColor = Color.FromRgb(0x40, 0x33, 0x1F);
         private static readonly Color PinColor = Color.FromRgb(0x7F, 0xA7, 0xFF);
 
         private static readonly Typeface LabelFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
@@ -86,7 +87,7 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Brush PlaneLowFill = Frozen(new SolidColorBrush(Color.FromRgb(0xF0, 0x8A, 0x3C)));
         private static readonly Brush GroundFill = Frozen(new SolidColorBrush(Color.FromRgb(0x70, 0x70, 0x70)));
         private static readonly Pen PlaneOutline = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0x14, 0x12, 0x0C)), 0.07));
-        private static readonly Pen RotorPen = Frozen(new Pen(new SolidColorBrush(Color.FromArgb(0xB0, 0xE9, 0xB8, 0x2C)), 0.07));
+        private static readonly Brush RotorFill = Frozen(new SolidColorBrush(Color.FromArgb(0x90, 0xE9, 0xB8, 0x2C)));
 
         private static T Frozen<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
@@ -115,21 +116,28 @@ namespace OLED_Sleeper.Features.Flights
             return Frozen(g);
         }
 
+        /// <summary>Where the rotor mast is on the helicopter symbol (the middle of the cabin).</summary>
+        private static readonly Point RotorHub = new(0, -0.35);
+
         private static Geometry Helicopter()
         {
-            var g = new GeometryGroup { FillRule = FillRule.Nonzero };
-            g.Children.Add(new EllipseGeometry(new Point(0, -0.35), 0.24, 0.42));                      // cabin
-            g.Children.Add(new RectangleGeometry(new Rect(-0.045, -0.05, 0.09, 0.98)));                  // tail boom
-            g.Children.Add(new RectangleGeometry(new Rect(-0.22, 0.80, 0.44, 0.08)));                    // tail fin
-            return Frozen(g);
+            // One merged outline (cabin + tail boom + tail fin), so the border does not run through the body.
+            Geometry body = new EllipseGeometry(RotorHub, 0.26, 0.44);
+            body = Geometry.Combine(body, new RectangleGeometry(new Rect(-0.05, 0.0, 0.10, 0.92), 0.04, 0.04), GeometryCombineMode.Union, null);
+            body = Geometry.Combine(body, new RectangleGeometry(new Rect(-0.24, 0.80, 0.48, 0.09), 0.04, 0.04), GeometryCombineMode.Union, null);
+            return Frozen(body);
         }
 
         private static Geometry Rotor()
         {
-            var g = new GeometryGroup();
+            // Two crossing blades, centred on the rotor hub, so turning them around the hub keeps them in place.
+            var g = new GeometryGroup { FillRule = FillRule.Nonzero };
             foreach (double angle in new[] { 0.0, 90.0 })
             {
-                var blade = new RectangleGeometry(new Rect(-0.95, -0.03, 1.9, 0.06)) { Transform = new RotateTransform(angle) };
+                var blade = new RectangleGeometry(new Rect(RotorHub.X - 0.95, RotorHub.Y - 0.035, 1.9, 0.07), 0.035, 0.035)
+                {
+                    Transform = new RotateTransform(angle, RotorHub.X, RotorHub.Y)
+                };
                 g.Children.Add(blade);
             }
             return Frozen(g);
@@ -365,27 +373,25 @@ namespace OLED_Sleeper.Features.Flights
             // Place names stay upright and readable; only the ones on this screen are drawn.
             var outside = bounds;
             outside.Inflate(150 * ui, 40 * ui);
-            var villageBrush = new SolidColorBrush(Color.FromRgb(0x34, 0x38, 0x40));
-            var townBrush = new SolidColorBrush(Color.FromRgb(0x58, 0x5D, 0x66));
-            foreach (var place in _map.Places)
+            var townBrush = new SolidColorBrush(Color.FromRgb(0x3A, 0x3E, 0x45));
+            foreach (var place in _map!.Places)
             {
                 var p = m.Transform(new Point(place.X, place.Y));
                 if (!outside.Contains(p)) continue;
                 switch (place.Kind)
                 {
                     case PlaceKind.Village:
-                        dc.DrawEllipse(villageBrush, null, p, 1.3 * ui, 1.3 * ui);
-                        break;
+                        break; // too many small dots: villages are left out
                     case PlaceKind.Town:
                         {
                             dc.DrawEllipse(townBrush, null, p, 1.9 * ui, 1.9 * ui);
-                            var t = Text(place.Name, LabelFace, 11.5 * ui, Color.FromRgb(0x62, 0x67, 0x70));
+                            var t = Text(place.Name, LabelFace, 11.5 * ui, Color.FromRgb(0x42, 0x46, 0x4D));
                             dc.DrawText(t, p + new Vector(5 * ui, -t.Height / 2));
                             break;
                         }
                     case PlaceKind.City:
                         {
-                            var t = Text(place.Name, CityFace, 15 * ui, Color.FromRgb(0x84, 0x8A, 0x94));
+                            var t = Text(place.Name, CityFace, 15 * ui, Color.FromRgb(0x5A, 0x5F, 0x68));
                             dc.DrawText(t, p - new Vector(t.Width / 2, t.Height / 2));
                             break;
                         }
@@ -461,9 +467,11 @@ namespace OLED_Sleeper.Features.Flights
                 dc.DrawGeometry(fill, PlaneOutline, Shapes[plane.Kind]);
                 if (plane.Kind == AircraftKind.Helicopter && !plane.OnGround)
                 {
-                    // The rotor turns (about 1 turn per second, a calm speed for the eye).
-                    dc.PushTransform(new RotateTransform((now - DateTime.UnixEpoch).TotalSeconds % 1 * 360, 0, -0.35));
-                    dc.DrawGeometry(null, RotorPen, RotorShape);
+                    // The rotor turns around its hub, calmly (a quarter turn per second looks like slow spinning
+                    // because the four blade ends look alike).
+                    double turn = (now - DateTime.UnixEpoch).TotalSeconds % 4 / 4 * 360;
+                    dc.PushTransform(new RotateTransform(turn, RotorHub.X, RotorHub.Y));
+                    dc.DrawGeometry(RotorFill, null, RotorShape);
                     dc.Pop();
                 }
                 dc.Pop();
@@ -474,7 +482,7 @@ namespace OLED_Sleeper.Features.Flights
                         ? (Math.Round(ft * 0.3048 / 100) * 100).ToString("#,0", CultureInfo.GetCultureInfo("nl-NL")) + " m"
                         : "";
                     string label = string.Join(" · ", new[] { plane.Callsign, plane.TypeCode, altitude }.Where(x => x.Length > 0));
-                    var t = Text(label, LabelFace, 10.5 * ui, Color.FromRgb(0x6E, 0x7C, 0x92));
+                    var t = Text(label, LabelFace, 10.5 * ui, Color.FromRgb(0x56, 0x61, 0x72));
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }

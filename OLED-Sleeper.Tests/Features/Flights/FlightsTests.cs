@@ -195,7 +195,7 @@ namespace OLED_Sleeper.Tests.Features.Flights
             MapBuilder.AddTile(content, features.Where(f => f.Layer == "place"), 10, 526, 337, p);
 
             Assert.Single(content.Shapes[MapKind.Motorway]);
-            Assert.Single(content.Shapes[MapKind.River]);
+            Assert.False(content.Shapes.ContainsKey(MapKind.River)); // rivers stay black
             Assert.False(content.Shapes.ContainsKey(MapKind.Minor));
             var place = Assert.Single(content.Places);
             Assert.Equal("Utrecht", place.Name);
@@ -460,6 +460,26 @@ namespace OLED_Sleeper.Tests.Features.Flights
                 """{"ac":[{"hex":"1","flight":"KLM1","lat":52,"lon":5,"t":"B77W","category":"A5"}]}""", DateTime.UtcNow);
             Assert.Equal("B77W", list[0].TypeCode);
             Assert.Equal(OLED_Sleeper.Features.Flights.AircraftKind.Widebody, list[0].Kind);
+        }
+    }
+}
+
+namespace OLED_Sleeper.Tests.Features.Flights
+{
+    public class HeadingTests
+    {
+        [Fact]
+        public void Tracker_KeepsHeadingWhenAlmostStandingStill()
+        {
+            var tracker = new OLED_Sleeper.Features.Flights.AircraftTracker(new OLED_Sleeper.Features.Flights.LocalProjection(52, 5));
+            var t0 = new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc);
+            tracker.Update(new[] { new OLED_Sleeper.Features.Flights.AircraftReport("h", "LIFE1", 52, 5, 90, 80, 1500, false, t0, "EC35") }, t0);
+            // Hovering: the reported track jumps around, the symbol should not.
+            tracker.Update(new[] { new OLED_Sleeper.Features.Flights.AircraftReport("h", "LIFE1", 52, 5, 270, 3, 1500, false, t0.AddSeconds(5), "EC35") }, t0.AddSeconds(5));
+            Assert.Equal(90, tracker.Snapshot(t0.AddSeconds(5)).Single().HeadingDeg);
+            // Flying off again: follows the track.
+            tracker.Update(new[] { new OLED_Sleeper.Features.Flights.AircraftReport("h", "LIFE1", 52, 5, 180, 90, 1500, false, t0.AddSeconds(10), "EC35") }, t0.AddSeconds(10));
+            Assert.Equal(180, tracker.Snapshot(t0.AddSeconds(10)).Single().HeadingDeg);
         }
     }
 }

@@ -126,9 +126,14 @@ namespace OLED_Sleeper.Features.Flights
                                    double? AltitudeFeet, bool OnGround, IReadOnlyList<(double X, double Y, double AgeSeconds)> Trail,
                                    AircraftKind Kind = AircraftKind.Narrowbody, string TypeCode = "");
 
+        /// <summary>Below this speed the reported track is unreliable (hovering helicopter, taxiing plane):
+        /// the symbol then keeps pointing where it last pointed instead of spinning around.</summary>
+        private const double ReliableTrackKnots = 30;
+
         private sealed class Track
         {
             public required AircraftReport Report;
+            public double Heading;
             public double X0, Y0, Vx, Vy;          // position at the report time + velocity, km and km/s
             public double CorrX, CorrY;            // offset still to blend away
             public DateTime CorrectionStart;
@@ -163,6 +168,7 @@ namespace OLED_Sleeper.Features.Flights
                 {
                     var (oldX, oldY) = Position(t, nowUtc);
                     t.Report = r;
+                    if (r.GroundSpeedKnots >= ReliableTrackKnots) t.Heading = r.TrackDeg;
                     t.X0 = x; t.Y0 = y; t.Vx = vx; t.Vy = vy;
                     var (newX, newY) = Raw(t, nowUtc);
                     t.CorrX = oldX - newX;
@@ -174,7 +180,7 @@ namespace OLED_Sleeper.Features.Flights
                 }
                 else
                 {
-                    _tracks[r.Hex] = new Track { Report = r, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
+                    _tracks[r.Hex] = new Track { Report = r, Heading = r.TrackDeg, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
                 }
             }
 
@@ -194,7 +200,7 @@ namespace OLED_Sleeper.Features.Flights
 
                 var trail = t.Trail.Select(p => (p.X, p.Y, (nowUtc - p.T).TotalSeconds)).ToList();
                 trail.Add((x, y, 0));
-                list.Add(new Plane(t.Report.Hex, t.Report.Callsign, x, y, t.Report.TrackDeg, t.Report.AltitudeFeet, t.Report.OnGround, trail,
+                list.Add(new Plane(t.Report.Hex, t.Report.Callsign, x, y, t.Heading, t.Report.AltitudeFeet, t.Report.OnGround, trail,
                                    t.Report.Kind, t.Report.TypeCode));
             }
             return list;
