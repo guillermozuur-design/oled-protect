@@ -88,35 +88,28 @@ namespace OLED_Sleeper
 
         private void RefreshHeader()
         {
-            int hour = DateTime.Now.Hour;
-            GreetingText.Text = hour switch
-            {
-                < 6 => "Goedenacht",
-                < 12 => "Goedemorgen",
-                < 18 => "Goedemiddag",
-                _ => "Goedenavond"
-            };
-
             var settings = _settingsFile.LoadSettings();
             int managed = settings.Count(s => s.IsManaged);
 
             if (_workMode.IsEnabled)
             {
                 var until = _workMode.EnabledUntil;
+                GreetingText.Text = "Werkmodus";
                 StatusText.Text = until != null
-                    ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm} — alle schermen blijven aan"
-                    : "Werkmodus — alle schermen blijven aan";
+                    ? $"Alle schermen blijven aan tot {until.Value.ToLocalTime():HH:mm}"
+                    : "Alle schermen blijven aan";
                 StatusDot.Fill = (Brush)FindResource("StarGoldBrush");
                 WorkModeLabel.Text = "Bescherming aan";
                 WorkModeIcon.Text = "";
             }
             else
             {
+                GreetingText.Text = managed == 0 ? "Nog niets ingesteld" : "Bescherming actief";
                 StatusText.Text = managed switch
                 {
-                    0 => "Nog geen scherm bewaakt — kies hieronder een scherm",
-                    1 => "Bescherming actief · 1 scherm bewaakt",
-                    _ => $"Bescherming actief · {managed} schermen bewaakt"
+                    0 => "Kies hieronder een scherm om te bewaken",
+                    1 => "1 scherm bewaakt",
+                    _ => $"{managed} schermen bewaakt"
                 };
                 StatusDot.Fill = (Brush)FindResource("AccentColorBrush");
                 WorkModeLabel.Text = "Werkmodus aan";

@@ -120,7 +120,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="GreetingText" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource PrimaryForegroundColor}" Text="Goedenavond" />
+                        <TextBlock x:Name="GreetingText" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource PrimaryForegroundColor}" Text="Bescherming actief" />
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource AccentColorBrush}" VerticalAlignment="Center" />
                             <TextBlock x:Name="StatusText" FontSize="13.5" Margin="8,0,0,0" Foreground="{StaticResource SecondaryForegroundColor}" />
