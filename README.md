@@ -41,7 +41,10 @@ Download de nieuwste versie bij [Releases](../../releases):
 | Bestand | Wat |
 |---|---|
 | `OLED-Space-Sleeper-…-Setup.exe` | Installatieprogramma (klein; haalt zo nodig de .NET 8 Desktop Runtime op) |
-| `OLED-Space-Sleeper-…-Portable-x64.zip` | Uitpakken en starten, niets installeren; instellingen staan in `Data\` naast de exe |
+| `OLED-Space-Sleeper-…-Portable.exe` | Eén bestand: dubbelklikken en klaar, niets installeren; instellingen in `Data\` naast de exe |
+| `OLED-Space-Sleeper-…-Portable-x64.zip` | Hetzelfde als map: uitpakken en starten |
+
+De bestanden zijn niet digitaal ondertekend. Waarschuwt Windows SmartScreen, kies dan **Meer info → Toch uitvoeren**.
 
 Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI ondersteunen (de meeste moderne schermen).
 
