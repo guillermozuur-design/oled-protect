@@ -34,6 +34,7 @@ namespace OLED_Sleeper.UI.Services
             var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y))) ?? monitors.FirstOrDefault();
             if (monitor == null) return;
 
+            Serilog.Log.Debug("Screensaver preview on {Bounds}", monitor.Bounds);
             _overlay = new OverlayWindow(screensaver: true, _panorama);
             _overlay.Show(monitor.Bounds);
 

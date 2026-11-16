@@ -29,7 +29,7 @@ namespace OLED_Sleeper.Features.Sky
         private const double PanDegreesPerSecond = 0.015;
         private const double BaseAltitude = 42;        // kijkhoogte: onderrand ligt dan ~12-24 graden boven de horizon
         private const double AltitudeSwing = 6;        // langzaam op en neer
-        private const double FrameIntervalMs = 33;
+        private const double MaxFramesPerSecond = 120; // in step with the display, but no more than this
 
         // Shooting stars: one chance per second-slot, the same on every screen.
         // Real shooting stars are rare, quick and thin: a streak of half a second to a second that is brightest
@@ -70,7 +70,6 @@ namespace OLED_Sleeper.Features.Sky
 
         private readonly SkyCatalog _catalog = SkyCatalog.Default;
         private readonly Random _random = new();
-        private readonly DispatcherTimer _timer;
         private readonly (double Ra, double Dec)[][] _lines;
         private readonly SkyCatalog.Label[] _labels;
 
@@ -112,13 +111,31 @@ namespace OLED_Sleeper.Features.Sky
             _lines = _catalog.Lines.Where(l => FamousConstellations.Contains(l.Abbreviation)).Select(l => l.Points).ToArray();
             _labels = _catalog.Labels.Where(l => FamousConstellations.Contains(l.Abbreviation)).ToArray();
 
-            _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(FrameIntervalMs) };
-            _timer.Tick += (_, _) => Tick();
             Loaded += (_, _) => Start();
-            Unloaded += (_, _) => _timer.Stop();
+            Unloaded += (_, _) => Stop();
         }
 
-        public void Stop() => _timer.Stop();
+        /// <summary>Stops the animation (the screensaver closes).</summary>
+        public void Stop()
+        {
+            if (!_running) return;
+            _running = false;
+            CompositionTarget.Rendering -= OnRendering;
+        }
+
+        private bool _running;
+        private readonly System.Diagnostics.Stopwatch _frameClock = new();
+
+        /// <summary>
+        /// Called once per display refresh (so a 240 Hz screen gets smooth motion); frames are capped at
+        /// <see cref="MaxFramesPerSecond"/> to keep the processor load low.
+        /// </summary>
+        private void OnRendering(object? sender, EventArgs e)
+        {
+            if (_frameClock.IsRunning && _frameClock.Elapsed.TotalMilliseconds < 1000.0 / MaxFramesPerSecond - 0.5) return;
+            _frameClock.Restart();
+            Tick();
+        }
 
         /// <summary>
         /// Prepares a single still frame without starting the animation, at a moment with shooting stars in
@@ -153,7 +170,9 @@ namespace OLED_Sleeper.Features.Sky
             _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
             BuildBrushes();
             BuildStars();
-            _timer.Start();
+            if (_running) return;
+            _running = true;
+            CompositionTarget.Rendering += OnRendering;
         }
 
         private static readonly Color[] StarColors =
