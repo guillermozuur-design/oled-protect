@@ -34,15 +34,23 @@ namespace OLED_Sleeper.UI.Services
             var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y))) ?? monitors.FirstOrDefault();
             if (monitor == null) return;
 
-            Serilog.Log.Debug("Screensaver preview on {Bounds}", monitor.Bounds);
             _overlay = new OverlayWindow(screensaver: true, _panorama);
             _overlay.Show(monitor.Bounds);
 
             var startedAt = DateTime.UtcNow;
+            bool keyPressed = false;
             var poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+
+            // Any key ends the preview too, like a normal screensaver. A low-level keyboard hook sees every key,
+            // whichever window has focus; it only exists while the preview is open.
+            _keyHook = new LowLevelKeyboardHook(() =>
+            {
+                if ((DateTime.UtcNow - startedAt).TotalSeconds >= 1) keyPressed = true;
+            });
+
             poll.Tick += (_, _) =>
             {
-                // Ignore the first second: the click that opened it still moves the mouse a bit.
+                // Ignore the first second: the click or keys that opened it are still settling.
                 if ((DateTime.UtcNow - startedAt).TotalSeconds < 1)
                 {
                     NativeMethods.GetCursorPos(out start);
@@ -50,13 +58,62 @@ namespace OLED_Sleeper.UI.Services
                 }
 
                 NativeMethods.GetCursorPos(out var now);
-                if (Math.Abs(now.X - start.X) + Math.Abs(now.Y - start.Y) < 25) return;
+                bool mouseMoved = Math.Abs(now.X - start.X) + Math.Abs(now.Y - start.Y) >= 25;
+                if (!mouseMoved && !keyPressed) return;
 
                 poll.Stop();
+                _keyHook?.Dispose();
+                _keyHook = null;
                 _overlay?.Close();
                 _overlay = null;
             };
             poll.Start();
+        }
+
+        private LowLevelKeyboardHook? _keyHook;
+
+        /// <summary>Calls back on every key press anywhere, until disposed.</summary>
+        private sealed class LowLevelKeyboardHook : IDisposable
+        {
+            private const int WH_KEYBOARD_LL = 13;
+            private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
+            private readonly HookProc _proc; // keep the delegate alive while hooked
+            private readonly Action _onKey;
+            private nint _hook;
+
+            public LowLevelKeyboardHook(Action onKey)
+            {
+                _onKey = onKey;
+                _proc = Callback;
+                _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
+            }
+
+            private nint Callback(int code, nint wParam, nint lParam)
+            {
+                if (code >= 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) _onKey();
+                return CallNextHookEx(_hook, code, wParam, lParam);
+            }
+
+            public void Dispose()
+            {
+                if (_hook == nint.Zero) return;
+                UnhookWindowsHookEx(_hook);
+                _hook = nint.Zero;
+            }
+
+            private delegate nint HookProc(int code, nint wParam, nint lParam);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern nint SetWindowsHookEx(int id, HookProc proc, nint module, uint threadId);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern bool UnhookWindowsHookEx(nint hook);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern nint CallNextHookEx(nint hook, int code, nint wParam, nint lParam);
+
+            [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+            private static extern nint GetModuleHandle(string? name);
         }
     }
 }

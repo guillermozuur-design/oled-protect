@@ -82,7 +82,7 @@ namespace OLED_Sleeper.UI.Views
                 new("", "Werkmodus", "Alle schermen blijven aan", on && until == null, () => _workMode.SetEnabled(true)),
                 new("", until != null ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm}" : "Werkmodus 1 uur",
                     "Daarna gaat de bescherming vanzelf weer aan", on && until != null, () => _workMode.EnableFor(TimedWorkMode)),
-                new("", "Sterren bekijken", "Op dit scherm, muis bewegen = stoppen", false, _previewScreensaver),
+                new("", "Sterren bekijken", "Op dit scherm; muis bewegen of een toets = stoppen", false, _previewScreensaver),
                 new("", "App openen", "Instellingen per scherm", false, _openApp),
             };
 

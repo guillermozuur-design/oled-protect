@@ -187,7 +187,7 @@
                                         <StackPanel>
                                             <TextBlock Text="Sterrenhemel als screensaver" Style="{StaticResource CardTitle}" />
                                             <TextBlock Style="{StaticResource CardText}"
-                                                       Text="Kies bij een scherm 'Sterren' als gedrag. Echte sterren, sterrenbeelden, planeten en de maan van vandaag; alles beweegt langzaam, dus er kan niets inbranden. Muis bewegen stopt het voorbeeld." />
+                                                       Text="Kies bij een scherm 'Sterren' als gedrag. Echte sterren, sterrenbeelden, planeten en de maan van vandaag; alles beweegt langzaam, dus er kan niets inbranden. Muis bewegen of een toets indrukken stopt het voorbeeld." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
