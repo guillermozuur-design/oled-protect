@@ -18,7 +18,7 @@ namespace OLED_Sleeper.UI.Services
 
         /// <inheritdoc />
         public bool ConfirmExit() =>
-            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat OLED Sleeper stopt?");
+            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat OLED Space Sleeper stopt?");
 
         /// <summary>
         /// Prompts only when there is something to lose. Yes answers with whether the save succeeded;

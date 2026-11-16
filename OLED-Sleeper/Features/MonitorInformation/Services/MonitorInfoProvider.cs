@@ -118,7 +118,7 @@ namespace OLED_Sleeper.Features.MonitorInformation.Services
             return false;
         }
 
-                private static uint CountPhysicalMonitors(nint hMonitor)
+        private static uint CountPhysicalMonitors(nint hMonitor)
         {
             if (!NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint count) || count == 0)
             {

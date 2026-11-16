@@ -1,6 +1,6 @@
-﻿<#
+<#
 .SYNOPSIS
-    Builds the OLED Sleeper release artifacts: the dual-architecture installer and the portable x64 zip.
+    Builds the OLED Space Sleeper release artifacts: the dual-architecture installer and the portable x64 zip.
 
 .DESCRIPTION
     Publishes the two framework-dependent payloads the installer packs, publishes the self-contained
@@ -164,23 +164,23 @@ Write-Step 'Compiling the installer'
 & $iscc "/DAppVersion=$version" $scriptPath
 if ($LASTEXITCODE -ne 0) { throw 'The Inno Setup compile failed.' }
 
-$setupPath = Join-Path $OutputDirectory "OLED-Sleeper-$version-Setup.exe"
+$setupPath = Join-Path $OutputDirectory "OLED-Space-Sleeper-$version-Setup.exe"
 if (-not (Test-Path -LiteralPath $setupPath)) { throw "The installer was not produced at $setupPath." }
 
 if (-not $SkipPortable) {
     Write-Step 'Publishing the portable build'
-    $portableX64 = Join-Path $stagingDirectory 'portable\OLED-Sleeper'
+    $portableX64 = Join-Path $stagingDirectory 'portable\OLED-Space-Sleeper'
     Publish-Payload -Runtime 'win-x64' -Destination $portableX64 -Portable
 
     Write-Step 'Zipping the portable build'
-    $zipPath = Join-Path $OutputDirectory "OLED-Sleeper-$version-Portable-x64.zip"
+    $zipPath = Join-Path $OutputDirectory "OLED-Space-Sleeper-$version-Portable-x64.zip"
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     # The zip carries its own OLED-Sleeper folder, so extracting it never scatters files loose.
     Compress-Archive -Path $portableX64 -DestinationPath $zipPath
 }
 
 Write-Step 'Writing checksums'
-$checksumPath = Join-Path $OutputDirectory "OLED-Sleeper-$version-SHA256SUMS.txt"
+$checksumPath = Join-Path $OutputDirectory "OLED-Space-Sleeper-$version-SHA256SUMS.txt"
 if (Test-Path -LiteralPath $checksumPath) { Remove-Item -LiteralPath $checksumPath -Force }
 $lines = Get-ChildItem -LiteralPath $OutputDirectory -File |
     Where-Object { $_.Extension -in '.exe', '.zip' } |

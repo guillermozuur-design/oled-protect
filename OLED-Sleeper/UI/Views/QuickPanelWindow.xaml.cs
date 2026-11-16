@@ -99,7 +99,10 @@ namespace OLED_Sleeper.UI.Views
 
                 var icon = new TextBlock
                 {
-                    Text = option.Icon, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 18, Width = 30,
+                    Text = option.Icon,
+                    FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                    FontSize = 18,
+                    Width = 30,
                     VerticalAlignment = VerticalAlignment.Center,
                     Foreground = option.IsActive ? (Brush)FindResource("AccentColorBrush") : (Brush)FindResource("PrimaryForegroundColor")
                 };

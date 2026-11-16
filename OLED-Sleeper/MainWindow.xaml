@@ -8,7 +8,7 @@
         xmlns:views="clr-namespace:OLED_Sleeper.UI.Views"
         xmlns:sky="clr-namespace:OLED_Sleeper.Features.Sky"
         mc:Ignorable="d"
-        Title="OLED Sleeper"
+        Title="OLED Space Sleeper"
         d:DataContext="{d:DesignInstance viewModels1:MainViewModel}"
         Height="900" Width="860" MinHeight="700" MinWidth="760"
         FontFamily="Bahnschrift"
@@ -104,7 +104,7 @@
                 <Grid Grid.Row="0" Background="Transparent" MouseDown="TitleBar_MouseDown">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0">
                         <Image Source="/Assets/icon.ico" Width="16" Height="16" />
-                        <TextBlock Text="OLED Sleeper" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12.5" Margin="9,0,0,0" VerticalAlignment="Center" />
+                        <TextBlock Text="OLED Space Sleeper" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12.5" Margin="9,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Style="{StaticResource WindowButtonStyle}" Content="&#xE921;" Click="MinimizeButton_Click" ToolTip="Minimaliseren" />
@@ -266,7 +266,7 @@
                                     <StackPanel>
                                         <TextBlock Text="Tip" Style="{StaticResource CardTitle}" />
                                         <TextBlock Style="{StaticResource CardText}"
-                                                   Text="Zet in Windows (Instellingen → Systeem → Energie) 'Scherm uitschakelen' op Nooit of veel langer; OLED Sleeper regelt het dan per scherm." />
+                                                   Text="Zet in Windows (Instellingen → Systeem → Energie) 'Scherm uitschakelen' op Nooit of veel langer; OLED Space Sleeper regelt het dan per scherm." />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

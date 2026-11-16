@@ -613,15 +613,15 @@ namespace OLED_Sleeper.Features.Sky
             SolidColorBrush? ringBrush = null;
             if (saturn)
             {
-            var ringTilt = new RotateTransform(-18, p.X, p.Y);
-            var ringOuter = new EllipseGeometry(p, r * 2.3, r * 0.85) { Transform = ringTilt };
-            var ringInner = new EllipseGeometry(p, r * 1.45, r * 0.52) { Transform = ringTilt };
-            ring = new CombinedGeometry(GeometryCombineMode.Exclude, ringOuter, ringInner);
-            ringBrush = new SolidColorBrush(Color.FromArgb(A(170), 215, 195, 150));
-            ringBrush.Freeze();
-            backHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y - r * 3, r * 6, r * 3)) { Transform = ringTilt };
-            frontHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y, r * 6, r * 3)) { Transform = ringTilt };
-            ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, backHalf));
+                var ringTilt = new RotateTransform(-18, p.X, p.Y);
+                var ringOuter = new EllipseGeometry(p, r * 2.3, r * 0.85) { Transform = ringTilt };
+                var ringInner = new EllipseGeometry(p, r * 1.45, r * 0.52) { Transform = ringTilt };
+                ring = new CombinedGeometry(GeometryCombineMode.Exclude, ringOuter, ringInner);
+                ringBrush = new SolidColorBrush(Color.FromArgb(A(170), 215, 195, 150));
+                ringBrush.Freeze();
+                backHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y - r * 3, r * 6, r * 3)) { Transform = ringTilt };
+                frontHalf = new RectangleGeometry(new Rect(p.X - r * 3, p.Y, r * 6, r * 3)) { Transform = ringTilt };
+                ctx.DrawGeometry(ringBrush, null, new CombinedGeometry(GeometryCombineMode.Intersect, ring, backHalf));
             }
 
             // The globe, lit from the upper left.

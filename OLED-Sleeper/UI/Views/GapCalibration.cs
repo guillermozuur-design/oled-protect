@@ -59,8 +59,11 @@ namespace OLED_Sleeper.UI.Views
             info.Children.Add(new TextBlock
             {
                 Text = "Schuif tot de lijnen recht doorlopen over de rand tussen de schermen\n← / → of muiswiel = 0,1 cm   ·   Shift = 0,5 cm   ·   Enter = opslaan   ·   Esc = annuleren",
-                FontSize = 15, Foreground = new SolidColorBrush(Color.FromRgb(150, 150, 155)), TextAlignment = TextAlignment.Center,
-                Margin = new Thickness(0, 10, 0, 16), FontFamily = new FontFamily("Bahnschrift")
+                FontSize = 15,
+                Foreground = new SolidColorBrush(Color.FromRgb(150, 150, 155)),
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 10, 0, 16),
+                FontFamily = new FontFamily("Bahnschrift")
             });
 
             if (showControls)

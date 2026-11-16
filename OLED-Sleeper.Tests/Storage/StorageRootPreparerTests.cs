@@ -6,7 +6,7 @@ namespace OLED_Sleeper.Tests.Storage
 {
     public class StorageRootPreparerTests
     {
-        private const string StoreDirectory = @"C:\FakeAppData\OLED-Sleeper";
+        private const string StoreDirectory = @"C:\FakeAppData\OLED-Space-Sleeper";
 
         private readonly FakeFileSystem _fileSystem;
         private readonly StorageRootPreparer _preparer;

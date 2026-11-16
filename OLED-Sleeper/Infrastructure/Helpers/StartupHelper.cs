@@ -1,4 +1,4 @@
-﻿using Microsoft.Win32;
+using Microsoft.Win32;
 
 namespace OLED_Sleeper.Infrastructure.Helpers
 {
@@ -7,7 +7,7 @@ namespace OLED_Sleeper.Infrastructure.Helpers
     /// </summary>
     public static class StartupHelper
     {
-        private const string AppName = "OLED Sleeper";
+        private const string AppName = "OLED Space Sleeper";
         private const string RunKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
         /// <summary>

@@ -49,7 +49,7 @@ namespace OLED_Sleeper
             GlobalIdleCheck.IsChecked = _globalIdle.Enabled;
             GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
             StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
-            VersionText.Text = "eigen versie · gebaseerd op OLED Sleeper 2.2.0";
+            VersionText.Text = "versie " + AppVersion() + " · gebaseerd op OLED Sleeper van Quorthon13";
 
             _panorama.Changed += () => Dispatcher.BeginInvoke(() => GapBox.Text = FormatCm(_panorama.GapCm));
             _hotkeyService.Changed += () => Dispatcher.BeginInvoke(() => { ShowHotkey(); RefreshHeader(); });
@@ -70,6 +70,13 @@ namespace OLED_Sleeper
                 else { _headerTimer.Stop(); _autoSaveTimer.Stop(); AutoSave(); }
             };
         }
+
+        /// <summary>The version from the git tag (MinVer), e.g. "3.0.0"; build details after '+' are left out.</summary>
+        private static string AppVersion() =>
+            System.Reflection.Assembly.GetExecutingAssembly()
+                .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+                .FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "?";
 
         private static string FormatCm(double cm) => cm.ToString("0.0", CultureInfo.CurrentCulture);
 

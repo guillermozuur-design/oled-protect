@@ -1,11 +1,11 @@
 using OLED_Sleeper.Features.BrightnessSchedule.Services;
 using OLED_Sleeper.Features.MonitorDimming.Commands;
-using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorState.Services.Interfaces;
 using OLED_Sleeper.Features.UserSettings.Commands;
 using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
+using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Infrastructure.Hosting.Interfaces;
 using OLED_Sleeper.Messaging.Interfaces;
 using Serilog;

@@ -138,7 +138,7 @@ namespace OLED_Sleeper.Tests.UI.Services
 
             // Assert
             _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("voordat het venster sluit")), "Niet opgeslagen wijzigingen"), Times.Once);
-            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("voordat OLED Sleeper stopt")), "Niet opgeslagen wijzigingen"), Times.Once);
+            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("voordat OLED Space Sleeper stopt")), "Niet opgeslagen wijzigingen"), Times.Once);
         }
 
         /// <summary>

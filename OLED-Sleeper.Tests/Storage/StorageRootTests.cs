@@ -14,7 +14,7 @@ namespace OLED_Sleeper.Tests.Storage
             var root = new StorageRoot(_fileSystem, isPortable: false);
 
             // Assert
-            Assert.Equal(@"C:\FakeAppData\OLED-Sleeper", root.DirectoryPath);
+            Assert.Equal(@"C:\FakeAppData\OLED-Space-Sleeper", root.DirectoryPath);
         }
 
         [Fact]

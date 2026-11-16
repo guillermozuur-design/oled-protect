@@ -2,13 +2,13 @@ using Hardcodet.Wpf.TaskbarNotification;
 using OLED_Sleeper.Features.MonitorBlackout.Services;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.WorkMode.Services;
-using OLED_Sleeper.Native;
-using System.Windows.Threading;
 using OLED_Sleeper.Infrastructure.Helpers;
+using OLED_Sleeper.Native;
 using OLED_Sleeper.UI.Services.Interfaces;
 using Serilog;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 
 namespace OLED_Sleeper.UI.Services
 {
@@ -53,7 +53,7 @@ namespace OLED_Sleeper.UI.Services
             _showMainWindowAction = showMainWindowAction ?? throw new ArgumentNullException(nameof(showMainWindowAction));
             _exitApplicationAction = exitApplicationAction ?? throw new ArgumentNullException(nameof(exitApplicationAction));
 
-            _notifyIcon = new TaskbarIcon { ToolTipText = "OLED Sleeper" };
+            _notifyIcon = new TaskbarIcon { ToolTipText = "OLED Space Sleeper" };
 
             WireTrayIconEvents();
             SetupContextMenu();
@@ -119,8 +119,8 @@ namespace OLED_Sleeper.UI.Services
             var untilText = until != null ? $" tot {until.Value.ToLocalTime():HH:mm}" : "";
 
             _notifyIcon.ToolTipText = enabled
-                ? $"OLED Sleeper – WERKMODUS{untilText}: alles blijft aan ({hotkeyHint} = snelmenu)"
-                : $"OLED Sleeper – bescherming actief ({hotkeyHint} = snelmenu)";
+                ? $"OLED Space Sleeper – WERKMODUS{untilText}: alles blijft aan ({hotkeyHint} = snelmenu)"
+                : $"OLED Space Sleeper – bescherming actief ({hotkeyHint} = snelmenu)";
 
             var icon = enabled ? _pausedIcon : _normalIcon;
             if (icon != null) _notifyIcon.Icon = icon;

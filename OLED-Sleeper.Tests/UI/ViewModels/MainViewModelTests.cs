@@ -172,7 +172,7 @@ namespace OLED_Sleeper.Tests.UI.ViewModels
 
             // Assert
             Assert.True(_viewModel.IsDirty);
-            Assert.Equal("OLED Sleeper*", _viewModel.WindowTitle);
+            Assert.Equal("OLED Space Sleeper*", _viewModel.WindowTitle);
         }
 
         [Fact]

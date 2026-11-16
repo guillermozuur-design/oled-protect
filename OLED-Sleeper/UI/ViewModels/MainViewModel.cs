@@ -55,7 +55,7 @@ namespace OLED_Sleeper.UI.ViewModels
         /// <summary>
         /// The text displayed in the main window's title bar.
         /// </summary>
-        private string _windowTitle = "OLED Sleeper";
+        private string _windowTitle = "OLED Space Sleeper";
 
         /// <summary>
         /// The text displayed on the save button.
@@ -110,7 +110,7 @@ namespace OLED_Sleeper.UI.ViewModels
                 if (_isDirty == value) return;
                 _isDirty = value;
                 OnPropertyChanged();
-                WindowTitle = "OLED Sleeper" + (_isDirty ? "*" : "");
+                WindowTitle = "OLED Space Sleeper" + (_isDirty ? "*" : "");
             }
         }
 

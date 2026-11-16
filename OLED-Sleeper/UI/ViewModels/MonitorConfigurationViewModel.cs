@@ -1,10 +1,10 @@
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
 using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.UserSettings.Models;
+using OLED_Sleeper.UI.Commands;
 using OLED_Sleeper.UI.Helpers;
 using OLED_Sleeper.UI.Models;
-using OLED_Sleeper.Features.BrightnessSchedule.Services;
-using OLED_Sleeper.UI.Commands;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Input;

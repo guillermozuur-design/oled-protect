@@ -26,7 +26,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
         private const int RestoreOnShutdownTimeoutMs = 10000;
 
         /// <summary>The title of the dialog shown when the storage root cannot be written to.</summary>
-        private const string StorageErrorCaption = "OLED Sleeper";
+        private const string StorageErrorCaption = "OLED Space Sleeper";
 
         private readonly ApplicationOptions _applicationOptions = CommandLineHelper.ParseArguments(args);
 
@@ -95,8 +95,8 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             }
 
             var guidance = BuildMode.IsPortable
-                ? "Zet de map van OLED Sleeper op een plek waar je mag schrijven (bijvoorbeeld je Bureaublad) en start opnieuw."
-                : "Controleer of je gebruikersprofiel bereikbaar is en start OLED Sleeper opnieuw.";
+                ? "Zet de map van OLED Space Sleeper op een plek waar je mag schrijven (bijvoorbeeld je Bureaublad) en start opnieuw."
+                : "Controleer of je gebruikersprofiel bereikbaar is en start OLED Space Sleeper opnieuw.";
 
             new MessageBoxDialogService(new MainWindowAccessor()).ShowError($"{error}{Environment.NewLine}{Environment.NewLine}{guidance}", StorageErrorCaption);
             _applicationShutdown.Shutdown();

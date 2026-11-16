@@ -1,7 +1,7 @@
 <Window x:Class="OLED_Sleeper.UI.Views.QuickPanelWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="OLED Sleeper snelmenu" Width="370" SizeToContent="Height"
+        Title="OLED Space Sleeper snelmenu" Width="370" SizeToContent="Height"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" ShowActivated="False"
         WindowStartupLocation="Manual" FontFamily="Bahnschrift">
@@ -31,7 +31,7 @@
             <DropShadowEffect BlurRadius="26" ShadowDepth="0" Opacity="0.65" />
         </Border.Effect>
         <StackPanel>
-            <TextBlock Text="OLED Sleeper" Margin="8,2,0,8" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource SecondaryForegroundColor}" />
+            <TextBlock Text="OLED Space Sleeper" Margin="8,2,0,8" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource SecondaryForegroundColor}" />
             <StackPanel x:Name="Rows" />
             <TextBlock x:Name="HintText" Margin="8,6,8,2" FontSize="10.5" TextWrapping="Wrap" Foreground="#6E6E73" />
         </StackPanel>
