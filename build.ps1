@@ -108,7 +108,8 @@ function Publish-Payload {
     param(
         [string] $Runtime,
         [string] $Destination,
-        [switch] $Portable
+        [switch] $Portable,
+        [switch] $OneFile
     )
 
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
@@ -131,6 +132,10 @@ function Publish-Payload {
             '-p:EnableCompressionInSingleFile=true',
             '-p:DebugType=none'
         )
+        if ($OneFile) {
+            # Also pack the WPF native DLLs into the exe, so the whole app is one file you can just run.
+            $arguments += @('-p:IncludeNativeLibrariesForSelfExtract=true')
+        }
     }
     else {
         # The installer fetches the .NET 8 Desktop runtime itself, and an installed copy must never be
@@ -175,8 +180,14 @@ if (-not $SkipPortable) {
     Write-Step 'Zipping the portable build'
     $zipPath = Join-Path $OutputDirectory "OLED-Space-Sleeper-$version-Portable-x64.zip"
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-    # The zip carries its own OLED-Sleeper folder, so extracting it never scatters files loose.
+    # The zip carries its own OLED-Space-Sleeper folder, so extracting it never scatters files loose.
     Compress-Archive -Path $portableX64 -DestinationPath $zipPath
+
+    Write-Step 'Publishing the one-file portable exe'
+    $oneFile = Join-Path $stagingDirectory 'onefile'
+    Publish-Payload -Runtime 'win-x64' -Destination $oneFile -Portable -OneFile
+    Copy-Item -LiteralPath (Join-Path $oneFile 'OLED-Sleeper.exe') `
+              -Destination (Join-Path $OutputDirectory "OLED-Space-Sleeper-$version-Portable.exe") -Force
 }
 
 Write-Step 'Writing checksums'
