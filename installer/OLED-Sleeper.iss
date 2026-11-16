@@ -17,9 +17,9 @@ AppId={{644E3FA9-9DF7-4CB4-B061-821BA60FC20D}}
 AppName=OLED Space Sleeper
 UninstallDisplayName=OLED Space Sleeper
 AppVersion={#AppVersion}
-AppPublisher=__GITHUB_USER__
-AppPublisherURL=https://github.com/__GITHUB_USER__/oled-space-sleeper
-AppSupportURL=https://github.com/__GITHUB_USER__/oled-space-sleeper/issues
+AppPublisher=guillermozuur-design
+AppPublisherURL=https://github.com/guillermozuur-design/oled-space-sleeper
+AppSupportURL=https://github.com/guillermozuur-design/oled-space-sleeper/issues
 
 ; Installation runs without elevation.
 PrivilegesRequired=lowest
