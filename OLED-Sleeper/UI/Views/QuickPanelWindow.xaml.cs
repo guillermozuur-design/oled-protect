@@ -199,7 +199,7 @@ namespace OLED_Sleeper.UI.Views
             // Monitor bounds are physical pixels; window positions are DIPs.
             var dpi = VisualTreeHelper.GetDpi(this);
             Left = (_monitorBounds.Right) / dpi.DpiScaleX - ActualWidth - 8;
-            Top = (_monitorBounds.Bottom) / dpi.DpiScaleY - ActualHeight - 150; // boven taakbalk en Windows-watermerk
+            Top = (_monitorBounds.Bottom) / dpi.DpiScaleY - ActualHeight - 56; // rechtsonder boven de taakbalk, zoals Win+P
             BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
         }
 
