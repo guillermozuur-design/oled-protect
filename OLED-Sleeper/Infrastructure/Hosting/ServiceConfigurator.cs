@@ -79,6 +79,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton(BrightnessFadeOptions.Default);
             services.AddSingleton<IMonitorDimmingService, MonitorDimmingService>();
             services.AddSingleton<IWorkModeService, WorkModeService>();
+            services.AddSingleton<GlobalHotkeyService>();
             services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
             services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
             services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();

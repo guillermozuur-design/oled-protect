@@ -24,8 +24,8 @@ namespace OLED_Sleeper.Features.Sky
         private const double TimeLapse = 30;           // de hemel draait 30x sneller dan echt
         private const double FieldOfView = 100;        // horizontale beeldhoek per scherm, graden
         private const double PanDegreesPerSecond = 0.015;
-        private const double BaseAltitude = 30;        // kijkhoogte boven de horizon
-        private const double AltitudeSwing = 8;        // langzaam op en neer
+        private const double BaseAltitude = 46;        // kijkhoogte: onderrand ligt dan ~10-17 graden boven de horizon
+        private const double AltitudeSwing = 6;        // langzaam op en neer
         private const double FrameIntervalMs = 33;
 
         private static readonly (Astronomy.Body Body, string Name, Color Color, double Radius)[] Planets =
@@ -348,7 +348,7 @@ namespace OLED_Sleeper.Features.Sky
             }
 
             // Fade out towards the horizon (atmosphere), nothing below it.
-            static double HorizonFade(double u) => Math.Clamp((u - 0.01) / 0.16, 0, 1);
+            static double HorizonFade(double u) => Math.Clamp((u - 0.01) / 0.08, 0, 1);
 
             DrawConstellations(dc, cam, RaDecToEnu);
             DrawStars(dc, cam, ToEnu, seconds);

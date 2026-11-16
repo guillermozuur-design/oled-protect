@@ -29,5 +29,35 @@ namespace OLED_Sleeper.Tests.Features.WorkMode
 
             Assert.Equal(0, count);
         }
+
+        [Fact]
+        public async Task EnableFor_SwitchesOffByItselfAfterTheDuration()
+        {
+            var service = new WorkModeService();
+            var raised = new List<bool>();
+            service.Changed += raised.Add;
+
+            service.EnableFor(TimeSpan.FromMilliseconds(150));
+            Assert.True(service.IsEnabled);
+            Assert.NotNull(service.EnabledUntil);
+
+            for (int i = 0; i < 40 && service.IsEnabled; i++) await Task.Delay(50);
+
+            Assert.False(service.IsEnabled);
+            Assert.Null(service.EnabledUntil);
+            Assert.Equal(new[] { true, false }, raised);
+        }
+
+        [Fact]
+        public void SetEnabled_AfterEnableFor_CancelsTheTimer()
+        {
+            var service = new WorkModeService();
+            service.EnableFor(TimeSpan.FromHours(1));
+
+            service.SetEnabled(true);
+
+            Assert.True(service.IsEnabled);
+            Assert.Null(service.EnabledUntil);
+        }
     }
 }

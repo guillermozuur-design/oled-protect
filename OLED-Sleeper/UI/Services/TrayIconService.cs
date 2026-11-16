@@ -21,18 +21,20 @@ namespace OLED_Sleeper.UI.Services
         private Action? _showMainWindowAction;
         private Action? _exitApplicationAction;
         private readonly IWorkModeService _workModeService;
-        private GlobalHotkeyService? _hotkeyService;
+        private readonly GlobalHotkeyService _hotkeyService;
         private MenuItem? _workModeMenuItem;
         private System.Drawing.Icon? _normalIcon;
         private System.Drawing.Icon? _pausedIcon;
 
         private readonly IMonitorInfoManager _monitorInfoManager;
         private OverlayWindow? _previewOverlay;
+        private Views.QuickPanelWindow? _quickPanel;
 
-        public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager)
+        public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService)
         {
             _workModeService = workModeService;
             _monitorInfoManager = monitorInfoManager;
+            _hotkeyService = hotkeyService;
         }
 
         /// <summary>
@@ -52,10 +54,43 @@ namespace OLED_Sleeper.UI.Services
             SetupContextMenu();
             SetTrayIcon();
 
-            _hotkeyService = new GlobalHotkeyService(_workModeService);
+            _hotkeyService.Pressed += OnHotkeyPressed;
+            _hotkeyService.Changed += OnHotkeyChanged;
             _hotkeyService.Register();
             _workModeService.Changed += OnWorkModeChanged;
             UpdateWorkModeVisuals(_workModeService.IsEnabled, showBalloon: false);
+        }
+
+        private void OnHotkeyChanged() => UpdateWorkModeVisuals(_workModeService.IsEnabled, showBalloon: false);
+
+        /// <summary>
+        /// First press opens the quick panel on the monitor under the mouse; further presses while the
+        /// modifier is still held move the highlight, like Alt+Tab.
+        /// </summary>
+        private void OnHotkeyPressed()
+        {
+            if (_quickPanel != null)
+            {
+                _quickPanel.Next();
+                return;
+            }
+
+            NativeMethods.GetCursorPos(out var cursor);
+            var monitors = _monitorInfoManager.GetLatestMonitorsBasicInfo();
+            var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(cursor.X, cursor.Y))) ?? monitors.FirstOrDefault();
+            if (monitor == null) return;
+
+            var hotkey = _hotkeyService.HotkeyText;
+            var modifier = hotkey.Contains('+') ? hotkey[..hotkey.LastIndexOf('+')] : hotkey;
+            var key = hotkey[(hotkey.LastIndexOf('+') + 1)..];
+            _quickPanel = new Views.QuickPanelWindow(_workModeService,
+                () => _showMainWindowAction?.Invoke(),
+                ShowScreensaverPreview,
+                monitor.Bounds,
+                _hotkeyService.HoldKey,
+                $"Houd {modifier} vast \u00b7 tik {key} = volgende \u00b7 loslaten = kiezen \u00b7 Esc = annuleren");
+            _quickPanel.Closed += (_, _) => _quickPanel = null;
+            _quickPanel.Show();
         }
 
         private void OnWorkModeChanged(bool enabled)
@@ -71,13 +106,16 @@ namespace OLED_Sleeper.UI.Services
 
             if (_workModeMenuItem != null) _workModeMenuItem.IsChecked = enabled;
 
-            var hotkeyHint = _hotkeyService?.IsRegistered == true
-                ? GlobalHotkeyService.HotkeyText
+            var hotkeyHint = _hotkeyService.IsRegistered
+                ? _hotkeyService.HotkeyText
                 : "sneltoets niet beschikbaar";
 
+            var until = _workModeService.EnabledUntil;
+            var untilText = until != null ? $" tot {until.Value.ToLocalTime():HH:mm}" : "";
+
             _notifyIcon.ToolTipText = enabled
-                ? $"OLED Sleeper – WERKMODUS: alle schermen blijven aan ({hotkeyHint})"
-                : $"OLED Sleeper – bescherming actief ({hotkeyHint} = werkmodus)";
+                ? $"OLED Sleeper – WERKMODUS{untilText}: alles blijft aan ({hotkeyHint} = snelmenu)"
+                : $"OLED Sleeper – bescherming actief ({hotkeyHint} = snelmenu)";
 
             var icon = enabled ? _pausedIcon : _normalIcon;
             if (icon != null) _notifyIcon.Icon = icon;
@@ -85,7 +123,7 @@ namespace OLED_Sleeper.UI.Services
             if (showBalloon)
             {
                 _notifyIcon.ShowBalloonTip(
-                    enabled ? "Werkmodus aan" : "Werkmodus uit",
+                    enabled ? "Werkmodus aan" + untilText : "Werkmodus uit",
                     enabled ? "Alle schermen blijven aan." : "Inbrandbescherming is weer actief.",
                     BalloonIcon.Info);
             }
@@ -131,7 +169,6 @@ namespace OLED_Sleeper.UI.Services
             _workModeMenuItem = new MenuItem
             {
                 Header = "Werkmodus (alles aan)",
-                InputGestureText = GlobalHotkeyService.HotkeyText,
                 IsCheckable = true,
                 IsChecked = _workModeService.IsEnabled
             };
@@ -292,8 +329,9 @@ namespace OLED_Sleeper.UI.Services
         public void Dispose()
         {
             _workModeService.Changed -= OnWorkModeChanged;
-            _hotkeyService?.Dispose();
-            _hotkeyService = null;
+            _hotkeyService.Pressed -= OnHotkeyPressed;
+            _hotkeyService.Changed -= OnHotkeyChanged;
+            _hotkeyService.Dispose();
             _notifyIcon?.Dispose();
         }
     }
