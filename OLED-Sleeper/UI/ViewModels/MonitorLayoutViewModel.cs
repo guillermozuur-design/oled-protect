@@ -1,0 +1,123 @@
+﻿using OLED_Sleeper.Features.MonitorInformation.Models;
+using OLED_Sleeper.UI.Helpers;
+using System.Windows;
+using System.Windows.Media;
+
+namespace OLED_Sleeper.UI.ViewModels
+{
+    /// <summary>
+    /// ViewModel representing a monitor in the layout view.
+    /// Handles scaled layout, selection, and dirty state tracking for a single monitor.
+    /// </summary>
+    public class MonitorLayoutViewModel : ViewModelBase
+    {
+        #region Fields
+        /// <summary>
+        /// The underlying monitor information model.
+        /// </summary>
+        private readonly MonitorInfo _monitor;
+        #endregion
+
+        #region Properties
+        /// <summary>
+        /// The configuration ViewModel for this monitor.
+        /// </summary>
+        public MonitorConfigurationViewModel Configuration { get; }
+
+        private bool _isSelected;
+        /// <summary>
+        /// Gets or sets whether this monitor is currently selected in the UI.
+        /// </summary>
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { _isSelected = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Whether this monitor has unsaved changes in its configuration.
+        /// </summary>
+        public bool IsDirty => Configuration.IsDirty;
+
+        /// <summary>
+        /// The display title for the monitor, including primary indicator if applicable. A duplicated surface
+        /// is titled the way Windows titles it, such as <c>Monitor 1|2</c>.
+        /// </summary>
+        public string MonitorTitle => MonitorTitleFormatter.Format(_monitor);
+
+        /// <summary>
+        /// The display number for the monitor.
+        /// </summary>
+        public int DisplayNumber => _monitor.DisplayNumber;
+
+        /// <summary>
+        /// The hardware ID for the monitor.
+        /// </summary>
+        public string HardwareId => _monitor.HardwareId;
+
+        /// <summary>
+        /// The resolution of the monitor as a formatted string (e.g., 1920x1080).
+        /// </summary>
+        public string ResolutionText => $"{(int)_monitor.Bounds.Width}x{(int)_monitor.Bounds.Height}";
+
+        /// <summary>
+        /// The background color for the monitor representation in the layout.
+        /// </summary>
+        public SolidColorBrush BackgroundColor => new SolidColorBrush(Color.FromRgb(60, 60, 60));
+
+        /// <summary>
+        /// The scaled width of the monitor for layout display.
+        /// </summary>
+        public double ScaledWidth { get; }
+
+        /// <summary>
+        /// The scaled height of the monitor for layout display.
+        /// </summary>
+        public double ScaledHeight { get; }
+
+        /// <summary>
+        /// The scaled left position of the monitor for layout display.
+        /// </summary>
+        public double ScaledLeft { get; }
+
+        /// <summary>
+        /// The scaled top position of the monitor for layout display.
+        /// </summary>
+        public double ScaledTop { get; }
+        #endregion
+
+        #region Constructor
+        /// <param name="monitor">The monitor information model.</param>
+        /// <param name="scale">The scale factor for layout display.</param>
+        /// <param name="totalBounds">The total bounds of all monitors for layout calculations.</param>
+        /// <param name="offsetX">The X offset for layout positioning.</param>
+        /// <param name="offsetY">The Y offset for layout positioning.</param>
+        public MonitorLayoutViewModel(MonitorInfo monitor, double scale, Rect totalBounds, double offsetX, double offsetY)
+        {
+            _monitor = monitor;
+            Configuration = new MonitorConfigurationViewModel(monitor);
+            SubscribeToConfigurationDirtyState();
+            ScaledWidth = _monitor.Bounds.Width * scale;
+            ScaledHeight = _monitor.Bounds.Height * scale;
+            ScaledLeft = (_monitor.Bounds.Left - totalBounds.Left) * scale + offsetX;
+            ScaledTop = (_monitor.Bounds.Top - totalBounds.Top) * scale + offsetY;
+        }
+        #endregion
+
+        #region Private Methods
+        /// <summary>
+        /// Re-raises the configuration's dirty state changes as this ViewModel's own.
+        /// </summary>
+        private void SubscribeToConfigurationDirtyState()
+        {
+            Configuration.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MonitorConfigurationViewModel.IsDirty))
+                {
+                    OnPropertyChanged(nameof(IsDirty));
+                }
+            };
+        }
+        #endregion
+    }
+}

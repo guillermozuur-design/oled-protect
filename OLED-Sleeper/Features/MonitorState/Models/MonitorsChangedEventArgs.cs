@@ -1,0 +1,28 @@
+﻿using OLED_Sleeper.Features.MonitorInformation.Models;
+
+namespace OLED_Sleeper.Features.MonitorState.Models
+{
+    /// <summary>
+    /// Provides data for monitor set change events, containing both the previous and current monitor lists.
+    /// </summary>
+    public class MonitorsChangedEventArgs : EventArgs
+    {
+        /// <summary>
+        /// Gets the list of monitors before the change occurred.
+        /// </summary>
+        public IReadOnlyList<MonitorInfo> OldMonitors { get; }
+
+        /// <summary>
+        /// Gets the list of monitors after the change occurred.
+        /// </summary>
+        public IReadOnlyList<MonitorInfo> NewMonitors { get; }
+
+        /// <param name="oldMonitors">The list of monitors before the change.</param>
+        /// <param name="newMonitors">The list of monitors after the change.</param>
+        public MonitorsChangedEventArgs(IReadOnlyList<MonitorInfo> oldMonitors, IReadOnlyList<MonitorInfo> newMonitors)
+        {
+            OldMonitors = oldMonitors;
+            NewMonitors = newMonitors;
+        }
+    }
+}
