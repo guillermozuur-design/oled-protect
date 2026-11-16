@@ -57,7 +57,7 @@ namespace OLED_Sleeper.Tests.Features.Sky
         public void EmbeddedCatalog_ContainsTheBrightStarsAndAllConstellations()
         {
             var catalog = SkyCatalog.Default;
-            Assert.InRange(catalog.Stars.Count, 700, 1100);
+            Assert.InRange(catalog.Stars.Count, 350, 700);
             Assert.Contains(catalog.Stars, s => s.Magnitude < -1.4); // Sirius
             Assert.Equal(89, catalog.Labels.Count);
             Assert.Contains(catalog.Labels, l => l.Name == "Grote Beer");

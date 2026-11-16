@@ -17,12 +17,12 @@ namespace OLED_Sleeper.Features.Sky
 
         public IReadOnlyList<Star> Stars { get; }
 
-        /// <summary>Each line is a polyline of (ra, dec) points.</summary>
-        public IReadOnlyList<(double Ra, double Dec)[]> Lines { get; }
+        /// <summary>Constellation stick figures: each line is a polyline of (ra, dec) points.</summary>
+        public IReadOnlyList<(string Abbreviation, (double Ra, double Dec)[] Points)> Lines { get; }
 
         public IReadOnlyList<Label> Labels { get; }
 
-        private SkyCatalog(List<Star> stars, List<(double, double)[]> lines, List<Label> labels)
+        private SkyCatalog(List<Star> stars, List<(string, (double, double)[])> lines, List<Label> labels)
         {
             Stars = stars;
             Lines = lines;
@@ -35,16 +35,19 @@ namespace OLED_Sleeper.Features.Sky
             var name = assembly.GetManifestResourceNames().First(n => n.EndsWith("sky.txt", StringComparison.OrdinalIgnoreCase));
             using var stream = assembly.GetManifestResourceStream(name)!;
             using var reader = new StreamReader(stream);
-            return Parse(reader.ReadToEnd());
+            return Parse(reader.ReadToEnd(), DefaultMaxMagnitude);
         });
 
         /// <summary>The catalog built into the app. Loaded once, on first use.</summary>
         public static SkyCatalog Default => Embedded.Value;
 
-        public static SkyCatalog Parse(string text, double maxMagnitude = 4.5)
+        /// <summary>Stars fainter than this are left out: only the brighter ones, so the sky stays calm.</summary>
+        public const double DefaultMaxMagnitude = 4.0;
+
+        public static SkyCatalog Parse(string text, double maxMagnitude = DefaultMaxMagnitude)
         {
             var stars = new List<Star>();
-            var lines = new List<(double, double)[]>();
+            var lines = new List<(string, (double, double)[])>();
             var labels = new List<Label>();
             var ci = CultureInfo.InvariantCulture;
 
@@ -63,11 +66,11 @@ namespace OLED_Sleeper.Features.Sky
                         break;
 
                     case "L" when parts.Length >= 4:
-                        lines.Add(parts.Skip(2).Select(p =>
+                        lines.Add((parts[1], parts.Skip(2).Select(p =>
                         {
                             var xy = p.Split(',');
                             return (double.Parse(xy[0], ci), double.Parse(xy[1], ci));
-                        }).ToArray());
+                        }).ToArray()));
                         break;
 
                     case "N" when parts.Length >= 5:

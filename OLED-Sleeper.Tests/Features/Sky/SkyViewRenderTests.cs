@@ -21,19 +21,30 @@ namespace OLED_Sleeper.Tests.Features.Sky
             {
                 try
                 {
-                    const int w = 2560, h = 1440;
-                    var view = new SkyView();
-                    view.Measure(new Size(w, h));
-                    view.Arrange(new Rect(0, 0, w, h));
-                    view.PrepareStillFrame();
-                    view.InvalidateVisual();
-                    view.UpdateLayout();
+                    const int w = 2560, h = 1440, screens = 2;
+                    var visual = new DrawingVisual();
+                    using (var dcAll = visual.RenderOpen())
+                    {
+                        for (int s = 0; s < screens; s++)
+                        {
+                            var view = new SkyView { PanoramaIndex = s, PanoramaCount = screens };
+                            view.Measure(new Size(w, h));
+                            view.Arrange(new Rect(0, 0, w, h));
+                            view.PrepareStillFrame();
+                            view.InvalidateVisual();
+                            view.UpdateLayout();
+                            var part = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+                            part.Render(view);
+                            dcAll.DrawImage(part, new Rect(s * w, 0, w, h));
+                            dcAll.DrawLine(new Pen(Brushes.DimGray, 2), new Point(s * w, 0), new Point(s * w, 40)); // naad-markering
+                        }
+                    }
+                    var bitmap = new RenderTargetBitmap(w * screens, h, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(visual);
 
-                    var bitmap = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-                    bitmap.Render(view);
-
-                    var pixels = new byte[w * h * 4];
-                    bitmap.CopyPixels(pixels, w * 4, 0);
+                    int bw = bitmap.PixelWidth;
+                    var pixels = new byte[bw * h * 4];
+                    bitmap.CopyPixels(pixels, bw * 4, 0);
                     long lit = 0;
                     for (int i = 0; i < pixels.Length; i += 4)
                     {
@@ -41,7 +52,7 @@ namespace OLED_Sleeper.Tests.Features.Sky
                         if (v > 8) lit++;
                         maxBrightness = Math.Max(maxBrightness, v);
                     }
-                    litFraction = (double)lit / (w * h);
+                    litFraction = (double)lit / (bw * h);
 
                     var path = Environment.GetEnvironmentVariable("SKY_SNAPSHOT");
                     if (!string.IsNullOrEmpty(path))

@@ -67,7 +67,9 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             if (_starfield != null && bounds.Width > 0)
             {
                 // Screens next to each other show neighbouring parts of the same sky.
-                _starfield.PanoramaIndex = Math.Round(bounds.Left / bounds.Width);
+                double virtualLeft = SystemParameters.VirtualScreenLeft;
+                _starfield.PanoramaIndex = Math.Round((bounds.Left - virtualLeft) / bounds.Width);
+                _starfield.PanoramaCount = Math.Max(1, (int)Math.Round(SystemParameters.VirtualScreenWidth / bounds.Width));
             }
 
             PositionToMonitor(hwnd, bounds);

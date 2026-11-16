@@ -7,13 +7,16 @@ using System.Windows.Threading;
 namespace OLED_Sleeper.Features.Sky
 {
     /// <summary>
-    /// OLED-friendly screensaver showing the real night sky over the Netherlands: the stars you can see with
-    /// the naked eye, faint constellation figures and names, today's planets and Moon, and now and then a
-    /// shooting star (from the radiant of the active meteor shower when there is one).
+    /// OLED-friendly screensaver showing the real night sky over the Netherlands: the brighter stars, the
+    /// best-known constellation figures and names, today's planets and Moon, and now and then a slow shooting
+    /// star (from the radiant of the active meteor shower when there is one).
     ///
     /// The sky shown is tonight's sky from 22:00 onwards, sped up so it slowly turns, while the view pans
     /// gently. Everything keeps moving and almost all pixels stay truly black, so nothing can burn in.
-    /// Two monitors side by side together form one wide panorama.
+    ///
+    /// Screens next to each other form one wide panorama. Shooting stars are worked out from the clock alone
+    /// (same seed on every screen), so a shooting star that leaves one screen carries on across the next one
+    /// without the screens having to talk to each other.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public sealed class SkyView : FrameworkElement
@@ -27,6 +30,18 @@ namespace OLED_Sleeper.Features.Sky
         private const double BaseAltitude = 46;        // kijkhoogte: onderrand ligt dan ~10-17 graden boven de horizon
         private const double AltitudeSwing = 6;        // langzaam op en neer
         private const double FrameIntervalMs = 33;
+
+        // Shooting stars: one chance per second-slot, the same on every screen.
+        private const double MeteorChancePerSecond = 1.0 / 11;
+        private const double ShowerChancePerSecond = 1.0 / 7;
+        private const double MaxMeteorLife = 4.5;      // seconden
+
+        /// <summary>Only the well-known figures get lines and a name; the rest stays as plain stars.</summary>
+        private static readonly HashSet<string> FamousConstellations = new(StringComparer.Ordinal)
+        {
+            "UMa", "UMi", "Cas", "Cep", "Ori", "Cyg", "Lyr", "Aql", "Leo", "Gem", "Tau", "Sco",
+            "Sgr", "Peg", "And", "Per", "Boo", "CMa", "Aur", "Her", "Vir", "CrB", "Dra"
+        };
 
         private static readonly (Astronomy.Body Body, string Name, Color Color, double Radius)[] Planets =
         {
@@ -52,9 +67,10 @@ namespace OLED_Sleeper.Features.Sky
         private readonly SkyCatalog _catalog = SkyCatalog.Default;
         private readonly Random _random = new();
         private readonly DispatcherTimer _timer;
+        private readonly (double Ra, double Dec)[][] _lines;
+        private readonly SkyCatalog.Label[] _labels;
 
         private (double X, double Y, double Z, int ColorBucket, double Alpha, double Radius, double TwinkleSpeed, double TwinklePhase)[] _stars = Array.Empty<(double, double, double, int, double, double, double, double)>();
-        private readonly List<Meteor> _meteors = new();
         private SolidColorBrush[,] _starBrushes = new SolidColorBrush[0, 0];
         private RadialGradientBrush[] _glowBrushes = Array.Empty<RadialGradientBrush>();
         private Pen _linePen = null!;
@@ -62,18 +78,23 @@ namespace OLED_Sleeper.Features.Sky
         private readonly Dictionary<string, FormattedText> _labelTexts = new();
         private double _pixelsPerDip = 1;
 
-        private DateTime _lastTick;
-        private double _nextMeteorIn;
         private DateTime _bodiesComputedAt = DateTime.MinValue;
         private (string Name, double Ra, double Dec, Color Color, double Radius)[] _bodies = Array.Empty<(string, double, double, Color, double)>();
         private (double Ra, double Dec, double Illuminated, bool Waxing) _moon;
         private (double Ra, double Dec, double Longitude) _sun;
+        private DateTime? _stillFrameTime;
 
         /// <summary>Which screen this is, counted from the left (0, 1, ...). Screens next to each other form one panorama.</summary>
         public double PanoramaIndex { get; set; }
 
+        /// <summary>How many screens wide the panorama is (shooting stars can cross all of them).</summary>
+        public int PanoramaCount { get; set; } = 1;
+
         public SkyView()
         {
+            _lines = _catalog.Lines.Where(l => FamousConstellations.Contains(l.Abbreviation)).Select(l => l.Points).ToArray();
+            _labels = _catalog.Labels.Where(l => FamousConstellations.Contains(l.Abbreviation)).ToArray();
+
             _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(FrameIntervalMs) };
             _timer.Tick += (_, _) => Tick();
             Loaded += (_, _) => Start();
@@ -83,20 +104,23 @@ namespace OLED_Sleeper.Features.Sky
         public void Stop() => _timer.Stop();
 
         /// <summary>
-        /// Prepares a single still frame without starting the animation, with a few shooting stars in flight.
-        /// Used to render a preview image (tests / README); the live screensaver never calls this.
+        /// Prepares a single still frame without starting the animation, at a moment with shooting stars in
+        /// flight. Used to render a preview image (tests / README); the live screensaver never calls this.
         /// </summary>
-        public void PrepareStillFrame(int meteors = 2)
+        public void PrepareStillFrame()
         {
             _pixelsPerDip = 1;
             BuildBrushes();
             BuildStars();
             ComputeBodies();
-            for (int i = 0; i < meteors; i++)
+
+            // Find a moment in the next few minutes where a shooting star is about halfway.
+            var t = DateTime.UtcNow;
+            for (int i = 0; i < 600; i++, t = t.AddSeconds(1))
             {
-                SpawnMeteor(DateTime.UtcNow);
-                _meteors[^1].Age = _meteors[^1].Life * 0.35;
+                if (ActiveMeteors(t).Any(m => m.Age > m.Life * 0.3 && m.Age < m.Life * 0.6)) break;
             }
+            _stillFrameTime = t;
         }
 
         // ================= setup =================
@@ -106,8 +130,6 @@ namespace OLED_Sleeper.Features.Sky
             _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
             BuildBrushes();
             BuildStars();
-            _lastTick = DateTime.UtcNow;
-            _nextMeteorIn = 3 + _random.NextDouble() * 4;
             _timer.Start();
         }
 
@@ -150,9 +172,9 @@ namespace OLED_Sleeper.Features.Sky
                 _glowBrushes[c] = glow;
             }
 
-            _linePen = new Pen(new SolidColorBrush(Color.FromArgb(26, 120, 150, 215)), 0.8);
+            _linePen = new Pen(new SolidColorBrush(Color.FromArgb(24, 120, 150, 215)), 0.8);
             _linePen.Freeze();
-            _labelBrush = new SolidColorBrush(Color.FromArgb(72, 150, 170, 220));
+            _labelBrush = new SolidColorBrush(Color.FromArgb(64, 150, 170, 220));
             _labelBrush.Freeze();
         }
 
@@ -161,8 +183,8 @@ namespace OLED_Sleeper.Features.Sky
             _stars = _catalog.Stars.Select(s =>
             {
                 double ra = s.Ra * Astronomy.Deg, dec = s.Dec * Astronomy.Deg;
-                double alpha = Math.Clamp(1.05 - 0.15 * s.Magnitude, 0.25, 1.0);
-                double radius = Math.Clamp(2.9 - 0.42 * s.Magnitude, 0.85, 3.6);
+                double alpha = Math.Clamp(1.05 - 0.15 * s.Magnitude, 0.28, 1.0);
+                double radius = Math.Clamp(2.9 - 0.42 * s.Magnitude, 0.9, 3.6);
                 return (Math.Cos(dec) * Math.Cos(ra), Math.Cos(dec) * Math.Sin(ra), Math.Sin(dec),
                         ColorBucket(s.ColorIndex), alpha, radius,
                         1.2 + _random.NextDouble() * 2.5, _random.NextDouble() * Math.PI * 2);
@@ -180,7 +202,7 @@ namespace OLED_Sleeper.Features.Sky
             return anchor.ToUniversalTime();
         }
 
-        private double CurrentLst(DateTime nowUtc)
+        private static double CurrentLst(DateTime nowUtc)
         {
             double elapsedDays = (nowUtc - DateTime.Today.ToUniversalTime()).TotalDays;
             double d = Astronomy.DaysSinceJ2000(TonightUtc());
@@ -213,10 +235,10 @@ namespace OLED_Sleeper.Features.Sky
             }
         }
 
-        private Camera CurrentCamera(DateTime nowUtc)
+        private Camera CameraFor(DateTime nowUtc, double panoramaIndex)
         {
             double t = (nowUtc - DateTime.Today.ToUniversalTime()).TotalSeconds;
-            double azimuth = 160 + t * PanDegreesPerSecond + PanoramaIndex * FieldOfView;
+            double azimuth = 160 + t * PanDegreesPerSecond + panoramaIndex * FieldOfView;
             double altitude = BaseAltitude + AltitudeSwing * Math.Sin(2 * Math.PI * t / 1200);
             return new Camera(azimuth, altitude, ActualWidth, ActualHeight);
         }
@@ -225,27 +247,7 @@ namespace OLED_Sleeper.Features.Sky
 
         private void Tick()
         {
-            var now = DateTime.UtcNow;
-            double dt = Math.Min((now - _lastTick).TotalSeconds, 0.25);
-            _lastTick = now;
-
-            if ((now - _bodiesComputedAt).TotalMinutes > 10) ComputeBodies();
-
-            _nextMeteorIn -= dt;
-            if (_nextMeteorIn <= 0)
-            {
-                SpawnMeteor(now);
-                bool shower = ActiveShower() != null;
-                _nextMeteorIn = shower ? 5 + _random.NextDouble() * 9 : 9 + _random.NextDouble() * 14;
-            }
-
-            for (int i = _meteors.Count - 1; i >= 0; i--)
-            {
-                var m = _meteors[i];
-                m.Age += dt;
-                if (m.Age >= m.Life) _meteors.RemoveAt(i);
-            }
-
+            if ((DateTime.UtcNow - _bodiesComputedAt).TotalMinutes > 10) ComputeBodies();
             InvalidateVisual();
         }
 
@@ -262,7 +264,7 @@ namespace OLED_Sleeper.Features.Sky
             _bodiesComputedAt = DateTime.UtcNow;
         }
 
-        private (double Ra, double Dec)? ActiveShower()
+        private static (double Ra, double Dec)? ActiveShower()
         {
             var today = DateTime.Today;
             foreach (var s in Showers)
@@ -274,50 +276,81 @@ namespace OLED_Sleeper.Features.Sky
             return null;
         }
 
-        private void SpawnMeteor(DateTime nowUtc)
+        // ================= shooting stars (shared by all screens) =================
+
+        /// <summary>A shooting star in panorama coordinates: x runs over all screens side by side.</summary>
+        private readonly record struct Meteor(Point Start, Vector Direction, double Speed, double Length, double Life,
+                                              double Width, Color Color, double Age);
+
+        /// <summary>
+        /// The shooting stars in flight at <paramref name="nowUtc"/>. Each whole second has a fixed, seeded
+        /// chance of starting one, so every screen computes exactly the same set.
+        /// </summary>
+        private IEnumerable<Meteor> ActiveMeteors(DateTime nowUtc)
         {
-            if (ActualWidth <= 0) return;
+            if (ActualWidth <= 0) yield break;
 
-            var start = new Point(ActualWidth * (0.1 + 0.8 * _random.NextDouble()), ActualHeight * (0.08 + 0.5 * _random.NextDouble()));
-            Vector dir;
-
+            long nowSlot = (long)Math.Floor((nowUtc - DateTime.UnixEpoch).TotalSeconds);
             var shower = ActiveShower();
-            Point radiant = default;
-            bool fromRadiant = false;
-            if (shower != null && _random.NextDouble() < 0.75)
-            {
-                var (e, n, u) = Astronomy.ToHorizon(shower.Value.Ra, shower.Value.Dec, CurrentLst(nowUtc), Latitude);
-                fromRadiant = u > -0.1 && CurrentCamera(nowUtc).Project(e, n, u, out radiant);
-            }
+            double chance = shower != null ? ShowerChancePerSecond : MeteorChancePerSecond;
+            double totalWidth = ActualWidth * Math.Max(1, PanoramaCount);
 
-            if (fromRadiant && (start - radiant).Length > 40)
+            for (long slot = nowSlot - (long)Math.Ceiling(MaxMeteorLife); slot <= nowSlot; slot++)
             {
-                dir = start - radiant;
-            }
-            else
-            {
-                double angle = (15 + _random.NextDouble() * 45) * Astronomy.Deg;
-                dir = new Vector(Math.Cos(angle) * (_random.Next(2) == 0 ? -1 : 1), Math.Sin(angle));
-            }
-            dir.Normalize();
+                var rng = new Random(unchecked((int)(slot * 2654435761L)));
+                if (rng.NextDouble() >= chance) continue;
 
-            bool fireball = _random.NextDouble() < 0.08;
-            double tint = _random.NextDouble();
-            var color = tint < 0.6 ? Color.FromRgb(235, 242, 255)      // wit
-                      : tint < 0.85 ? Color.FromRgb(200, 255, 215)     // groenig (magnesium)
-                      : Color.FromRgb(255, 236, 190);                  // geelachtig (natrium)
+                var startTime = DateTime.UnixEpoch.AddSeconds(slot + rng.NextDouble());
+                double age = (nowUtc - startTime).TotalSeconds;
 
-            _meteors.Add(new Meteor
+                bool fireball = rng.NextDouble() < 0.08;
+                double life = (fireball ? 3.0 : 2.2) + rng.NextDouble() * 1.3;
+                if (age < 0 || age >= life) continue;
+
+                var start = new Point(totalWidth * (0.05 + 0.9 * rng.NextDouble()), ActualHeight * (0.05 + 0.45 * rng.NextDouble()));
+
+                // Direction: away from the shower radiant when it is in view, otherwise a gentle diagonal.
+                Vector dir = default;
+                bool fromRadiant = false;
+                if (shower != null && rng.NextDouble() < 0.75 && RadiantInPanorama(shower.Value, startTime) is Point radiant)
+                {
+                    dir = start - radiant;
+                    fromRadiant = dir.Length > 60;
+                }
+                if (!fromRadiant)
+                {
+                    double angle = (12 + rng.NextDouble() * 38) * Astronomy.Deg;
+                    dir = new Vector(Math.Cos(angle) * (rng.Next(2) == 0 ? -1 : 1), Math.Sin(angle));
+                }
+                dir.Normalize();
+
+                double tint = rng.NextDouble();
+                var color = tint < 0.6 ? Color.FromRgb(235, 242, 255)      // wit
+                          : tint < 0.85 ? Color.FromRgb(200, 255, 215)     // groenig (magnesium)
+                          : Color.FromRgb(255, 236, 190);                  // geelachtig (natrium)
+
+                yield return new Meteor(start, dir,
+                    Speed: (fireball ? 260 : 300) + rng.NextDouble() * 220,     // px/s: rustig
+                    Length: (fireball ? 380 : 220) + rng.NextDouble() * 200,
+                    Life: life,
+                    Width: fireball ? 2.8 : 1.7,
+                    Color: color,
+                    Age: age);
+            }
+        }
+
+        /// <summary>The shower radiant in panorama coordinates, or null when no screen shows it.</summary>
+        private Point? RadiantInPanorama((double Ra, double Dec) radiant, DateTime atUtc)
+        {
+            var (e, n, u) = Astronomy.ToHorizon(radiant.Ra, radiant.Dec, CurrentLst(atUtc), Latitude);
+            if (u < -0.1) return null;
+
+            for (int screen = 0; screen < Math.Max(1, PanoramaCount); screen++)
             {
-                Start = start,
-                Direction = dir,
-                Speed = (fireball ? 380 : 550) + _random.NextDouble() * 550,
-                Length = (fireball ? 260 : 140) + _random.NextDouble() * 170,
-                Life = (fireball ? 1.4 : 0.55) + _random.NextDouble() * 0.6,
-                Width = fireball ? 2.8 : 1.6,
-                Color = color,
-                Age = 0
-            });
+                if (CameraFor(atUtc, screen).Project(e, n, u, out var p) && p.X >= 0 && p.X <= ActualWidth)
+                    return new Point(p.X + screen * ActualWidth, p.Y);
+            }
+            return null;
         }
 
         // ================= rendering =================
@@ -327,11 +360,11 @@ namespace OLED_Sleeper.Features.Sky
             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, ActualWidth, ActualHeight));
             if (_stars.Length == 0 || ActualWidth <= 0) return;
 
-            var now = DateTime.UtcNow;
+            var now = _stillFrameTime ?? DateTime.UtcNow;
             double lst = CurrentLst(now) * Astronomy.Deg;
             double sinPhi = Math.Sin(Latitude * Astronomy.Deg), cosPhi = Math.Cos(Latitude * Astronomy.Deg);
             double cosL = Math.Cos(lst), sinL = Math.Sin(lst);
-            var cam = CurrentCamera(now);
+            var cam = CameraFor(now, PanoramaIndex);
             double seconds = (now - DateTime.Today.ToUniversalTime()).TotalSeconds;
 
             (double E, double N, double U) ToEnu(double x, double y, double z)
@@ -354,11 +387,11 @@ namespace OLED_Sleeper.Features.Sky
             DrawStars(dc, cam, ToEnu, seconds);
             DrawPlanets(dc, cam, RaDecToEnu);
             DrawMoon(dc, cam, RaDecToEnu);
-            DrawMeteors(dc);
+            DrawMeteors(dc, now);
 
             void DrawConstellations(DrawingContext ctx, Camera c, Func<double, double, (double E, double N, double U)> conv)
             {
-                foreach (var line in _catalog.Lines)
+                foreach (var line in _lines)
                 {
                     Point? prev = null;
                     foreach (var (ra, dec) in line)
@@ -373,7 +406,7 @@ namespace OLED_Sleeper.Features.Sky
                     }
                 }
 
-                foreach (var label in _catalog.Labels)
+                foreach (var label in _labels)
                 {
                     var (e, n, u) = conv(label.Ra, label.Dec);
                     if (u < 0.12 || !c.Project(e, n, u, out var p)) continue;
@@ -452,7 +485,7 @@ namespace OLED_Sleeper.Features.Sky
 
                 // Lit part, turned towards the Sun.
                 var (se, sn, su) = conv(_sun.Ra, _sun.Dec);
-                double angle = 0;
+                double angle;
                 if (c.Project(se, sn, su, out var sp)) angle = Math.Atan2(sp.Y - p.Y, sp.X - p.X) / Astronomy.Deg;
                 else angle = _moon.Waxing ? 0 : 180;
 
@@ -469,17 +502,22 @@ namespace OLED_Sleeper.Features.Sky
                 ctx.DrawText(text, new Point(p.X - text.Width / 2, p.Y + r + 8));
             }
 
-            void DrawMeteors(DrawingContext ctx)
+            void DrawMeteors(DrawingContext ctx, DateTime at)
             {
-                const int segments = 16;
-                foreach (var m in _meteors)
+                const int segments = 18;
+                double offsetX = PanoramaIndex * ActualWidth; // panorama -> this screen
+
+                foreach (var m in ActiveMeteors(at))
                 {
                     double t = m.Age / m.Life;
-                    // Snel opgloeien, rustiger uitdoven.
-                    double brightness = Math.Pow(Math.Min(1, t / 0.15), 0.6) * Math.Pow(1 - t, 1.4) * 1.25;
-                    brightness = Math.Clamp(brightness, 0, 1);
-                    var head = m.Start + m.Direction * (m.Speed * m.Age);
-                    double tailLength = m.Length * Math.Min(1, t / 0.3 + 0.2);
+                    // Rustig opgloeien, lang nagloeien.
+                    double brightness = Math.Clamp(Math.Pow(Math.Min(1, t / 0.12), 0.7) * Math.Pow(1 - t, 1.1) * 1.2, 0, 1);
+                    var head = m.Start + m.Direction * (m.Speed * m.Age) - new Vector(offsetX, 0);
+                    double tailLength = m.Length * Math.Min(1, t / 0.25 + 0.15);
+
+                    // Skip quickly when the whole streak is on another screen.
+                    var tailEnd = head - m.Direction * tailLength;
+                    if (Math.Max(head.X, tailEnd.X) < -20 || Math.Min(head.X, tailEnd.X) > ActualWidth + 20) continue;
 
                     for (int i = 0; i < segments; i++)
                     {
@@ -524,21 +562,13 @@ namespace OLED_Sleeper.Features.Sky
 
         private FormattedText LabelText(string text, double size, Brush brush)
         {
-            string key = text + "|" + size + "|" + brush.GetHashCode();
+            string key = text + "|" + size;
             if (brush == _labelBrush && _labelTexts.TryGetValue(key, out var cached)) return cached;
 
             var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                 new Typeface("Bahnschrift Light"), size, brush, _pixelsPerDip);
             if (brush == _labelBrush) _labelTexts[key] = formatted;
             return formatted;
-        }
-
-        private sealed class Meteor
-        {
-            public Point Start;
-            public Vector Direction;
-            public double Speed, Length, Life, Width, Age;
-            public Color Color;
         }
     }
 }
