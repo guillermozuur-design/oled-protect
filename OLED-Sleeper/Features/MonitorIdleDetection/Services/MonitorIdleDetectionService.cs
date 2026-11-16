@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.Features.MonitorBehavior.Commands;
+using OLED_Sleeper.Features.MonitorBehavior.Commands;
 using OLED_Sleeper.Features.MonitorIdleDetection.Models;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Models;
@@ -40,6 +40,7 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
         private List<ManagedMonitorState> _managedMonitors = new();
         private readonly object _lock = new();
         private readonly Dictionary<string, MonitorTimerState> _monitorStates = new();
+        private bool _isPaused;
 
         // === Construction ===
 
@@ -74,6 +75,30 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
             cancellationTokenSource.Cancel();
             cancellationTokenSource.Dispose();
             Log.Information("MonitorIdleDetectionService stopped.");
+        }
+
+        /// <inheritdoc />
+        public void SetPaused(bool paused)
+        {
+            lock (_lock)
+            {
+                if (_isPaused == paused) return;
+                _isPaused = paused;
+
+                foreach (var monitor in _managedMonitors)
+                {
+                    var state = _monitorStates[monitor.Settings.HardwareId];
+                    // Waking is idempotent (hiding a missing overlay or undimming an undimmed monitor does
+                    // nothing), so every managed monitor is restored, not only the ones we think are idle.
+                    if (paused)
+                    {
+                        _mediator.SendAsync(new RestoreMonitorStateCommand { HardwareId = monitor.Settings.HardwareId });
+                    }
+                    state.CurrentState = MonitorStateMachine.Active;
+                }
+            }
+
+            Log.Information("Idle detection {State}.", paused ? "paused (work mode)" : "resumed");
         }
 
         /// <summary>
@@ -145,6 +170,8 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
 
             lock (_lock)
             {
+                if (_isPaused) return;
+
                 foreach (var monitor in _managedMonitors)
                 {
                     ProcessSingleMonitor(monitor, systemState);

@@ -1,4 +1,4 @@
-﻿namespace OLED_Sleeper.Features.MonitorBehavior.Models
+namespace OLED_Sleeper.Features.MonitorBehavior.Models
 {
     /// <summary>
     /// Specifies the behavior to apply to a monitor when it becomes idle.
@@ -18,6 +18,11 @@
         /// <summary>
         /// Apply a blackout overlay to the monitor.
         /// </summary>
-        Blackout
+        Blackout,
+
+        /// <summary>
+        /// Show the OLED-friendly starfield screensaver on the monitor.
+        /// </summary>
+        Screensaver
     }
 }

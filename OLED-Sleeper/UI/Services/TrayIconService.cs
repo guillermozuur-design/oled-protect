@@ -1,4 +1,5 @@
 using Hardcodet.Wpf.TaskbarNotification;
+using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Infrastructure.Helpers;
 using OLED_Sleeper.UI.Services.Interfaces;
 using Serilog;
@@ -15,6 +16,16 @@ namespace OLED_Sleeper.UI.Services
         private TaskbarIcon? _notifyIcon;
         private Action? _showMainWindowAction;
         private Action? _exitApplicationAction;
+        private readonly IWorkModeService _workModeService;
+        private GlobalHotkeyService? _hotkeyService;
+        private MenuItem? _workModeMenuItem;
+        private System.Drawing.Icon? _normalIcon;
+        private System.Drawing.Icon? _pausedIcon;
+
+        public TrayIconService(IWorkModeService workModeService)
+        {
+            _workModeService = workModeService;
+        }
 
         /// <summary>
         /// Initializes and displays the tray icon and its context menu.
@@ -32,6 +43,44 @@ namespace OLED_Sleeper.UI.Services
             WireTrayIconEvents();
             SetupContextMenu();
             SetTrayIcon();
+
+            _hotkeyService = new GlobalHotkeyService(_workModeService);
+            _hotkeyService.Register();
+            _workModeService.Changed += OnWorkModeChanged;
+            UpdateWorkModeVisuals(_workModeService.IsEnabled, showBalloon: false);
+        }
+
+        private void OnWorkModeChanged(bool enabled)
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null) return;
+            dispatcher.BeginInvoke(() => UpdateWorkModeVisuals(enabled, showBalloon: true));
+        }
+
+        private void UpdateWorkModeVisuals(bool enabled, bool showBalloon)
+        {
+            if (_notifyIcon == null) return;
+
+            if (_workModeMenuItem != null) _workModeMenuItem.IsChecked = enabled;
+
+            var hotkeyHint = _hotkeyService?.IsRegistered == true
+                ? GlobalHotkeyService.HotkeyText
+                : "sneltoets niet beschikbaar";
+
+            _notifyIcon.ToolTipText = enabled
+                ? $"OLED Sleeper – WERKMODUS: alle schermen blijven aan ({hotkeyHint})"
+                : $"OLED Sleeper – bescherming actief ({hotkeyHint} = werkmodus)";
+
+            var icon = enabled ? _pausedIcon : _normalIcon;
+            if (icon != null) _notifyIcon.Icon = icon;
+
+            if (showBalloon)
+            {
+                _notifyIcon.ShowBalloonTip(
+                    enabled ? "Werkmodus aan" : "Werkmodus uit",
+                    enabled ? "Alle schermen blijven aan." : "Inbrandbescherming is weer actief.",
+                    BalloonIcon.Info);
+            }
         }
 
         /// <summary>
@@ -54,6 +103,8 @@ namespace OLED_Sleeper.UI.Services
 
             var contextMenu = new ContextMenu();
 
+            contextMenu.Items.Add(CreateWorkModeMenuItem());
+            contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(CreateShowSettingsMenuItem());
             contextMenu.Items.Add(CreateStartupMenuItem());
             contextMenu.Items.Add(new Separator());
@@ -66,6 +117,19 @@ namespace OLED_Sleeper.UI.Services
         /// Creates the menu item used to show the main application settings window.
         /// </summary>
         /// <returns>A configured MenuItem for showing settings.</returns>
+        private MenuItem CreateWorkModeMenuItem()
+        {
+            _workModeMenuItem = new MenuItem
+            {
+                Header = "Werkmodus (alles aan)",
+                InputGestureText = GlobalHotkeyService.HotkeyText,
+                IsCheckable = true,
+                IsChecked = _workModeService.IsEnabled
+            };
+            _workModeMenuItem.Click += (_, _) => _workModeService.SetEnabled(_workModeMenuItem.IsChecked);
+            return _workModeMenuItem;
+        }
+
         private MenuItem CreateShowSettingsMenuItem()
         {
             var item = new MenuItem { Header = "Show Settings" };
@@ -129,7 +193,9 @@ namespace OLED_Sleeper.UI.Services
             try
             {
                 var iconUri = new Uri("pack://application:,,,/Assets/icon.ico", UriKind.RelativeOrAbsolute);
-                _notifyIcon.Icon = new System.Drawing.Icon(Application.GetResourceStream(iconUri)!.Stream);
+                _normalIcon = new System.Drawing.Icon(Application.GetResourceStream(iconUri)!.Stream, 32, 32);
+                _pausedIcon = CreatePausedIcon(_normalIcon);
+                _notifyIcon.Icon = _normalIcon;
             }
             catch (Exception ex)
             {
@@ -140,8 +206,41 @@ namespace OLED_Sleeper.UI.Services
         /// <summary>
         /// Disposes the tray icon and releases resources.
         /// </summary>
+        /// <summary>
+        /// The normal icon with an amber pause badge in the corner, shown while the work mode is on.
+        /// </summary>
+        private static System.Drawing.Icon? CreatePausedIcon(System.Drawing.Icon baseIcon)
+        {
+            try
+            {
+                using var bitmap = new System.Drawing.Bitmap(32, 32);
+                using (var g = System.Drawing.Graphics.FromImage(bitmap))
+                {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    g.DrawIcon(baseIcon, new System.Drawing.Rectangle(0, 0, 32, 32));
+                    using var badge = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 255, 176, 32));
+                    using var bars = new System.Drawing.SolidBrush(System.Drawing.Color.Black);
+                    g.FillEllipse(badge, 14, 14, 18, 18);
+                    g.FillRectangle(bars, 19, 18, 3, 10);
+                    g.FillRectangle(bars, 24, 18, 3, 10);
+                }
+
+                var handle = bitmap.GetHicon();
+                // Clone so the icon owns its own handle data; the GDI handle itself is small and lives for the app's lifetime.
+                return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(handle).Clone();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Kon pauze-icoon niet maken; het normale icoon wordt gebruikt.");
+                return null;
+            }
+        }
+
         public void Dispose()
         {
+            _workModeService.Changed -= OnWorkModeChanged;
+            _hotkeyService?.Dispose();
+            _hotkeyService = null;
             _notifyIcon?.Dispose();
         }
     }

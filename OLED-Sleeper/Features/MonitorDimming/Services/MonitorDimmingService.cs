@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.Features.MonitorDimming.Helpers;
+using OLED_Sleeper.Features.MonitorDimming.Helpers;
 using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using Serilog;
@@ -33,11 +33,48 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
         public MonitorDimmingService(
             IMonitorInfoManager monitorManager,
             IDdcCiAccess ddcCiAccess,
-            IOriginalBrightnessStore originalBrightnessStore)
+            IOriginalBrightnessStore originalBrightnessStore,
+            BrightnessFadeOptions? fadeOptions = null)
         {
             _monitorManager = monitorManager;
             _ddcCiAccess = ddcCiAccess;
             _originalBrightnessStore = originalBrightnessStore;
+            _fade = fadeOptions ?? BrightnessFadeOptions.None;
+        }
+
+        private readonly BrightnessFadeOptions _fade;
+
+        /// <summary>
+        /// Sets a monitor to a brightness picked by the schedule. When the monitor is dimmed or blacked
+        /// out right now, only the brightness it will return to is changed, so waking it lands on the
+        /// scheduled level instead of the old one.
+        /// </summary>
+        /// <param name="hardwareId">The monitor.</param>
+        /// <param name="percent">Brightness in percent, 0-100.</param>
+        public async Task SetScheduledBrightnessAsync(string hardwareId, int percent)
+        {
+            if (string.IsNullOrEmpty(hardwareId)) return;
+
+            await WithMonitorGateAsync(hardwareId, async () =>
+            {
+                var target = await ScaleToMonitorRangeAsync(hardwareId, percent);
+
+                if (_originalBrightnessStore.TryGetOriginal(hardwareId, out _))
+                {
+                    _originalBrightnessStore.ReplaceOriginal(hardwareId, target);
+                    Log.Information("Monitor {HardwareId} is dimmed; it will wake to scheduled brightness {Brightness}.", hardwareId, target);
+                    return;
+                }
+
+                await WithSessionAsync(hardwareId, session =>
+                {
+                    var current = session.GetBrightness();
+                    if (current is null) return false;
+                    if (current.Value == target) return true;
+                    Log.Information("Schedule: monitor {HardwareId} brightness {From} -> {To}.", hardwareId, current.Value, target);
+                    return FadeBrightness(session, hardwareId, current.Value, target);
+                });
+            });
         }
 
         /// <inheritdoc />
@@ -103,7 +140,7 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
                 if (currentBrightness is null) return false;
 
                 _originalBrightnessStore.RecordOriginal(hardwareId, currentBrightness.Value);
-                return SetMonitorBrightness(session, hardwareId, targetBrightness);
+                return FadeBrightness(session, hardwareId, currentBrightness.Value, targetBrightness);
             });
         }
 
@@ -254,6 +291,26 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
         /// <param name="session">The open channel to the monitor.</param>
         /// <param name="hardwareId">The hardware ID of the monitor.</param>
         /// <returns>The current brightness, or null if the read failed.</returns>
+        /// <summary>
+        /// Walks the brightness from <paramref name="from"/> to <paramref name="to"/> in a few steps so
+        /// the change is a smooth fade instead of a jump. With fading switched off it is a single write.
+        /// </summary>
+        private bool FadeBrightness(IDdcCiSession session, string hardwareId, uint from, uint to)
+        {
+            int steps = Math.Max(1, _fade.Steps);
+            if (steps > 1 && from != to)
+            {
+                for (int i = 1; i < steps; i++)
+                {
+                    var level = (uint)Math.Round(from + ((double)to - from) * i / steps);
+                    if (!session.SetBrightness(level)) break;
+                    Thread.Sleep(_fade.StepDelay);
+                }
+            }
+
+            return SetMonitorBrightness(session, hardwareId, to);
+        }
+
         private static uint? GetCurrentBrightness(IDdcCiSession session, string hardwareId)
         {
             var currentBrightness = session.GetBrightness();

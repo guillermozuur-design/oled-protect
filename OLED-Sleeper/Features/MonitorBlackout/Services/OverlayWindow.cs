@@ -4,25 +4,26 @@ using System.Diagnostics.CodeAnalysis;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Services
 {
     /// <summary>
-    /// A blackout overlay backed by a borderless, topmost WPF window.
+    /// A borderless, topmost, non-activating window that covers one monitor. It fades in slowly and
+    /// fades out quickly, and shows either plain black or the <see cref="StarfieldView"/> screensaver.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public class OverlayWindow : IOverlayWindow
     {
-        /// <summary>
-        /// How often the overlay returns itself to the top of the topmost band while it is shown.
-        /// </summary>
         private static readonly TimeSpan TopmostReassertInterval = TimeSpan.FromSeconds(1);
 
-        /// <summary>
-        /// The black, borderless, topmost window shown over the monitor. Its startup location is manual
-        /// so that <see cref="Show"/> can place it in physical pixels.
-        /// </summary>
+        /// <summary>Slow fade to black, so going idle is not a jarring flash.</summary>
+        private static readonly TimeSpan FadeInDuration = TimeSpan.FromSeconds(1.5);
+
+        /// <summary>Quick fade back, so waking the screen never feels laggy.</summary>
+        private static readonly TimeSpan FadeOutDuration = TimeSpan.FromMilliseconds(250);
+
         private readonly Window _window = new()
         {
             Cursor = System.Windows.Input.Cursors.None,
@@ -32,26 +33,28 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             Background = Brushes.Black,
             ShowInTaskbar = false,
             Topmost = true,
-            WindowStartupLocation = WindowStartupLocation.Manual
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Opacity = 0
         };
 
-        /// <summary>
-        /// Runs on the UI thread between <see cref="Show"/> and <see cref="Close"/>. Windows orders
-        /// topmost windows among themselves, so the taskbar and other topmost windows sit above the
-        /// overlay from the moment they are shown or activated until it re-asserts its z-order.
-        /// </summary>
         private readonly DispatcherTimer _topmostTimer;
+        private readonly StarfieldView? _starfield;
+        private bool _closing;
 
-        public OverlayWindow()
+        public OverlayWindow(bool screensaver = false)
         {
             _topmostTimer = new DispatcherTimer { Interval = TopmostReassertInterval };
             _topmostTimer.Tick += (_, _) => ReassertTopmost();
+
+            if (screensaver)
+            {
+                _starfield = new StarfieldView();
+                _window.Content = _starfield;
+            }
         }
 
-        /// <inheritdoc />
         public nint Handle => new WindowInteropHelper(_window).Handle;
 
-        /// <inheritdoc />
         public void Show(Rect bounds)
         {
             _window.Show();
@@ -62,23 +65,30 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             ApplyNoActivateStyle(hwnd);
             PositionToMonitor(hwnd, bounds);
             _topmostTimer.Start();
+
+            _window.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0, 1, FadeInDuration) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } });
         }
 
-        /// <inheritdoc />
         public void Close()
         {
+            if (_closing) return;
+            _closing = true;
+
             // A running DispatcherTimer is held by the dispatcher, which keeps this overlay alive.
             _topmostTimer.Stop();
-            _window.Close();
+
+            var fadeOut = new DoubleAnimation(_window.Opacity, 0, FadeOutDuration);
+            fadeOut.Completed += (_, _) =>
+            {
+                _starfield?.Stop();
+                _window.Close();
+            };
+            _window.BeginAnimation(UIElement.OpacityProperty, fadeOut);
         }
 
         #region Private Helpers
 
-        /// <summary>
-        /// Positions the overlay to exactly cover the monitor using physical screen coordinates.
-        /// </summary>
-        /// <param name="hwnd">The window handle.</param>
-        /// <param name="bounds">The monitor bounds in physical screen coordinates.</param>
         private static void PositionToMonitor(nint hwnd, Rect bounds)
         {
             NativeMethods.SetWindowPos(
@@ -91,10 +101,6 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
                 NativeMethods.SWP_NOACTIVATE);
         }
 
-        /// <summary>
-        /// Applies the WS_EX_NOACTIVATE style to prevent the overlay from stealing focus.
-        /// </summary>
-        /// <param name="hwnd">The window handle.</param>
         private static void ApplyNoActivateStyle(nint hwnd)
         {
             nint extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
@@ -102,10 +108,6 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
                 new nint(extendedStyle.ToInt64() | NativeMethods.WS_EX_NOACTIVATE));
         }
 
-        /// <summary>
-        /// Returns the overlay to the top of the topmost band, leaving its position, size and the
-        /// active window untouched. Does nothing once the overlay has been closed.
-        /// </summary>
         private void ReassertTopmost()
         {
             nint hwnd = Handle;

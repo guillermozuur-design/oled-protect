@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
 using OLED_Sleeper.Features.MonitorBehavior.Commands;
+using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Features.MonitorBehavior.Handlers;
 using OLED_Sleeper.Features.MonitorBlackout.Commands;
 using OLED_Sleeper.Features.MonitorBlackout.Handlers;
@@ -74,7 +76,10 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<IMonitorBrightnessStateService, MonitorBrightnessStateService>();
             services.AddSingleton<IOriginalBrightnessStore, OriginalBrightnessStore>();
             services.AddSingleton<IDdcCiAccess, DdcCiAccess>();
+            services.AddSingleton(BrightnessFadeOptions.Default);
             services.AddSingleton<IMonitorDimmingService, MonitorDimmingService>();
+            services.AddSingleton<IWorkModeService, WorkModeService>();
+            services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
             services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
             services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();
             services.AddSingleton<IApplicationOrchestrator, ApplicationOrchestrator>();

@@ -10,6 +10,6 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
     public class OverlayWindowFactory : IOverlayWindowFactory
     {
         /// <inheritdoc />
-        public IOverlayWindow Create() => new OverlayWindow();
+        public IOverlayWindow Create(bool screensaver = false) => new OverlayWindow(screensaver);
     }
 }

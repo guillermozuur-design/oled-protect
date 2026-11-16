@@ -22,6 +22,11 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services.Interfaces
         void RecordOriginal(string hardwareId, uint brightness);
 
         /// <summary>
+        /// Overwrites the recorded brightness for a monitor, also when one is already recorded.
+        /// </summary>
+        void ReplaceOriginal(string hardwareId, uint brightness);
+
+        /// <summary>
         /// Removes a monitor's recording and saves the state. Does nothing when there is no recording.
         /// </summary>
         /// <param name="hardwareId">The unique hardware ID of the monitor.</param>

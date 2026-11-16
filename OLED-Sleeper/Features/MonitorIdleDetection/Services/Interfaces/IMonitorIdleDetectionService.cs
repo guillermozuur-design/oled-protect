@@ -20,6 +20,12 @@ namespace OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces
         void Stop();
 
         /// <summary>
+        /// Pauses or resumes idle detection (work mode). Pausing wakes every managed monitor at once and
+        /// keeps them awake; resuming starts every idle timer from zero.
+        /// </summary>
+        void SetPaused(bool paused);
+
+        /// <summary>
         /// Updates the settings for all managed monitors.
         /// </summary>
         /// <param name="monitorSettings">The list of monitor settings to manage.</param>

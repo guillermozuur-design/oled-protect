@@ -33,7 +33,7 @@ namespace OLED_Sleeper.Tests.TestDoubles
         public List<FakeOverlayWindow> Created { get; } = new();
 
         /// <inheritdoc />
-        public IOverlayWindow Create()
+        public IOverlayWindow Create(bool screensaver = false)
         {
             var overlay = new FakeOverlayWindow(_nextHandle);
 

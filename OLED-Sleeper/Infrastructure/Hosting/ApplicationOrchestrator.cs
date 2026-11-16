@@ -1,4 +1,6 @@
-﻿using OLED_Sleeper.Features.MonitorDimming.Commands;
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.Features.MonitorDimming.Commands;
+using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorState.Services.Interfaces;
 using OLED_Sleeper.Features.UserSettings.Commands;
@@ -32,6 +34,8 @@ namespace OLED_Sleeper.Infrastructure.Hosting
         private readonly IMonitorIdleDetectionService _monitorIdleDetectionService;
         private readonly IMonitorSettingsFileService _monitorSettingsFileService;
         private readonly IMonitorStateWatcher _monitorStateWatcher;
+        private readonly IWorkModeService _workModeService;
+        private readonly IBrightnessScheduleService _brightnessScheduleService;
 
         #region Constructor
 
@@ -39,8 +43,12 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             IMediator mediator,
             IMonitorIdleDetectionService monitorIdleDetectionService,
             IMonitorSettingsFileService monitorSettingsFileService,
-            IMonitorStateWatcher monitorStateWatcher)
+            IMonitorStateWatcher monitorStateWatcher,
+            IWorkModeService workModeService,
+            IBrightnessScheduleService brightnessScheduleService)
         {
+            _workModeService = workModeService;
+            _brightnessScheduleService = brightnessScheduleService;
             _mediator = mediator;
             _monitorIdleDetectionService = monitorIdleDetectionService;
             _monitorSettingsFileService = monitorSettingsFileService;
@@ -59,6 +67,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             _ = RestoreAllMonitorsAsync();
             SubscribeToEvents();
             InitializeStateWatcher();
+            _brightnessScheduleService.Start();
         }
 
         /// <summary>
@@ -72,6 +81,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             UnsubscribeFromEvents();
             _monitorIdleDetectionService.Stop();
             _monitorStateWatcher.Stop();
+            _brightnessScheduleService.Stop();
 
             await RestoreAllMonitorsAsync();
         }
@@ -86,6 +96,12 @@ namespace OLED_Sleeper.Infrastructure.Hosting
         private void SubscribeToEvents()
         {
             _monitorSettingsFileService.SettingsChanged += OnSettingsChanged;
+            _workModeService.Changed += OnWorkModeChanged;
+        }
+
+        private void OnWorkModeChanged(bool enabled)
+        {
+            _monitorIdleDetectionService.SetPaused(enabled);
         }
 
         /// <summary>
@@ -94,6 +110,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
         private void UnsubscribeFromEvents()
         {
             _monitorSettingsFileService.SettingsChanged -= OnSettingsChanged;
+            _workModeService.Changed -= OnWorkModeChanged;
         }
 
         #endregion Event Subscriptions

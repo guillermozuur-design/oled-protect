@@ -13,7 +13,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
         /// <param name="hardwareId">The unique hardware ID of the monitor.</param>
         /// <param name="bounds">The bounds of the monitor in screen coordinates.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds);
+        Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, bool screensaver = false);
 
         /// <summary>
         /// Asynchronously hides the blackout overlay for the specified monitor.

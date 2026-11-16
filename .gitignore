@@ -83,3 +83,11 @@ _ReSharper*/
 # Claude
 CLAUDE.md
 .claude/
+
+# Lokaal (oled-sleeper fork)
+.tmp/
+.venv/
+node_modules/
+__pycache__/
+artifacts/
+.env

@@ -46,7 +46,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         private readonly record struct OverlayRegistration(IOverlayWindow Window, nint Handle);
 
         /// <inheritdoc />
-        public async Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds)
+        public async Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, bool screensaver = false)
         {
             await _dispatcher.InvokeAsync(() =>
             {
@@ -55,7 +55,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
                     if (_overlayWindows.ContainsKey(hardwareId)) return;
                 }
 
-                var overlay = _overlayWindowFactory.Create();
+                var overlay = _overlayWindowFactory.Create(screensaver);
                 overlay.Show(bounds);
 
                 nint hwnd = overlay.Handle;

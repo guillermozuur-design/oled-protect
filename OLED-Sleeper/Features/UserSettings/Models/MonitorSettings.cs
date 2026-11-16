@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.Features.MonitorBehavior.Models;
+using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.UI.Models;
 
 namespace OLED_Sleeper.Features.UserSettings.Models
@@ -58,6 +58,22 @@ namespace OLED_Sleeper.Features.UserSettings.Models
         /// Gets or sets a value indicating whether the active window should reset idle state.
         /// </summary>
         public bool IsActiveOnActiveWindow { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the brightness schedule is applied to this monitor.
+        /// Works independently of <see cref="IsManaged"/>. Absent from older settings files, so it defaults to off.
+        /// </summary>
+        public bool UseBrightnessSchedule { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets the brightness schedule: from each start time onwards the monitor uses that brightness.
+        /// </summary>
+        public List<BrightnessScheduleEntry> BrightnessSchedule { get; set; } = new()
+        {
+            new BrightnessScheduleEntry { Start = "08:00", Brightness = 80 },
+            new BrightnessScheduleEntry { Start = "19:00", Brightness = 50 },
+            new BrightnessScheduleEntry { Start = "23:00", Brightness = 30 }
+        };
 
         /// <summary>
         /// Gets the idle timeout in milliseconds, based on <see cref="IdleValue"/> and <see cref="IdleUnit"/>.

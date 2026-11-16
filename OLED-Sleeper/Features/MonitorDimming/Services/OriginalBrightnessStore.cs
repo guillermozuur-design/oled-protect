@@ -51,6 +51,15 @@ namespace OLED_Sleeper.Features.MonitorDimming.Services
         }
 
         /// <inheritdoc />
+        public void ReplaceOriginal(string hardwareId, uint brightness)
+        {
+            lock (_stateLock)
+            {
+                _originalBrightnessLevels[hardwareId] = brightness;
+                _brightnessStateService.SaveState(new Dictionary<string, uint>(_originalBrightnessLevels));
+            }
+        }
+
         public void RemoveOriginal(string hardwareId)
         {
             lock (_stateLock)
