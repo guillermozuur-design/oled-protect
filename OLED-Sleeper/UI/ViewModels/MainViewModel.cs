@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.Infrastructure.Runtime.Interfaces;
+using OLED_Sleeper.Infrastructure.Runtime.Interfaces;
 using OLED_Sleeper.UI.Commands;
 using OLED_Sleeper.UI.Services.Interfaces;
 using Serilog;
@@ -55,12 +55,12 @@ namespace OLED_Sleeper.UI.ViewModels
         /// <summary>
         /// The text displayed in the main window's title bar.
         /// </summary>
-        private string _windowTitle = "OLED Sleeper Settings";
+        private string _windowTitle = "OLED Sleeper";
 
         /// <summary>
         /// The text displayed on the save button.
         /// </summary>
-        private string _saveButtonText = "Save Settings";
+        private string _saveButtonText = "Opslaan";
 
         /// <summary>
         /// Indicates whether the workspace is currently loading.
@@ -110,7 +110,7 @@ namespace OLED_Sleeper.UI.ViewModels
                 if (_isDirty == value) return;
                 _isDirty = value;
                 OnPropertyChanged();
-                WindowTitle = "OLED Sleeper Settings" + (_isDirty ? "*" : "");
+                WindowTitle = "OLED Sleeper" + (_isDirty ? "*" : "");
             }
         }
 

@@ -68,14 +68,14 @@ namespace OLED_Sleeper.UI.ViewModels
         {
             get
             {
-                string baseTooltip = "Choose how the monitor reacts after the idle timer expires.\n\n" +
-                                    "• Blackout: Turns the monitor completely black.\n" +
-                                     "• Dim: Reduces the monitor's brightness using DDC/CI.\n" +
-                                     "• Sterren: OLED-vriendelijke screensaver met vallende sterren.";
+                string baseTooltip = "Wat dit scherm doet als de wachttijd voorbij is.\n\n" +
+                                     "• Zwart: het scherm wordt helemaal zwart (OLED-pixels uit).\n" +
+                                     "• Dimmen: de helderheid van het scherm zelf gaat omlaag (DDC/CI).\n" +
+                                     "• Sterren: de echte sterrenhemel als screensaver.";
 
                 if (_monitorInfo.Capabilities?.IsSupported != true)
                 {
-                    baseTooltip = "THE SELECTED MONITOR DOES NOT SUPPORT DIMMING.\n\n" + baseTooltip;
+                    baseTooltip = "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n" + baseTooltip;
                 }
 
                 return baseTooltip;
@@ -162,16 +162,16 @@ namespace OLED_Sleeper.UI.ViewModels
         {
             get
             {
-                string baseTooltip = "Takes the monitor's own brightness down to zero\n" +
-                                     "as well as covering the screen with the black overlay.\n\n" +
-                                     "Useful on non-OLED displays, where the backlight\n" +
-                                     "stays lit behind the black overlay.";
+                string baseTooltip = "Zet ook de helderheid van het scherm zelf op 0,\n" +
+                                     "naast het zwarte beeld.\n\n" +
+                                     "Vooral nuttig bij niet-OLED-schermen, waar de\n" +
+                                     "achtergrondverlichting anders blijft branden.";
 
                 if (!IsDimBehaviorEnabled)
-                    return "THE SELECTED MONITOR DOES NOT SUPPORT DIMMING.\n\n" + baseTooltip;
+                    return "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n" + baseTooltip;
 
                 if (Behavior != MonitorBehaviorType.Blackout)
-                    return "AVAILABLE ONLY WHEN BLACKOUT IS SELECTED.\n\n" + baseTooltip;
+                    return "ALLEEN BIJ 'ZWART'.\n\n" + baseTooltip;
 
                 return baseTooltip;
             }
@@ -587,7 +587,7 @@ namespace OLED_Sleeper.UI.ViewModels
         private string? ValidateIdleValue()
         {
             if (IdleValue == null || IdleValue <= 0)
-                return "Idle time value must be a number greater than zero.";
+                return "Vul een wachttijd groter dan 0 in.";
             return null;
         }
 
@@ -598,7 +598,7 @@ namespace OLED_Sleeper.UI.ViewModels
         private string? ValidateActiveConditions()
         {
             if (!IsActiveOnInput && !IsActiveOnMousePosition && !IsActiveOnActiveWindow)
-                return "At least one 'Consider Active When' option must be selected.";
+                return "Kies minstens één 'Wakker houden als'-optie.";
             return null;
         }
 
@@ -611,7 +611,7 @@ namespace OLED_Sleeper.UI.ViewModels
         private string? ValidateBehavior()
         {
             if (Behavior == MonitorBehaviorType.None)
-                return "A monitor behavior must be selected.";
+                return "Kies wat er met dit scherm moet gebeuren.";
             return null;
         }
 

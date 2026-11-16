@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.UI.ViewModels;
+using OLED_Sleeper.UI.ViewModels;
 using System.Text;
 
 namespace OLED_Sleeper.UI.Helpers
@@ -41,7 +41,7 @@ namespace OLED_Sleeper.UI.Helpers
         private static string BuildMessage(List<MonitorLayoutViewModel> invalidMonitors)
         {
             var errorBuilder = new StringBuilder();
-            errorBuilder.AppendLine("One or more monitors have configuration issues and cannot be saved:");
+            errorBuilder.AppendLine("Een of meer schermen zijn nog niet goed ingesteld en kunnen niet worden opgeslagen:");
             foreach (var monitor in invalidMonitors)
             {
                 errorBuilder.AppendLine($" - {monitor.MonitorTitle}:");
@@ -53,7 +53,7 @@ namespace OLED_Sleeper.UI.Helpers
                 if (!string.IsNullOrWhiteSpace(config.ActiveConditionsError))
                     errorBuilder.AppendLine($"     • {config.ActiveConditionsError}");
             }
-            errorBuilder.AppendLine("\nTo resolve these issues, either update the highlighted fields or uncheck 'Manage' for the affected monitor(s).");
+            errorBuilder.AppendLine("\nPas de gemarkeerde velden aan, of zet het bewaken van dat scherm uit.");
 
             return errorBuilder.ToString();
         }

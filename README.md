@@ -24,7 +24,8 @@ Toegevoegd in deze versie:
 | **Ruimte tussen schermen** | Hoofdvenster: afstand tussen de schermen in cm (standaard 2,0). Wordt meegerekend als "verborgen hemel", zodat lijnen en vallende sterren achter de rand langs lopen. Knop **Kalibreren**: schuine lijnen over beide schermen, schuiven met ←/→, muiswiel of schuifbalk tot ze recht doorlopen, Enter = opslaan. | `Features/Sky/PanoramaSettings.cs`, `UI/Views/GapCalibration.cs` |
 | **DDC/CI-fix** | Origineel keurde de LG UltraGear-schermen af (geven geen "capabilities string"); nu telt een werkende helderheidsuitlezing als ondersteuning. | `MonitorInfoProvider.cs` |
 
-Nieuwe teksten in de app zijn Nederlands, de rest van de originele UI is nog Engels.
+| **Nieuwe UI** | Volledig Nederlands. Donker, OLED-vriendelijk thema met maanlicht-accent en eigen icoon (maansikkel, `tools/make_icon.ps1`). Persoonlijke kop (begroeting, status, volgende helderheidsstap, knop werkmodus) en drie tabbladen: **Schermen**, **Sterrenhemel** (live voorbeeld, ruimte tussen schermen, kalibreren) en **Algemeen** (sneltoets, algemene timer, starten met Windows). Wijzigingen worden automatisch opgeslagen zodra ze geldig zijn. | `MainWindow.xaml(.cs)`, `App.xaml` |
+| **Video-uitzondering** | Zolang een programma Windows vraagt het scherm aan te houden (video in browser/speler), gelden de stil-limiet en de algemene timer niet; het scherm met het actieve venster blijft aan. | `MonitorIdleDetectionService.IsDisplayRequired` |
 Waarnemerslocatie staat vast op midden-Nederland (52,1° N, 5,1° O) in `SkyView.cs`.
 
 ## Bouwen en starten
@@ -33,7 +34,7 @@ Er staat geen .NET SDK systeembreed; de SDK staat lokaal in `.tmp\dotnet` (gitig
 zet de juiste omgevingsvariabelen en roept die `dotnet` aan.
 
 ```powershell
-# testen (208 tests)
+# testen (209 tests)
 powershell -File .tmp\dn.ps1 test OLED-Sleeper.sln
 
 # portable build (instellingen in artifacts\portable\Data)
@@ -54,17 +55,18 @@ uit [d3-celestial](https://github.com/ofrohn/d3-celestial/tree/master/data) naar
 ## Status (16-11-2026)
 
 - Draait vanaf `artifacts\portable\OLED-Sleeper.exe`; de oude geïnstalleerde versie is verwijderd.
-- 208 unit tests groen, waaronder astronomie tegen echte gebeurtenissen (grote conjunctie Jupiter/Saturnus
+- 209 unit tests groen, waaronder astronomie tegen echte gebeurtenissen (grote conjunctie Jupiter/Saturnus
   21-12-2020, lente-equinox 2000, nieuwe/volle maan april 2024, hoogte Poolster).
 - Live getest: DDC/CI op beide schermen, snelmenu (vasthouden + tikken + loslaten, snelle tik), werkmodus
   1 uur, sneltoets-instelling, knoppen in het schema-blok.
 - Nog niet live gezien: kalibratiescherm, algemene timer, limiet per scherm, de sterrenhemel op de echte schermen (wel als render), maan/planeten in beeld,
   fade bij dimmen, helderheidsschema dat op een tijdstip verspringt.
-- Niet automatisch opstarten met Windows: zet dat aan via tray → "Run at Startup".
+- Start automatisch met Windows (verborgen in het systeemvak); aan/uit via Algemeen → "Starten met Windows".
+- Onafhankelijke code-review gedaan; alle bevindingen verwerkt (DDC-werk van de UI-thread, timers vanaf laatste invoer, DPI, schema-herhaling, Alt-menubalk, enz.).
 
 ## Ideeën voor later
 - Waarnemerslocatie en tijdversnelling instelbaar
-- Rest van de UI vertalen
+- Snelmenu op de juiste plek bij verschillende schaal per scherm (nu: gelijke schaal aangenomen)
 - Echte installer (Inno Setup-script staat in `installer/`)
 
 ## Licenties

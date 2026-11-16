@@ -81,7 +81,7 @@ namespace OLED_Sleeper.Tests.UI.Services
 
             // Assert
             Assert.False(saved);
-            _dialogServiceMock.Verify(x => x.ShowError(It.IsAny<string>(), "Monitor Configuration Error"), Times.Once);
+            _dialogServiceMock.Verify(x => x.ShowError(It.IsAny<string>(), "Instellingen niet compleet"), Times.Once);
             _settingsServiceMock.Verify(x => x.SaveSettings(It.IsAny<List<MonitorSettings>>()), Times.Never);
         }
 

@@ -95,8 +95,8 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             }
 
             var guidance = BuildMode.IsPortable
-                ? "Move the OLED Sleeper folder somewhere you can write to, such as your Desktop, and start it again."
-                : "Check that your user profile is accessible and start OLED Sleeper again.";
+                ? "Zet de map van OLED Sleeper op een plek waar je mag schrijven (bijvoorbeeld je Bureaublad) en start opnieuw."
+                : "Controleer of je gebruikersprofiel bereikbaar is en start OLED Sleeper opnieuw.";
 
             new MessageBoxDialogService(new MainWindowAccessor()).ShowError($"{error}{Environment.NewLine}{Environment.NewLine}{guidance}", StorageErrorCaption);
             _applicationShutdown.Shutdown();

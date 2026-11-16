@@ -172,7 +172,7 @@ namespace OLED_Sleeper.Tests.UI.ViewModels
 
             // Assert
             Assert.True(_viewModel.IsDirty);
-            Assert.Equal("OLED Sleeper Settings*", _viewModel.WindowTitle);
+            Assert.Equal("OLED Sleeper*", _viewModel.WindowTitle);
         }
 
         [Fact]
@@ -342,7 +342,7 @@ namespace OLED_Sleeper.Tests.UI.ViewModels
             // Assert
             Assert.True(saved);
             Assert.False(_viewModel.IsDirty);
-            Assert.Equal("Save Settings", _viewModel.SaveButtonText);
+            Assert.Equal("Opslaan", _viewModel.SaveButtonText);
         }
 
         [Fact]
@@ -393,7 +393,7 @@ namespace OLED_Sleeper.Tests.UI.ViewModels
             _viewModel.SaveSettingsCommand.Execute(null);
 
             // Assert
-            Assert.Equal("Save Settings", _viewModel.SaveButtonText);
+            Assert.Equal("Opslaan", _viewModel.SaveButtonText);
             Assert.True(_viewModel.IsDirty);
         }
 

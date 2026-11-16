@@ -6,10 +6,11 @@
         xmlns:converters="clr-namespace:OLED_Sleeper.UI.Converters"
         xmlns:viewModels1="clr-namespace:OLED_Sleeper.UI.ViewModels"
         xmlns:views="clr-namespace:OLED_Sleeper.UI.Views"
+        xmlns:sky="clr-namespace:OLED_Sleeper.Features.Sky"
         mc:Ignorable="d"
-        Title="{Binding WindowTitle}"
+        Title="OLED Sleeper"
         d:DataContext="{d:DesignInstance viewModels1:MainViewModel}"
-        Height="960" Width="820" MinHeight="760" MinWidth="700"
+        Height="900" Width="860" MinHeight="700" MinWidth="760"
         FontFamily="Bahnschrift"
         Background="{StaticResource PrimaryBackgroundColor}"
         WindowStyle="None"
@@ -24,12 +25,12 @@
 
         <Style x:Key="WindowButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+            <Setter Property="Foreground" Value="{StaticResource SecondaryForegroundColor}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Width" Value="46" />
-            <Setter Property="Height" Value="32" />
+            <Setter Property="Height" Value="34" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -42,6 +43,7 @@
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{StaticResource TertiaryBackgroundColor}" />
+                    <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -55,80 +57,28 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="ModernActionButton" TargetType="Button">
-            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="Padding" Value="15,8" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="border"
-                                Padding="{TemplateBinding Padding}"
-                                CornerRadius="5"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.5" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
         <Style x:Key="LoadingProgressBarStyle" TargetType="ProgressBar">
             <Setter Property="Foreground" Value="{StaticResource AccentColorBrush}" />
             <Setter Property="Background" Value="{StaticResource TertiaryBackgroundColor}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Height" Value="8" />
+            <Setter Property="Height" Value="6" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ProgressBar">
-                        <Grid x:Name="TemplateRoot">
-                            <Border x:Name="PART_Track"
-                            CornerRadius="4"
-                            Background="{TemplateBinding Background}" />
-
-                            <Border x:Name="PART_Indicator"
-                            CornerRadius="4"
-                            Background="{TemplateBinding Foreground}"
-                            HorizontalAlignment="Left" />
-
-                            <Border x:Name="IndeterminateRoot"
-                            CornerRadius="4"
-                            Background="Transparent"
-                            ClipToBounds="True"
-                            Visibility="Collapsed">
-                                <Rectangle x:Name="IndeterminateIndicator"
-                                   Height="{TemplateBinding Height}"
-                                   Width="100"
-                                   Fill="{TemplateBinding Foreground}">
-                                    <Rectangle.RenderTransform>
-                                        <TranslateTransform X="-100" />
-                                    </Rectangle.RenderTransform>
-                                </Rectangle>
-                            </Border>
-                        </Grid>
-
+                        <Border CornerRadius="3" Background="{TemplateBinding Background}" ClipToBounds="True">
+                            <Rectangle x:Name="Bar" Width="90" HorizontalAlignment="Left" Fill="{TemplateBinding Foreground}" RadiusX="3" RadiusY="3">
+                                <Rectangle.RenderTransform>
+                                    <TranslateTransform X="-90" />
+                                </Rectangle.RenderTransform>
+                            </Rectangle>
+                        </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsIndeterminate" Value="True">
-                                <Setter TargetName="PART_Indicator" Property="Visibility" Value="Collapsed" />
-                                <Setter TargetName="IndeterminateRoot" Property="Visibility" Value="Visible" />
-
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard RepeatBehavior="Forever">
-                                            <DoubleAnimation
-                                        Storyboard.TargetName="IndeterminateIndicator"
-                                        Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
-                                        From="-300"
-                                        To="300"
-                                        Duration="0:0:2" />
+                                            <DoubleAnimation Storyboard.TargetName="Bar"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                             From="-90" To="300" Duration="0:0:1.6" />
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.EnterActions>
@@ -140,146 +90,206 @@
         </Style>
     </Window.Resources>
 
-    <Border BorderBrush="{StaticResource TertiaryBackgroundColor}" BorderThickness="1">
+    <Border BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="1">
         <Grid>
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="32" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" Background="{StaticResource SecondaryBackgroundColor}" MouseDown="TitleBar_MouseDown">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-                        <Image Source="/Assets/icon.ico" Width="18" Height="18" Margin="8,0,0,0" />
-                        <TextBlock Text="{Binding WindowTitle}" Foreground="{StaticResource PrimaryForegroundColor}" Margin="10,0,0,0" VerticalAlignment="Center" />
+                <!-- ===== Title bar ===== -->
+                <Grid Grid.Row="0" Background="Transparent" MouseDown="TitleBar_MouseDown">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0">
+                        <Image Source="/Assets/icon.ico" Width="16" Height="16" />
+                        <TextBlock Text="OLED Sleeper" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12.5" Margin="9,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Style="{StaticResource WindowButtonStyle}" Content="&#xE921;" Click="MinimizeButton_Click" ToolTip="Minimize" />
-                        <Button Style="{StaticResource WindowButtonStyle}" Content="&#xE922;" Click="MaximizeButton_Click" ToolTip="Maximize" />
-                        <Button Style="{StaticResource CloseButtonStyle}" Content="&#xE8BB;" Click="CloseButton_Click" ToolTip="Close" />
+                        <Button Style="{StaticResource WindowButtonStyle}" Content="&#xE921;" Click="MinimizeButton_Click" ToolTip="Minimaliseren" />
+                        <Button Style="{StaticResource WindowButtonStyle}" Content="&#xE922;" Click="MaximizeButton_Click" ToolTip="Maximaliseren" />
+                        <Button Style="{StaticResource CloseButtonStyle}" Content="&#xE8BB;" Click="CloseButton_Click" ToolTip="Naar het systeemvak (blijft actief)" />
                     </StackPanel>
                 </Grid>
 
-                <Grid Margin="15" Grid.Row="1">
-                    <views:MonitorLayoutView />
+                <!-- ===== Personal header ===== -->
+                <Grid Grid.Row="1" Margin="22,6,22,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="GreetingText" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource PrimaryForegroundColor}" Text="Goedenavond" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource AccentColorBrush}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StatusText" FontSize="13.5" Margin="8,0,0,0" Foreground="{StaticResource SecondaryForegroundColor}" />
+                        </StackPanel>
+                        <TextBlock x:Name="ScheduleText" FontSize="12.5" Margin="16,3,0,0" Foreground="{StaticResource SecondaryForegroundColor}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Button x:Name="WorkModeButton" Style="{StaticResource SubtleButton}" Click="WorkMode_Click" Padding="16,9">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="WorkModeIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock x:Name="WorkModeLabel" Text="Werkmodus aan" Margin="9,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock x:Name="HotkeyHint" FontSize="11.5" Margin="0,6,0,0" HorizontalAlignment="Center" Foreground="{StaticResource SecondaryForegroundColor}" />
+                    </StackPanel>
                 </Grid>
 
-                <Border Grid.Row="2" Margin="15,0,15,15"
-                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8"
-                        Visibility="{Binding SelectedMonitor, Converter={StaticResource NotNullToVisibilityConverter}}">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                <!-- ===== Tabs ===== -->
+                <TabControl Grid.Row="2" Style="{StaticResource Tabs}">
 
-                        <views:MonitorConfigurationView Grid.Row="0" DataContext="{Binding SelectedMonitor.Configuration}" />
+                    <!-- ===== Schermen ===== -->
+                    <TabItem Header="Schermen">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="200" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                        <Border Grid.Row="1" BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="15">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,0">
-                                <Button Content="Discard Changes"
-                                        Command="{Binding DiscardChangesCommand}"
-                                        IsEnabled="{Binding IsDirty}"
-                                        Style="{StaticResource ModernActionButton}"
-                                        Background="Transparent" BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1" />
-                                <Button Content="{Binding SaveButtonText}"
-                                        Command="{Binding SaveSettingsCommand}"
-                                        IsEnabled="{Binding IsDirty}"
-                                        Style="{StaticResource ModernActionButton}"
-                                        Background="{StaticResource AccentColorBrush}" Margin="15,0,0,0" />
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="8">
+                                <views:MonitorLayoutView />
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" Margin="0,0,0,12"
+                                    Visibility="{Binding SelectedMonitor, Converter={StaticResource NotNullToVisibilityConverter}}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <views:MonitorConfigurationView DataContext="{Binding SelectedMonitor.Configuration}" />
+                                </ScrollViewer>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}"
+                                    Visibility="{Binding SelectedMonitor, Converter={StaticResource NullToVisibilityConverter}}">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="28" HorizontalAlignment="Center" Foreground="{StaticResource AccentColorBrush}" />
+                                    <TextBlock Text="Kies hierboven een scherm om in te stellen" FontSize="15" Margin="0,10,0,0" HorizontalAlignment="Center" Foreground="{StaticResource SecondaryForegroundColor}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== Sterrenhemel ===== -->
+                    <TabItem Header="Sterrenhemel">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
+                                    <Grid>
+                                        <sky:SkyView x:Name="SkyPreview" />
+                                        <TextBlock Text="De hemel van vandaag boven Nederland" Margin="16,12,0,0" FontSize="12" Foreground="#6E7486" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op dit scherm" Click="PreviewSky_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Sterrenhemel als screensaver" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="Kies bij een scherm 'Sterren' als gedrag. Echte sterren, sterrenbeelden, planeten en de maan van vandaag; alles beweegt langzaam, dus er kan niets inbranden. Muis bewegen stopt het voorbeeld." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="GapBox" Style="{StaticResource Field}" Width="64"
+                                                         LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
+                                                         ToolTip="De afstand tussen het beeld van het ene en het andere scherm (beide randen samen)." />
+                                                <TextBlock Text="cm" Margin="8,0,14,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                <Button Content="Kalibreren" Style="{StaticResource SubtleButton}" Click="Calibrate_Click"
+                                                        ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Ruimte tussen de schermen" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="GapStatus" Style="{StaticResource CardText}"
+                                                           Text="Zo lopen sterren en vallende sterren 'achter de rand langs' van het ene naar het andere scherm." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                        </Border>
-                    </Grid>
-                </Border>
+                        </ScrollViewer>
+                    </TabItem>
 
-                <Border Grid.Row="2" MinHeight="220" Margin="15,0,15,15"
-                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8"
-                        Visibility="{Binding SelectedMonitor, Converter={StaticResource NullToVisibilityConverter}}">
-                    <TextBlock Text="Click a monitor above to configure its settings."
-                               Foreground="{StaticResource SecondaryForegroundColor}" FontSize="16"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
+                    <!-- ===== Algemeen ===== -->
+                    <TabItem Header="Algemeen">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <TextBox x:Name="HotkeyBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="150" IsReadOnly="True" Cursor="Hand"
+                                                 CaretBrush="Transparent" VerticalAlignment="Center"
+                                                 GotKeyboardFocus="HotkeyBox_GotFocus" LostKeyboardFocus="HotkeyBox_LostFocus"
+                                                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                                 ToolTip="Klik hier en druk de combinatie die je wilt gebruiken (met Ctrl, Alt, Shift of Win)." />
+                                        <StackPanel>
+                                            <TextBlock Text="Sneltoets snelmenu" Style="{StaticResource CardTitle}" />
+                                            <TextBlock x:Name="HotkeyStatus" Style="{StaticResource CardText}"
+                                                       Text="Ingedrukt houden, tikken = volgende keuze, loslaten = kiezen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
 
-                <!-- Hotkey for the quick panel -->
-                <Border Grid.Row="3" Margin="15,0,15,15" Padding="15,10"
-                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="GlobalIdleBox" Style="{StaticResource Field}" Width="56"
+                                                         LostKeyboardFocus="GlobalIdleBox_LostFocus" KeyDown="GlobalIdleBox_KeyDown" />
+                                                <TextBlock Text="min" Margin="8,0,16,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                <CheckBox x:Name="GlobalIdleCheck" Style="{StaticResource Switch}" Click="GlobalIdle_Changed" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Alle schermen uit als je weg bent" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="GlobalIdleStatus" Style="{StaticResource CardText}"
+                                                           Text="Na deze tijd zonder muis of toets gaan alle bewaakte schermen naar hun stand. Speelt er een video, dan blijft het scherm met die video aan." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="StartupCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Starten met Windows" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Start verborgen in het systeemvak bij het inloggen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Text="Tip" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Style="{StaticResource CardText}"
+                                                   Text="Zet in Windows (Instellingen → Systeem → Energie) 'Scherm uitschakelen' op Nooit of veel langer; OLED Sleeper regelt het dan per scherm." />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+
+                <!-- ===== Footer ===== -->
+                <Border Grid.Row="3" BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="0,1,0,0" Padding="22,9">
                     <DockPanel>
-                        <TextBlock Text="Sneltoets snelmenu" Foreground="{StaticResource PrimaryForegroundColor}" FontSize="14"
-                                   VerticalAlignment="Center" />
-                        <TextBox x:Name="HotkeyBox" DockPanel.Dock="Right" Width="170" Height="30" IsReadOnly="True" Cursor="Hand"
-                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="14"
-                                 Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
-                                 BorderBrush="{StaticResource SeparatorColorBrush}" CaretBrush="Transparent"
-                                 GotKeyboardFocus="HotkeyBox_GotFocus" LostKeyboardFocus="HotkeyBox_LostFocus"
-                                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                 ToolTip="Klik hier en druk de combinatie die je wilt gebruiken (met Ctrl, Alt, Shift of Win)." />
-                        <TextBlock x:Name="HotkeyStatus" Margin="12,0,12,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{StaticResource SecondaryForegroundColor}"
-                                   Text="ingedrukt houden, tik = volgende, loslaten = kiezen" />
-                    </DockPanel>
-                </Border>
-
-                <!-- General timer -->
-                <Border Grid.Row="5" Margin="15,0,15,15" Padding="15,10"
-                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
-                    <DockPanel>
-                        <CheckBox x:Name="GlobalIdleCheck" VerticalAlignment="Center" Click="GlobalIdle_Changed"
-                                  Foreground="{StaticResource PrimaryForegroundColor}" FontSize="14"
-                                  Content="Alle schermen na" />
-                        <TextBox x:Name="GlobalIdleBox" Width="50" Height="30" Margin="10,0,0,0" FontSize="14"
-                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                 Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
-                                 BorderBrush="{StaticResource SeparatorColorBrush}" CaretBrush="{StaticResource PrimaryForegroundColor}"
-                                 LostKeyboardFocus="GlobalIdleBox_LostFocus" KeyDown="GlobalIdleBox_KeyDown" />
-                        <TextBlock Text="min zonder muis of toets" Margin="10,0,0,0" FontSize="14" VerticalAlignment="Center"
-                                   Foreground="{StaticResource PrimaryForegroundColor}" />
-                        <TextBlock x:Name="GlobalIdleStatus" Margin="14,0,0,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{StaticResource SecondaryForegroundColor}"
-                                   Text="dan gaan alle bewaakte schermen naar hun stand, ook met muis of venster erop" />
-                    </DockPanel>
-                </Border>
-
-                <!-- Space between the screens, for the sky panorama -->
-                <Border Grid.Row="4" Margin="15,0,15,15" Padding="15,10"
-                        Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
-                    <DockPanel>
-                        <TextBlock Text="Ruimte tussen schermen" Foreground="{StaticResource PrimaryForegroundColor}" FontSize="14"
-                                   VerticalAlignment="Center" />
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <TextBox x:Name="GapBox" Width="70" Height="30" FontSize="14"
-                                     HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                     Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
-                                     BorderBrush="{StaticResource SeparatorColorBrush}" CaretBrush="{StaticResource PrimaryForegroundColor}"
-                                     LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
-                                     ToolTip="Meet de afstand tussen het beeld van het ene en het andere scherm (randen samen)." />
-                            <TextBlock Text="cm" Margin="8,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
-                            <Button Content="Kalibreren" Margin="14,0,0,0" Padding="14,4" Click="Calibrate_Click" Cursor="Hand"
-                                    Background="{StaticResource TertiaryBackgroundColor}" Foreground="{StaticResource PrimaryForegroundColor}"
-                                    BorderBrush="{StaticResource SeparatorColorBrush}"
-                                    ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
-                        </StackPanel>
-                        <TextBlock x:Name="GapStatus" Margin="12,0,12,0" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{StaticResource SecondaryForegroundColor}"
-                                   Text="sterren lopen dan 'achter de rand langs' van scherm naar scherm" />
+                        <TextBlock x:Name="VersionText" DockPanel.Dock="Right" FontSize="11.5" Foreground="#5C6272" />
+                        <TextBlock x:Name="SaveStatusText" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}"
+                                   Text="Wijzigingen worden automatisch opgeslagen" />
                     </DockPanel>
                 </Border>
             </Grid>
 
-            <Grid Background="#A0000000"
+            <Grid Background="#C008090C"
                   Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Collapsed}">
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <ProgressBar Style="{StaticResource LoadingProgressBarStyle}"
-                                 IsIndeterminate="True"
-                                 Width="300" />
-                    <TextBlock Text="Loading monitors..."
-                               Foreground="White"
-                               FontSize="16"
-                               Margin="0,15,0,0"
-                               HorizontalAlignment="Center" />
+                    <ProgressBar Style="{StaticResource LoadingProgressBarStyle}" IsIndeterminate="True" Width="220" />
+                    <TextBlock Text="Schermen zoeken…" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="14"
+                               Margin="0,14,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Grid>

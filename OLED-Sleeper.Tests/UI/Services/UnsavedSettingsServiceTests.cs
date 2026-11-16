@@ -137,8 +137,8 @@ namespace OLED_Sleeper.Tests.UI.Services
             _service.ConfirmExit();
 
             // Assert
-            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("hiding the window")), "Unsaved Changes"), Times.Once);
-            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("exiting")), "Unsaved Changes"), Times.Once);
+            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("voordat het venster sluit")), "Niet opgeslagen wijzigingen"), Times.Once);
+            _dialogServiceMock.Verify(x => x.AskYesNoCancel(It.Is<string>(m => m.Contains("voordat OLED Sleeper stopt")), "Niet opgeslagen wijzigingen"), Times.Once);
         }
 
         /// <summary>
@@ -148,7 +148,7 @@ namespace OLED_Sleeper.Tests.UI.Services
         private void SetupAnswer(MessageBoxResult answer)
         {
             _dialogServiceMock
-                .Setup(x => x.AskYesNoCancel(It.IsAny<string>(), "Unsaved Changes"))
+                .Setup(x => x.AskYesNoCancel(It.IsAny<string>(), "Niet opgeslagen wijzigingen"))
                 .Returns(answer);
         }
     }

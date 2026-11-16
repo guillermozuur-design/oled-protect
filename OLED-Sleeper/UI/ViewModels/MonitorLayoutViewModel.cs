@@ -1,4 +1,4 @@
-﻿using OLED_Sleeper.Features.MonitorInformation.Models;
+using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.UI.Helpers;
 using System.Windows;
 using System.Windows.Media;
@@ -63,7 +63,15 @@ namespace OLED_Sleeper.UI.ViewModels
         /// <summary>
         /// The background color for the monitor representation in the layout.
         /// </summary>
-        public SolidColorBrush BackgroundColor => new SolidColorBrush(Color.FromRgb(60, 60, 60));
+        public Brush BackgroundColor { get; } = CreateTileBrush();
+
+        /// <summary>A small night-sky gradient for the monitor tiles, matching the app's theme.</summary>
+        private static Brush CreateTileBrush()
+        {
+            var brush = new LinearGradientBrush(Color.FromRgb(30, 38, 62), Color.FromRgb(14, 17, 28), 90);
+            brush.Freeze();
+            return brush;
+        }
 
         /// <summary>
         /// The scaled width of the monitor for layout display.

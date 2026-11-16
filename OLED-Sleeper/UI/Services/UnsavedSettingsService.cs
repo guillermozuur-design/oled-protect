@@ -10,15 +10,15 @@ namespace OLED_Sleeper.UI.Services
         IUnsavedSettings unsavedSettings,
         IDialogService dialogService) : IUnsavedSettingsService
     {
-        private const string Caption = "Unsaved Changes";
+        private const string Caption = "Niet opgeslagen wijzigingen";
 
         /// <inheritdoc />
         public bool ConfirmHide() =>
-            Confirm("You have unsaved changes. Would you like to save them before hiding the window?");
+            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat het venster sluit?");
 
         /// <inheritdoc />
         public bool ConfirmExit() =>
-            Confirm("You have unsaved changes. Would you like to save them before exiting?");
+            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat OLED Sleeper stopt?");
 
         /// <summary>
         /// Prompts only when there is something to lose. Yes answers with whether the save succeeded;

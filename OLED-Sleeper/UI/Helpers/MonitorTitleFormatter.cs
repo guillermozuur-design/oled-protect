@@ -19,7 +19,7 @@ namespace OLED_Sleeper.UI.Helpers
                 ? monitor.DisplayNumber.ToString()
                 : monitor.TopologyLabel;
 
-            return monitor.IsPrimary ? $"Monitor {number} (Primary)" : $"Monitor {number}";
+            return monitor.IsPrimary ? $"Scherm {number} (hoofdscherm)" : $"Scherm {number}";
         }
     }
 }

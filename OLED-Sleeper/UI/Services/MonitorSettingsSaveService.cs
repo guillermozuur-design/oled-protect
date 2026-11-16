@@ -28,7 +28,7 @@ namespace OLED_Sleeper.UI.Services
             var error = MonitorSettingsValidator.BuildValidationError(monitors);
             if (error != null)
             {
-                _dialogService.ShowError(error, "Monitor Configuration Error");
+                _dialogService.ShowError(error, "Instellingen niet compleet");
                 return false;
             }
 
