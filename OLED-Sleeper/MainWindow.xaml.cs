@@ -1,5 +1,7 @@
 using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.Features.Flights;
 using OLED_Sleeper.Features.KeepAwakeApps;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorIdleDetection.Services;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.Sky;
@@ -18,9 +20,9 @@ using System.Windows.Threading;
 namespace OLED_Sleeper
 {
     /// <summary>
-    /// The main window: a personal header (greeting, current state, work-mode button) and three tabs —
-    /// Schermen (per-screen settings), Sterrenhemel (live preview, bezel gap) and Algemeen (hotkey, general
-    /// timer, start with Windows). Screen settings are saved automatically as soon as they are valid.
+    /// The main window: a personal header (current state, work-mode button) and four tabs — Schermen
+    /// (per-screen settings), Sterrenhemel (live preview, bezel gap), Vliegtuigen (pin, radius, live preview)
+    /// and Algemeen (hotkey, general timer, apps, start with Windows). Screen settings are saved automatically as soon as they are valid.
     /// </summary>
     public partial class MainWindow : Window
     {
@@ -32,14 +34,17 @@ namespace OLED_Sleeper
         private readonly IMonitorSettingsFileService _settingsFile;
         private readonly ScreensaverPreview _preview;
         private readonly KeepAwakeAppsSettings _keepAwakeApps;
+        private readonly FlightsSettings _flights;
+        private FlightsView? _flightsPreview;
         private readonly DispatcherTimer _headerTimer;
         private readonly DispatcherTimer _autoSaveTimer;
 
         public MainWindow(GlobalHotkeyService hotkeyService, PanoramaSettings panorama, IMonitorInfoManager monitorInfoManager,
                           GlobalIdleSettings globalIdle, IWorkModeService workMode, IMonitorSettingsFileService settingsFile,
-                          ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps)
+                          ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps, FlightsSettings flights)
         {
             _keepAwakeApps = keepAwakeApps;
+            _flights = flights;
             InitializeComponent();
             _hotkeyService = hotkeyService;
             _panorama = panorama;
@@ -53,6 +58,7 @@ namespace OLED_Sleeper
             GlobalIdleCheck.IsChecked = _globalIdle.Enabled;
             GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
             StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
+            ShowFlightSettings();
             VersionText.Text = "versie " + AppVersion() + " · gebaseerd op OLED Sleeper van Quorthon13";
 
             _panorama.Changed += () => Dispatcher.BeginInvoke(() => GapBox.Text = FormatCm(_panorama.GapCm));
@@ -72,6 +78,7 @@ namespace OLED_Sleeper
                 // Only tick while the window is on screen.
                 if (IsVisible) { RefreshHeader(); _headerTimer.Start(); _autoSaveTimer.Start(); }
                 else { _headerTimer.Stop(); _autoSaveTimer.Stop(); AutoSave(); }
+                UpdateFlightsPreview();
             };
         }
 
@@ -199,6 +206,95 @@ namespace OLED_Sleeper
             }
             new UI.Views.GapCalibration(_panorama, bounds).Show();
         }
+
+        // ================= Vliegtuigen tab =================
+
+        private void ShowFlightSettings()
+        {
+            PlaceBox.Text = _flights.PlaceName;
+            PlaceStatus.Text = $"Nu: {_flights.PlaceName}. Typ een plaats, adres of postcode (of coördinaten) en kies Zoeken.";
+            RadiusSlider.Value = _flights.RadiusKm;
+            RadiusText.Text = $"{_flights.RadiusKm:0} km";
+            FlightLabelsCheck.IsChecked = _flights.ShowLabels;
+            FlightsPreviewCaption.Text = $"Live rond {_flights.PlaceName}";
+        }
+
+        private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ReferenceEquals(e.OriginalSource, MainTabs)) UpdateFlightsPreview();
+        }
+
+        /// <summary>
+        /// The live preview only runs while its tab is open and the window is visible, so the app never fetches
+        /// aircraft in the background for nothing.
+        /// </summary>
+        private void UpdateFlightsPreview()
+        {
+            bool wanted = IsVisible && MainTabs.SelectedItem == FlightsTab;
+            if (wanted && _flightsPreview == null)
+            {
+                _flightsPreview = new FlightsView(_flights);
+                FlightsPreviewHost.Content = _flightsPreview;
+            }
+            else if (!wanted && _flightsPreview != null)
+            {
+                _flightsPreview.Stop();
+                FlightsPreviewHost.Content = null;
+                _flightsPreview = null;
+            }
+        }
+
+        private void PreviewFlights_Click(object sender, RoutedEventArgs e) => _preview.Show(allScreens: true, OverlayScene.Flights);
+
+        private void PlaceBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) PlaceSearch_Click(sender, e);
+        }
+
+        private async void PlaceSearch_Click(object sender, RoutedEventArgs e)
+        {
+            string text = PlaceBox.Text.Trim();
+            if (text.Length == 0) return;
+            PlaceSearchButton.IsEnabled = false;
+            PlaceStatus.Text = "Zoeken…";
+            try
+            {
+                var result = await PlaceSearch.FindAsync(text);
+                if (result == null)
+                {
+                    PlaceStatus.Text = $"\"{text}\" niet gevonden. Probeer een plaatsnaam, adres of postcode.";
+                    return;
+                }
+                _flights.SetLocation(result.Latitude, result.Longitude, result.Name);
+                ShowFlightSettings();
+                PlaceStatus.Text = $"Opgeslagen ✓ — pin op {result.Name}. De kaart van deze plek wordt één keer opgehaald.";
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning("Place search failed: {Message}", ex.Message);
+                PlaceStatus.Text = "Zoeken lukt nu niet (geen verbinding?). Je kunt ook coördinaten typen, zoals 52.09, 5.12.";
+            }
+            finally
+            {
+                PlaceSearchButton.IsEnabled = true;
+            }
+        }
+
+        private void RadiusSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (RadiusText == null) return; // during InitializeComponent
+            RadiusText.Text = $"{e.NewValue:0} km";
+            if (!IsLoaded) return;
+            // Apply when the slider comes to rest, so dragging it does not load a map for every step.
+            _radiusDebounce ??= new DispatcherTimer(TimeSpan.FromMilliseconds(600), DispatcherPriority.Normal,
+                (_, _) => { _radiusDebounce!.Stop(); _flights.SetRadius(RadiusSlider.Value); }, Dispatcher);
+            _radiusDebounce.Stop();
+            _radiusDebounce.Start();
+        }
+
+        private DispatcherTimer? _radiusDebounce;
+
+        private void FlightLabels_Click(object sender, RoutedEventArgs e) => _flights.SetShowLabels(FlightLabelsCheck.IsChecked == true);
 
         // ================= Algemeen tab =================
 

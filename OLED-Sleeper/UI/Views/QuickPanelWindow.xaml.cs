@@ -36,6 +36,7 @@ namespace OLED_Sleeper.UI.Views
         private readonly IWorkModeService _workMode;
         private readonly Action _openApp;
         private readonly Action _previewScreensaver;
+        private readonly Action _previewFlights;
         private readonly Rect _monitorBounds;
         private readonly int _holdKey;
         private readonly DispatcherTimer _poll;
@@ -49,13 +50,14 @@ namespace OLED_Sleeper.UI.Views
 
         /// <param name="holdKey">Virtual key of the modifier held with the hotkey (e.g. VK_MENU for Alt).</param>
         /// <param name="hint">Short usage hint shown at the bottom.</param>
-        public QuickPanelWindow(IWorkModeService workMode, Action openApp, Action previewScreensaver, Rect monitorBounds,
+        public QuickPanelWindow(IWorkModeService workMode, Action openApp, Action previewScreensaver, Action previewFlights, Rect monitorBounds,
                                 int holdKey, string hint)
         {
             InitializeComponent();
             _workMode = workMode;
             _openApp = openApp;
             _previewScreensaver = previewScreensaver;
+            _previewFlights = previewFlights;
             _monitorBounds = monitorBounds;
             _holdKey = holdKey;
             HintText.Text = hint;
@@ -83,6 +85,7 @@ namespace OLED_Sleeper.UI.Views
                 new("", until != null ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm}" : "Werkmodus 1 uur",
                     "Daarna gaat de bescherming vanzelf weer aan", on && until != null, () => _workMode.EnableFor(TimedWorkMode)),
                 new("", "Sterren bekijken", "Op alle schermen; muis bewegen of een toets = stoppen", false, _previewScreensaver),
+                new("", "Vliegtuigen bekijken", "Live kaart op alle schermen; muis of toets = stoppen", false, _previewFlights),
                 new("", "App openen", "Instellingen per scherm", false, _openApp),
             };
 

@@ -91,6 +91,7 @@ namespace OLED_Sleeper.UI.Services
             _quickPanel = new Views.QuickPanelWindow(_workModeService,
                 () => _showMainWindowAction?.Invoke(),
                 ShowScreensaverPreview,
+                () => _preview.Show(allScreens: true, Features.MonitorBlackout.Models.OverlayScene.Flights),
                 monitor.Bounds,
                 _hotkeyService.HoldKey,
                 $"{modifier} vasthouden + {key} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten");
@@ -157,6 +158,7 @@ namespace OLED_Sleeper.UI.Services
             contextMenu.Items.Add(CreateWorkModeMenuItem());
             contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(CreatePreviewMenuItem());
+            contextMenu.Items.Add(CreateFlightsPreviewMenuItem());
             contextMenu.Items.Add(CreateShowSettingsMenuItem());
             contextMenu.Items.Add(CreateStartupMenuItem());
             contextMenu.Items.Add(new Separator());
@@ -185,6 +187,13 @@ namespace OLED_Sleeper.UI.Services
         {
             var item = new MenuItem { Header = "Sterrenhemel bekijken" };
             item.Click += (_, _) => ShowScreensaverPreview();
+            return item;
+        }
+
+        private MenuItem CreateFlightsPreviewMenuItem()
+        {
+            var item = new MenuItem { Header = "Vliegtuigen bekijken" };
+            item.Click += (_, _) => _preview.Show(allScreens: true, Features.MonitorBlackout.Models.OverlayScene.Flights);
             return item;
         }
 

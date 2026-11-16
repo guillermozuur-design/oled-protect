@@ -88,6 +88,40 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ModernSlider" TargetType="Slider">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid>
+                            <Border x:Name="Track" Height="4" Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="2" />
+                            <Canvas>
+                                <Border x:Name="PART_SelectionRange" Background="{StaticResource AccentColorBrush}" Height="4" CornerRadius="2" />
+                            </Canvas>
+                            <Track x:Name="PART_Track">
+                                <Track.Thumb>
+                                    <Thumb x:Name="Thumb" Width="16" Height="16" Background="{StaticResource PrimaryForegroundColor}" BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Thumb" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="1">
@@ -139,7 +173,7 @@
                 </Grid>
 
                 <!-- ===== Tabs ===== -->
-                <TabControl Grid.Row="2" Style="{StaticResource Tabs}">
+                <TabControl x:Name="MainTabs" Grid.Row="2" Style="{StaticResource Tabs}" SelectionChanged="MainTabs_SelectionChanged">
 
                     <!-- ===== Schermen ===== -->
                     <TabItem Header="Schermen">
@@ -211,6 +245,74 @@
                                         </DockPanel>
                                     </StackPanel>
                                 </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- ===== Vliegtuigen ===== -->
+                    <TabItem Header="Vliegtuigen" x:Name="FlightsTab">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
+                                    <Grid>
+                                        <ContentControl x:Name="FlightsPreviewHost" />
+                                        <TextBlock x:Name="FlightsPreviewCaption" Margin="16,12,0,0" FontSize="12" Foreground="#6E7486" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op alle schermen" Click="PreviewFlights_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Vliegtuigen als screensaver" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="Kies bij een scherm 'Vliegtuigen' als gedrag. Een donkere kaart met wegen, water en plaatsen, en de echte vliegtuigen van dit moment erboven. De kaart drijft, draait en zoomt heel langzaam en start elke keer ergens anders, dus er kan niets inbranden." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="PlaceBox" Style="{StaticResource Field}" Width="210" KeyDown="PlaceBox_KeyDown"
+                                                         ToolTip="Een plaats, adres of postcode, of coördinaten zoals 52.09, 5.12" />
+                                                <Button x:Name="PlaceSearchButton" Content="Zoeken" Style="{StaticResource SubtleButton}" Margin="10,0,0,0" Click="PlaceSearch_Click" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Plek van de pin" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="PlaceStatus" Style="{StaticResource CardText}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Slider x:Name="RadiusSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="15" Maximum="80" TickFrequency="5" IsSnapToTickEnabled="True"
+                                                    VerticalAlignment="Center" ValueChanged="RadiusSlider_ValueChanged" />
+                                            <TextBlock x:Name="RadiusText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Hoe ver om de pin heen" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Kleiner = meer details en grotere plaatsnamen; groter = meer vliegtuigen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="FlightLabelsCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="FlightLabels_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Vluchtnummer en hoogte bij elk vliegtuig" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Kleur van het vliegtuig: oranje = laag (opstijgen of landen), lichtblauw = hoog." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.lol (open ADS-B-data). Zoeken: Nominatim (OpenStreetMap). De coördinaten van de pin worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

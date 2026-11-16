@@ -23,6 +23,11 @@ namespace OLED_Sleeper.Features.MonitorBehavior.Models
         /// <summary>
         /// Show the OLED-friendly starfield screensaver on the monitor.
         /// </summary>
-        Screensaver
+        Screensaver,
+
+        /// <summary>
+        /// Show the flights screensaver: a dim, drifting map with the real aircraft flying over it.
+        /// </summary>
+        Flights
     }
 }

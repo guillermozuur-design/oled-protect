@@ -361,6 +361,10 @@
                                 IsChecked="{Binding Behavior, Converter={StaticResource EnumToBooleanConverter}, ConverterParameter={x:Static models1:MonitorBehaviorType.Screensaver}, UpdateSourceTrigger=PropertyChanged}"
                                 ToolTip="OLED-vriendelijke screensaver: zwarte hemel met twinkelende en vallende sterren."
                                 ToolTipService.InitialShowDelay="200" />
+                            <RadioButton Content="Vliegtuigen" GroupName="Behavior" Style="{StaticResource ModernRadioButton}" Margin="25,0,0,0"
+                                IsChecked="{Binding Behavior, Converter={StaticResource EnumToBooleanConverter}, ConverterParameter={x:Static models1:MonitorBehaviorType.Flights}, UpdateSourceTrigger=PropertyChanged}"
+                                ToolTip="Een donkere, langzaam bewegende kaart met de echte vliegtuigen erboven (instellen in het tabblad Vliegtuigen)."
+                                ToolTipService.InitialShowDelay="200" />
                         </StackPanel>
                         <CheckBox Content="Ook helderheid naar 0" Style="{StaticResource ModernCheckBox}" Margin="0,12,0,0" FontSize="13"
                             IsChecked="{Binding LowerBrightnessOnBlackout, UpdateSourceTrigger=PropertyChanged}"

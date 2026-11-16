@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Messaging.Interfaces;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Commands
@@ -20,8 +21,8 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Commands
         public bool LowerBrightness { get; init; } = false;
 
         /// <summary>
-        /// When true the overlay shows the starfield screensaver instead of plain black.
+        /// What the overlay shows once the screen is black (black, stars or flights).
         /// </summary>
-        public bool Screensaver { get; init; } = false;
+        public OverlayScene Scene { get; init; } = OverlayScene.Black;
     }
 }

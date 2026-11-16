@@ -43,7 +43,7 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
             SetupMonitors(monitors);
 
             _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()))
+                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
                 .Returns(Task.CompletedTask);
 
             _monitorDimmingServiceMock
@@ -54,7 +54,7 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
             await _handler.HandleAsync(command);
 
             // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<bool>()), Times.Once);
+            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
             _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(hardwareId, 0), Times.Once);
         }
 
@@ -73,14 +73,14 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
             SetupMonitors(monitors);
 
             _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()))
+                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             await _handler.HandleAsync(command);
 
             // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<bool>()), Times.Once);
+            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
             _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
         }
 
@@ -99,14 +99,14 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
             SetupMonitors(monitors);
 
             _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()))
+                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             await _handler.HandleAsync(command);
 
             // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<bool>()), Times.Once);
+            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
             _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
         }
 
@@ -125,7 +125,7 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
 
             // Assert
             Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()), Times.Never);
+            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Never);
             _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
         }
 
@@ -144,7 +144,7 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
             SetupMonitors(monitors);
 
             _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()))
+                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
                 .ThrowsAsync(new Exception("Simulated service failure."));
 
             // Act
@@ -169,7 +169,7 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
 
             // Assert
             Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<bool>()), Times.Never);
+            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Never);
             _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
         }
 

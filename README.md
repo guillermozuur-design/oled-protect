@@ -16,7 +16,7 @@ onofficiële versie met veel uitbreidingen.
 ## Wat kan het
 
 **Per scherm**
-- **Zwart, dimmen of sterren** na een eigen wachttijd. Zwart faded zacht in en snel weer uit; dimmen gaat geleidelijk (DDC/CI).
+- **Zwart, dimmen, sterren of vliegtuigen** na een eigen wachttijd. Zwart faded zacht in en snel weer uit; dimmen gaat geleidelijk (DDC/CI).
 - **Wakker houden als** de muis op dat scherm staat, het actieve venster er staat, of je ergens muis/toetsenbord gebruikt.
 - **Maar toch uit na X minuten** zonder muis of toets, ook als er een venster gefocust op staat.
 - **Helderheid op tijden**, bijvoorbeeld 08:00 → 80 %, 19:00 → 50 %, 23:00 → 30 %.
@@ -27,6 +27,15 @@ onofficiële versie met veel uitbreidingen.
 - De hemel draait versneld en de blik beweegt langzaam: niets staat stil en vrijwel alle pixels zijn echt uit, dus geen inbranden.
 - Twee schermen naast elkaar vormen **één doorlopend panorama**, inclusief de ruimte tussen de schermen (instelbaar en te **kalibreren** met schuine lijnen).
 - Af en toe een realistische **vallende ster**; tijdens een meteorenzwerm (Perseïden, Leoniden, …) vanuit de echte richting.
+
+**Vliegtuigen-screensaver**
+- Een donkere kaart (wegen, spoor, kust en water als dunne lijnen, plaatsnamen) rond een **pin** die je zelf kiest, met de
+  **echte vliegtuigen van dit moment** erboven: eigen symbolen per soort toestel (jumbo, widebody, 737/A320, regionaal,
+  klein vliegtuig, helikopter met draaiende rotor), vluchtnummer, type en hoogte.
+- De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,
+  zodat niets op dezelfde pixels blijft. Over twee schermen één doorlopende kaart.
+- Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.lol (open ADS-B-data).
+  De coördinaten van de pin gaan naar die diensten; verder blijven ze op je pc.
 
 **Altijd bij de hand**
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
@@ -56,7 +65,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 217 tests
+dotnet test OLED-Sleeper.sln                       # 269 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
@@ -73,6 +82,7 @@ Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.js
 | Onderdeel | Map |
 |---|---|
 | Sterrenhemel (catalogus, astronomie, weergave, panorama) | `OLED-Sleeper/Features/Sky/` |
+| Vliegtuigen (kaarttegels, vliegtuigdata, drift, weergave) | `OLED-Sleeper/Features/Flights/` |
 | Wanneer is een scherm stil (incl. limieten, video-uitzondering) | `OLED-Sleeper/Features/MonitorIdleDetection/` |
 | Apps die het scherm aan houden | `OLED-Sleeper/Features/KeepAwakeApps/` |
 | Zwart / fade | `OLED-Sleeper/Features/MonitorBlackout/` |
@@ -86,4 +96,8 @@ Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.js
 - Sterrendata: [d3-celestial](https://github.com/ofrohn/d3-celestial) © Olaf Frohn, BSD-3-Clause — zie
   [`OLED-Sleeper/Assets/Sky/LICENSE-d3-celestial.txt`](OLED-Sleeper/Assets/Sky/LICENSE-d3-celestial.txt).
 
-Dit project is niet verbonden aan de makers van OLED Sleeper of d3-celestial.
+- Kaartdata: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-bijdragers (ODbL), tegels via
+  [OpenFreeMap](https://openfreemap.org) / [OpenMapTiles](https://openmaptiles.org). Plaatsen zoeken: Nominatim.
+- Vliegtuigdata: [adsb.lol](https://adsb.lol) (open data, ODbL).
+
+Dit project is niet verbonden aan de makers van OLED Sleeper, d3-celestial, OpenStreetMap, OpenFreeMap of adsb.lol.

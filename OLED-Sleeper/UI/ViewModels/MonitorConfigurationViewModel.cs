@@ -71,7 +71,8 @@ namespace OLED_Sleeper.UI.ViewModels
                 string baseTooltip = "Wat dit scherm doet als de wachttijd voorbij is.\n\n" +
                                      "• Zwart: het scherm wordt helemaal zwart (OLED-pixels uit).\n" +
                                      "• Dimmen: de helderheid van het scherm zelf gaat omlaag (DDC/CI).\n" +
-                                     "• Sterren: de echte sterrenhemel als screensaver.";
+                                     "• Sterren: de echte sterrenhemel als screensaver.\n" +
+                                     "• Vliegtuigen: een donkere kaart met de echte vliegtuigen erboven.";
 
                 if (_monitorInfo.Capabilities?.IsSupported != true)
                 {

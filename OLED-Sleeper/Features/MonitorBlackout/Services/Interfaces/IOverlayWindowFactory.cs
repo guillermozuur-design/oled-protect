@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
 {
     /// <summary>
@@ -9,6 +10,6 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
         /// Creates an overlay that has not been shown yet. Must be called on the UI thread.
         /// </summary>
         /// <returns>The new overlay.</returns>
-        IOverlayWindow Create(bool screensaver = false);
+        IOverlayWindow Create(OverlayScene scene = OverlayScene.Black);
     }
 }

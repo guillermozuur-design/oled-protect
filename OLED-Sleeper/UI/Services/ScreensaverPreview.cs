@@ -1,3 +1,5 @@
+using OLED_Sleeper.Features.Flights;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.Sky;
@@ -17,17 +19,20 @@ namespace OLED_Sleeper.UI.Services
     {
         private readonly IMonitorInfoManager _monitorInfoManager;
         private readonly PanoramaSettings _panorama;
+        private readonly FlightsSettings _flights;
         private readonly List<OverlayWindow> _overlays = new();
 
-        public ScreensaverPreview(IMonitorInfoManager monitorInfoManager, PanoramaSettings panorama)
+        public ScreensaverPreview(IMonitorInfoManager monitorInfoManager, PanoramaSettings panorama, FlightsSettings flights)
         {
             _monitorInfoManager = monitorInfoManager;
             _panorama = panorama;
+            _flights = flights;
         }
 
         /// <param name="allScreens">True: the sky on every screen at once (one continuous panorama).
         /// False: only on the screen under the mouse.</param>
-        public void Show(bool allScreens = false)
+        /// <param name="scene">Stars or flights.</param>
+        public void Show(bool allScreens = false, OverlayScene scene = OverlayScene.Stars)
         {
             if (_overlays.Count > 0) return;
 
@@ -41,7 +46,7 @@ namespace OLED_Sleeper.UI.Services
 
             foreach (var monitor in targets)
             {
-                var overlay = new OverlayWindow(screensaver: true, _panorama);
+                var overlay = new OverlayWindow(scene, _panorama, _flights);
                 overlay.Show(monitor.Bounds);
                 _overlays.Add(overlay);
             }

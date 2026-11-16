@@ -51,7 +51,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Handlers
                     return;
                 }
 
-                var showOverlayTask = _monitorBlackoutService.ShowBlackoutOverlayAsync(monitorInfo.HardwareId, monitorInfo.Bounds, command.Screensaver);
+                var showOverlayTask = _monitorBlackoutService.ShowBlackoutOverlayAsync(monitorInfo.HardwareId, monitorInfo.Bounds, command.Scene);
 
                 if (!command.LowerBrightness)
                 {

@@ -1,3 +1,5 @@
+using OLED_Sleeper.Features.Flights;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces;
 using OLED_Sleeper.Features.Sky;
 using OLED_Sleeper.Native;
@@ -12,7 +14,8 @@ using System.Windows.Threading;
 namespace OLED_Sleeper.Features.MonitorBlackout.Services
 {
     /// <summary>
-    /// Covers one monitor: fades it to black, and for the screensaver shows the <see cref="SkyView"/> night sky.
+    /// Covers one monitor: fades it to black, and for a screensaver shows the <see cref="SkyView"/> night sky or
+    /// the <see cref="FlightsView"/> flight map.
     ///
     /// The fade is done by a <see cref="FadeCurtain"/>, a plain black Win32 window whose transparency Windows
     /// blends on the GPU — smooth at any refresh rate (WPF's own transparency renders in software and stutters
@@ -33,12 +36,13 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         /// <summary>How long the stars take to appear once the screen is black.</summary>
         private static readonly TimeSpan StarsFadeIn = TimeSpan.FromSeconds(1.2);
 
-        private readonly bool _screensaver;
+        private readonly OverlayScene _scene;
         private readonly PanoramaSettings? _panorama;
+        private readonly FlightsSettings? _flights;
         private readonly DispatcherTimer _topmostTimer;
         private FadeCurtain? _curtain;
         private Window? _skyWindow;
-        private SkyView? _sky;
+        private FrameworkElement? _sky;
         private Rect _bounds;
         private bool _closing;
 
@@ -49,10 +53,11 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         private Action? _fadeDone;
         private bool _fading;
 
-        public OverlayWindow(bool screensaver = false, PanoramaSettings? panorama = null)
+        public OverlayWindow(OverlayScene scene = OverlayScene.Black, PanoramaSettings? panorama = null, FlightsSettings? flights = null)
         {
-            _screensaver = screensaver;
+            _scene = scene == OverlayScene.Flights && flights == null ? OverlayScene.Stars : scene;
             _panorama = panorama;
+            _flights = flights;
             _topmostTimer = new DispatcherTimer { Interval = TopmostReassertInterval };
             _topmostTimer.Tick += (_, _) => ReassertTopmost();
         }
@@ -67,7 +72,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             _topmostTimer.Start();
             StartFade(0, 1, FadeInDuration, () =>
             {
-                if (_screensaver && !_closing) ShowSky();
+                if (_scene != OverlayScene.Black && !_closing) ShowSky();
             });
         }
 
@@ -90,15 +95,13 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
 
         private void ShowSky()
         {
-            _sky = new SkyView { Opacity = 0 };
-            if (_bounds.Width > 0)
-            {
-                // Screens next to each other show neighbouring parts of the same sky.
-                var (index, count) = PanoramaLayout.Position(_bounds);
-                _sky.PanoramaIndex = index;
-                _sky.PanoramaCount = count;
-                _sky.GapFraction = _panorama?.GapFraction(_bounds) ?? 0;
-            }
+            // Screens next to each other show neighbouring parts of the same sky (or map).
+            var (index, count) = _bounds.Width > 0 ? PanoramaLayout.Position(_bounds) : (0, 1);
+            double gap = _bounds.Width > 0 ? _panorama?.GapFraction(_bounds) ?? 0 : 0;
+            if (_scene == OverlayScene.Flights)
+                _sky = new FlightsView(_flights!) { Opacity = 0, PanoramaIndex = index, PanoramaCount = count, GapFraction = gap };
+            else
+                _sky = new SkyView { Opacity = 0, PanoramaIndex = index, PanoramaCount = count, GapFraction = gap };
 
             _skyWindow = new Window
             {
@@ -134,7 +137,8 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
 
         private void CloseSky()
         {
-            _sky?.Stop();
+            (_sky as SkyView)?.Stop();
+            (_sky as FlightsView)?.Stop();
             _skyWindow?.Close();
             _skyWindow = null;
             _sky = null;

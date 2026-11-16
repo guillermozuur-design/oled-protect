@@ -1,6 +1,7 @@
 using OLED_Sleeper.Features.MonitorBehavior.Commands;
 using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Commands;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorDimming.Commands;
 using OLED_Sleeper.Messaging.Interfaces;
 using Serilog;
@@ -32,7 +33,10 @@ namespace OLED_Sleeper.Features.MonitorBehavior.Handlers
                     await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, LowerBrightness = e.Settings.LowerBrightnessOnBlackout });
                     break;
                 case MonitorBehaviorType.Screensaver:
-                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, Screensaver = true });
+                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, Scene = OverlayScene.Stars });
+                    break;
+                case MonitorBehaviorType.Flights:
+                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, Scene = OverlayScene.Flights });
                     break;
                 case MonitorBehaviorType.Dim:
                     await _mediator.SendAsync(new ApplyDimCommand { HardwareId = e.HardwareId, DimLevel = (int)e.Settings.DimLevel });

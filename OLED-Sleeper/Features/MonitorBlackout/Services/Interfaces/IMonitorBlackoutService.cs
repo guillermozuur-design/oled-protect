@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using System.Windows;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
@@ -13,7 +14,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
         /// <param name="hardwareId">The unique hardware ID of the monitor.</param>
         /// <param name="bounds">The bounds of the monitor in screen coordinates.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, bool screensaver = false);
+        Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, OverlayScene scene = OverlayScene.Black);
 
         /// <summary>
         /// Asynchronously hides the blackout overlay for the specified monitor.

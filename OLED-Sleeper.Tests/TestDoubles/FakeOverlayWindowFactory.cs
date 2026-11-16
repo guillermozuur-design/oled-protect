@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.TestDoubles
@@ -33,7 +34,7 @@ namespace OLED_Sleeper.Tests.TestDoubles
         public List<FakeOverlayWindow> Created { get; } = new();
 
         /// <inheritdoc />
-        public IOverlayWindow Create(bool screensaver = false)
+        public IOverlayWindow Create(OverlayScene scene = OverlayScene.Black)
         {
             var overlay = new FakeOverlayWindow(_nextHandle);
 
