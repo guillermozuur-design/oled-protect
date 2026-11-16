@@ -1,4 +1,4 @@
-; Inno Setup installer script for OLED Space Sleeper (a fork of OLED Sleeper by Quorthon13)
+﻿; Inno Setup installer script for OLED Space Sleeper (a fork of OLED Sleeper by Quorthon13)
 ; Builds a single installer supporting both x64 and x86 deployments.
 
 #include "CodeDependencies.iss"
@@ -60,11 +60,9 @@ Name: "startup"; Description: "Launch OLED Space Sleeper when Windows starts"; G
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional shortcuts:";
 
 [InstallDelete]
-; Every install starts from default settings and no recorded brightness. Logs are deliberately kept, so a
-; report about a build still carries the history from before it was installed.
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\settings.json"
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\settings.json.bak"
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\settings.json.tmp"
+; Settings are KEPT on install and update: the settings file stays compatible between versions (schema 1;
+; new options get their default). Only a recorded brightness is cleared — setup waits for the app to close,
+; and the app restores brightness itself when it closes. Logs are kept as well.
 Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json"
 Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json.bak"
 Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json.tmp"
