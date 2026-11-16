@@ -280,6 +280,32 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Flat button for the schedule rows (+ tijd, remove) -->
+        <Style x:Key="FlatButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SeparatorColorBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <!-- ========== LAYOUT ========== -->
@@ -472,7 +498,7 @@
                                                  Text="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}" />
                                         <TextBlock Text="%" Foreground="{StaticResource PrimaryForegroundColor}" VerticalAlignment="Center" Margin="4,0,0,0" />
                                         <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Width="22" Height="22" Margin="6,0,0,0"
-                                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                Style="{StaticResource FlatButton}"
                                                 Foreground="{StaticResource SecondaryForegroundColor}" ToolTip="Verwijderen"
                                                 Command="{Binding DataContext.RemoveScheduleEntryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                 CommandParameter="{Binding}" />
@@ -486,9 +512,9 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <Button Content="+ tijd" Height="34" Padding="10,0" Margin="0,0,0,6" Cursor="Hand"
-                            Background="Transparent" BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1"
-                            Foreground="{StaticResource PrimaryForegroundColor}"
+                    <Button Content="+ tijd" Height="34" Padding="12,0" Margin="0,0,0,6" FontSize="13"
+                            Style="{StaticResource FlatButton}"
+                            BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1"
                             Command="{Binding AddScheduleEntryCommand}" />
                 </WrapPanel>
             </StackPanel>
