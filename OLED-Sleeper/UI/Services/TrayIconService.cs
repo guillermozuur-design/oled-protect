@@ -189,10 +189,10 @@ namespace OLED_Sleeper.UI.Services
         }
 
         /// <summary>
-        /// Shows the starfield on the monitor under the mouse, using the real overlay window, until the
+        /// Shows the starfield on all monitors (one continuous sky), using the real overlay window, until the
         /// mouse is moved. Handy to see what the screensaver looks like without waiting for the idle timer.
         /// </summary>
-        private void ShowScreensaverPreview() => _preview.Show();
+        private void ShowScreensaverPreview() => _preview.Show(allScreens: true);
 
         private MenuItem CreateShowSettingsMenuItem()
         {

@@ -9,15 +9,15 @@ using System.Windows.Threading;
 namespace OLED_Sleeper.UI.Services
 {
     /// <summary>
-    /// Shows the night-sky screensaver on the monitor under the mouse, using the real overlay window, until the
-    /// mouse is moved. Shared by the tray menu, the quick panel and the "Sterrenhemel" tab.
+    /// Shows the night-sky screensaver on the monitor under the mouse (or on all monitors), using the real overlay
+    /// windows, until the mouse is moved or a key is pressed. Shared by the tray menu, the quick panel and the "Sterrenhemel" tab.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public sealed class ScreensaverPreview
     {
         private readonly IMonitorInfoManager _monitorInfoManager;
         private readonly PanoramaSettings _panorama;
-        private OverlayWindow? _overlay;
+        private readonly List<OverlayWindow> _overlays = new();
 
         public ScreensaverPreview(IMonitorInfoManager monitorInfoManager, PanoramaSettings panorama)
         {
@@ -25,17 +25,26 @@ namespace OLED_Sleeper.UI.Services
             _panorama = panorama;
         }
 
-        public void Show()
+        /// <param name="allScreens">True: the sky on every screen at once (one continuous panorama).
+        /// False: only on the screen under the mouse.</param>
+        public void Show(bool allScreens = false)
         {
-            if (_overlay != null) return;
+            if (_overlays.Count > 0) return;
 
             NativeMethods.GetCursorPos(out var start);
             var monitors = _monitorInfoManager.GetLatestMonitorsBasicInfo();
-            var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y))) ?? monitors.FirstOrDefault();
-            if (monitor == null) return;
+            var targets = allScreens
+                ? monitors.ToList()
+                : new[] { monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y))) ?? monitors.FirstOrDefault() }
+                    .Where(m => m != null).Select(m => m!).ToList();
+            if (targets.Count == 0) return;
 
-            _overlay = new OverlayWindow(screensaver: true, _panorama);
-            _overlay.Show(monitor.Bounds);
+            foreach (var monitor in targets)
+            {
+                var overlay = new OverlayWindow(screensaver: true, _panorama);
+                overlay.Show(monitor.Bounds);
+                _overlays.Add(overlay);
+            }
 
             var startedAt = DateTime.UtcNow;
             bool keyPressed = false;
@@ -64,8 +73,8 @@ namespace OLED_Sleeper.UI.Services
                 poll.Stop();
                 _keyHook?.Dispose();
                 _keyHook = null;
-                _overlay?.Close();
-                _overlay = null;
+                foreach (var overlay in _overlays) overlay.Close();
+                _overlays.Clear();
             };
             poll.Start();
         }
