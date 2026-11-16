@@ -483,3 +483,44 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
     }
 }
+
+namespace OLED_Sleeper.Tests.Features.Flights
+{
+    public class FeedSourcesTests
+    {
+        private static readonly OLED_Sleeper.Features.Flights.FeedSources.Source Fast = new("fast", "https://a/{lat}/{lon}/{nm}");
+        private static readonly OLED_Sleeper.Features.Flights.FeedSources.Source Reserve = new("reserve", "https://b/{lat}/{lon}/{nm}");
+        private static readonly DateTime T0 = new(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc);
+
+        [Fact]
+        public void PrefersTheFirstSource()
+        {
+            var s = new OLED_Sleeper.Features.Flights.FeedSources(new[] { Fast, Reserve });
+            Assert.Equal(new[] { Fast, Reserve }, s.Available(T0));
+        }
+
+        [Fact]
+        public void TooManyRequests_RestsThatSourceAMinuteAndUsesTheReserve()
+        {
+            var s = new OLED_Sleeper.Features.Flights.FeedSources(new[] { Fast, Reserve });
+            s.Refused(Fast, T0, tooManyRequests: true);
+            Assert.Equal(new[] { Reserve }, s.Available(T0.AddSeconds(30)));
+            Assert.Equal(new[] { Fast, Reserve }, s.Available(T0.AddSeconds(61)));
+        }
+
+        [Fact]
+        public void RetryAfter_IsRespectedWithinLimits()
+        {
+            var s = new OLED_Sleeper.Features.Flights.FeedSources(new[] { Fast, Reserve });
+            s.Refused(Fast, T0, tooManyRequests: true, TimeSpan.FromHours(5));
+            Assert.DoesNotContain(Fast, s.Available(T0.AddMinutes(9)));
+            Assert.Contains(Fast, s.Available(T0.AddMinutes(11))); // never longer than 10 minutes
+        }
+
+        [Fact]
+        public void Url_FillsInThePlaceWithDots()
+        {
+            Assert.Equal("https://a/52.0907/5.1214/35", OLED_Sleeper.Features.Flights.FeedSources.Url(Fast, 52.09071, 5.12139, 34.6));
+        }
+    }
+}

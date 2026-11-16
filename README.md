@@ -34,7 +34,7 @@ onofficiële versie met veel uitbreidingen.
   klein vliegtuig, helikopter met draaiende rotor), vluchtnummer, type en hoogte.
 - De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,
   zodat niets op dezelfde pixels blijft. Over twee schermen één doorlopende kaart.
-- Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.lol (open ADS-B-data).
+- Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.fi met adsb.lol als reserve (open ADS-B-data).
   De coördinaten van de pin gaan naar die diensten; verder blijven ze op je pc.
 
 **Altijd bij de hand**
@@ -65,7 +65,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 269 tests
+dotnet test OLED-Sleeper.sln                       # 274 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
@@ -98,6 +98,6 @@ Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.js
 
 - Kaartdata: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-bijdragers (ODbL), tegels via
   [OpenFreeMap](https://openfreemap.org) / [OpenMapTiles](https://openmaptiles.org). Plaatsen zoeken: Nominatim.
-- Vliegtuigdata: [adsb.lol](https://adsb.lol) (open data, ODbL).
+- Vliegtuigdata: [adsb.fi](https://adsb.fi) (open data, persoonlijk gebruik) en [adsb.lol](https://adsb.lol) (open data, ODbL).
 
-Dit project is niet verbonden aan de makers van OLED Sleeper, d3-celestial, OpenStreetMap, OpenFreeMap of adsb.lol.
+Dit project is niet verbonden aan de makers van OLED Sleeper, d3-celestial, OpenStreetMap, OpenFreeMap, adsb.fi of adsb.lol.

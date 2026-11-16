@@ -219,8 +219,9 @@ namespace OLED_Sleeper.Features.Flights
             _map = null;
             _mapDirty = true;
             _feed?.Dispose();
-            _feed = AircraftFeed.Subscribe(_settings.Latitude, _settings.Longitude, _settings.RadiusKm * 1.8);
-            if (AircraftFeed.Latest is { } latest) _tracker.Update(latest.Reports, DateTime.UtcNow);
+            _feed = AircraftFeed.Subscribe(_settings.Latitude, _settings.Longitude, FeedRadiusKm(_settings));
+            // Planes from a moment ago (e.g. fetched during the fade to black): show them at once.
+            if (AircraftFeed.RecentFor(_settings.Latitude, _settings.Longitude) is { } recent) _tracker.Update(recent, DateTime.UtcNow);
 
             MapLoader.GetAsync(_settings.Latitude, _settings.Longitude, _settings.RadiusKm, _settings.CacheDirectory)
                 .ContinueWith(t =>
@@ -232,6 +233,9 @@ namespace OLED_Sleeper.Features.Flights
                     });
                 });
         }
+
+        /// <summary>How far around the pin to ask for planes: the drifting view plus a margin for planes flying in.</summary>
+        public static double FeedRadiusKm(FlightsSettings settings) => settings.RadiusKm * 1.6;
 
         private void OnFeedUpdated()
         {

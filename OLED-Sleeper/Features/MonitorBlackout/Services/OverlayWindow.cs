@@ -45,6 +45,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
         private FrameworkElement? _sky;
         private Rect _bounds;
         private bool _closing;
+        private IDisposable? _flightsWarmUp;
 
         // Fade state, driven once per display frame.
         private readonly Stopwatch _fadeClock = new();
@@ -70,6 +71,14 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             _bounds = bounds;
             _curtain = new FadeCurtain(bounds);
             _topmostTimer.Start();
+
+            // Flights: start fetching planes and the map now, during the fade to black, so they are there as
+            // soon as the screen is black (instead of only starting then).
+            if (_scene == OverlayScene.Flights && _flights != null)
+            {
+                _flightsWarmUp = AircraftFeed.Subscribe(_flights.Latitude, _flights.Longitude, FlightsView.FeedRadiusKm(_flights));
+                _ = MapLoader.GetAsync(_flights.Latitude, _flights.Longitude, _flights.RadiusKm, _flights.CacheDirectory);
+            }
             StartFade(0, 1, FadeInDuration, () =>
             {
                 if (_scene != OverlayScene.Black && !_closing) ShowSky();
@@ -81,6 +90,8 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             if (_closing) return;
             _closing = true;
             _topmostTimer.Stop();
+            _flightsWarmUp?.Dispose();
+            _flightsWarmUp = null;
 
             // Stars go at once (the curtain underneath is black), then the black fades away.
             CloseSky();

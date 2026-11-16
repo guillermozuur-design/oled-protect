@@ -223,23 +223,68 @@ namespace OLED_Sleeper.Features.Flights
     }
 
     /// <summary>
-    /// Fetches the aircraft around the pin every few seconds from adsb.lol (free, open ADS-B data), but only
-    /// while a flights screensaver is on screen. Shared by all screens, so two screens make one request.
+    /// Which aircraft source to ask next. A source that refused (429 "too many requests", error, time-out)
+    /// rests for a while and the next one is used; the first source is preferred whenever it is available.
+    /// </summary>
+    public sealed class FeedSources
+    {
+        public sealed record Source(string Name, string UrlTemplate);
+
+        private readonly List<(Source Source, DateTime RestUntil)> _sources;
+
+        public FeedSources(IEnumerable<Source> sources) => _sources = sources.Select(x => (x, DateTime.MinValue)).ToList();
+
+        /// <summary>The sources that may be asked now, best first.</summary>
+        public IEnumerable<Source> Available(DateTime nowUtc) => _sources.Where(x => x.RestUntil <= nowUtc).Select(x => x.Source).ToList();
+
+        /// <summary>The source refused: let it rest. Too many requests → longer (or what it asked for).</summary>
+        public void Refused(Source source, DateTime nowUtc, bool tooManyRequests, TimeSpan? retryAfter = null)
+        {
+            var rest = retryAfter ?? (tooManyRequests ? TimeSpan.FromSeconds(60) : TimeSpan.FromSeconds(20));
+            rest = TimeSpan.FromSeconds(Math.Clamp(rest.TotalSeconds, 5, 600));
+            int i = _sources.FindIndex(x => x.Source == source);
+            if (i >= 0) _sources[i] = (source, nowUtc + rest);
+        }
+
+        public static string Url(Source source, double lat, double lon, double radiusNm) =>
+            source.UrlTemplate
+                .Replace("{lat}", lat.ToString("0.####", CultureInfo.InvariantCulture))
+                .Replace("{lon}", lon.ToString("0.####", CultureInfo.InvariantCulture))
+                .Replace("{nm}", radiusNm.ToString("0", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Fetches the aircraft around the pin every few seconds — from adsb.fi, with adsb.lol as a reserve (both
+    /// free, open ADS-B data from volunteers' receivers) — but only while a flights screensaver is on screen
+    /// or about to be. Shared by all screens, so two screens make one request. The last answer is kept, so a
+    /// screensaver that starts again soon after shows the planes straight away.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public static class AircraftFeed
     {
-        private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
+        /// <summary>Planes move on smoothly in between (see <see cref="AircraftTracker"/>), so this can be calm.</summary>
+        private static readonly TimeSpan Interval = TimeSpan.FromSeconds(8);
+
+        /// <summary>Data older than this is not shown any more when a screensaver starts.</summary>
+        public static readonly TimeSpan MaxAge = TimeSpan.FromSeconds(60);
+
         private static readonly HttpClient Http = CreateClient();
         private static readonly object Gate = new();
         private static readonly List<Subscription> Subscribers = new();
+        private static readonly FeedSources Sources = new(new[]
+        {
+            new FeedSources.Source("adsb.fi", "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}"),
+            new FeedSources.Source("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}"),
+        });
         private static System.Threading.Timer? _timer;
         private static bool _busy;
+        private static string _latestPlace = "";
+        private static DateTime _lastAttemptUtc = DateTime.MinValue;
 
-        /// <summary>The latest reports and when they arrived (null until the first answer).</summary>
+        /// <summary>The latest reports and when they arrived (null until the first answer for this place).</summary>
         public static (List<AircraftReport> Reports, DateTime ReceivedUtc)? Latest { get; private set; }
 
-        /// <summary>True when the last request failed (no internet, service down).</summary>
+        /// <summary>True when the last request failed with every source (no internet, services down).</summary>
         public static bool LastRequestFailed { get; private set; }
 
         /// <summary>Raised (on a background thread) after every successful update.</summary>
@@ -262,18 +307,32 @@ namespace OLED_Sleeper.Features.Flights
             }
         }
 
+        /// <summary>Recent planes for this place, if there are any (to show at once when a screensaver starts).</summary>
+        public static List<AircraftReport>? RecentFor(double lat, double lon)
+        {
+            lock (Gate)
+            {
+                if (Latest is not { } latest || _latestPlace != PlaceKey(lat, lon) || DateTime.UtcNow - latest.ReceivedUtc > MaxAge) return null;
+                return latest.Reports;
+            }
+        }
+
         public static IDisposable Subscribe(double lat, double lon, double radiusKm)
         {
             var s = new Subscription { Lat = lat, Lon = lon, RadiusNm = Math.Clamp(Math.Ceiling(radiusKm / 1.852), 5, 250) };
             lock (Gate)
             {
                 // A different place than what we have: the old planes are not wanted any more.
-                if (Subscribers.Count == 0 || Subscribers[^1].Lat != lat || Subscribers[^1].Lon != lon) Latest = null;
+                if (_latestPlace != PlaceKey(lat, lon)) Latest = null;
                 Subscribers.Add(s);
-                _timer ??= new System.Threading.Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, Interval);
+                // Ask right away, unless we just did (opening and closing a preview should not hammer the service).
+                var first = DateTime.UtcNow - _lastAttemptUtc < TimeSpan.FromSeconds(4) ? Interval : TimeSpan.Zero;
+                _timer ??= new System.Threading.Timer(_ => _ = PollAsync(), null, first, Interval);
             }
             return s;
         }
+
+        private static string PlaceKey(double lat, double lon) => FormattableString.Invariant($"{lat:0.####},{lon:0.####}");
 
         private static async Task PollAsync()
         {
@@ -283,22 +342,47 @@ namespace OLED_Sleeper.Features.Flights
                 if (_busy || Subscribers.Count == 0) return;
                 _busy = true;
                 s = Subscribers[^1];
+                _lastAttemptUtc = DateTime.UtcNow;
             }
 
             try
             {
-                string url = string.Create(CultureInfo.InvariantCulture,
-                    $"https://api.adsb.lol/v2/point/{s.Lat:0.####}/{s.Lon:0.####}/{s.RadiusNm:0}");
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                string json = await Http.GetStringAsync(url, cts.Token);
-                var reports = AircraftParser.Parse(json, DateTime.UtcNow);
-                Latest = (reports, DateTime.UtcNow);
-                LastRequestFailed = false;
-                Updated?.Invoke();
-            }
-            catch (Exception ex)
-            {
-                if (!LastRequestFailed) Serilog.Log.Warning("Aircraft feed unavailable: {Message}", ex.Message);
+                foreach (var source in Sources.Available(DateTime.UtcNow))
+                {
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                        using var response = await Http.GetAsync(FeedSources.Url(source, s.Lat, s.Lon, s.RadiusNm), cts.Token);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            bool tooMany = (int)response.StatusCode == 429;
+                            Sources.Refused(source, DateTime.UtcNow, tooMany, response.Headers.RetryAfter?.Delta);
+                            Serilog.Log.Debug("Aircraft source {Source} refused: {Status}", source.Name, (int)response.StatusCode);
+                            continue;
+                        }
+
+                        string json = await response.Content.ReadAsStringAsync(cts.Token);
+                        var reports = AircraftParser.Parse(json, DateTime.UtcNow);
+                        if (Latest == null)
+                            Serilog.Log.Information("Aircraft feed: {Count} planes via {Source} in {Ms:0} ms.", reports.Count, source.Name, (DateTime.UtcNow - _lastAttemptUtc).TotalMilliseconds);
+                        lock (Gate)
+                        {
+                            Latest = (reports, DateTime.UtcNow);
+                            _latestPlace = PlaceKey(s.Lat, s.Lon);
+                        }
+                        if (LastRequestFailed) Serilog.Log.Information("Aircraft feed back via {Source}.", source.Name);
+                        LastRequestFailed = false;
+                        Updated?.Invoke();
+                        return;
+                    }
+                    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+                    {
+                        Sources.Refused(source, DateTime.UtcNow, tooManyRequests: false);
+                        Serilog.Log.Debug("Aircraft source {Source} failed: {Message}", source.Name, ex.Message);
+                    }
+                }
+
+                if (!LastRequestFailed) Serilog.Log.Warning("Aircraft feed unavailable (all sources refused or failed).");
                 LastRequestFailed = true;
             }
             finally
