@@ -32,9 +32,12 @@ namespace OLED_Sleeper.Features.Sky
         private const double FrameIntervalMs = 33;
 
         // Shooting stars: one chance per second-slot, the same on every screen.
-        private const double MeteorChancePerSecond = 1.0 / 11;
-        private const double ShowerChancePerSecond = 1.0 / 7;
-        private const double MaxMeteorLife = 4.5;      // seconden
+        // Real shooting stars are rare, quick and thin: a streak of half a second to a second that is brightest
+        // near its end and leaves a short glowing trail. Now and then a slower, brighter fireball.
+        private const double MeteorChancePerSecond = 1.0 / 45;
+        private const double ShowerChancePerSecond = 1.0 / 20;
+        private const double FireballChance = 0.03;
+        private const double MaxMeteorLife = 4;        // seconden, inclusief nagloeien
 
         /// <summary>Only the well-known figures get lines and a name; the rest stays as plain stars.</summary>
         private static readonly HashSet<string> FamousConstellations = new(StringComparer.Ordinal)
@@ -126,12 +129,18 @@ namespace OLED_Sleeper.Features.Sky
 
             // Find a moment in the next few minutes where a shooting star is about halfway.
             var t = DateTime.UtcNow;
-            for (int i = 0; i < 600; i++, t = t.AddSeconds(1))
+            for (int i = 0; i < 20000; i++, t = t.AddSeconds(0.1))
             {
-                if (ActiveMeteors(t).Any(m => m.Age > m.Life * 0.3 && m.Age < m.Life * 0.6)) break;
+                if (ActiveMeteors(t).Any(m => m.Age > m.Life * 0.6 && m.Age < m.Life * 0.8)) break;
             }
             _stillFrameTime = t;
+            StillFrameMeteorHeads = ActiveMeteors(t)
+                .Select(m => m.Start + m.Direction * (m.Speed * Math.Min(m.Age, m.Life)) - new Vector(PanoramaIndex * Stride, 0))
+                .ToList();
         }
+
+        /// <summary>Where the shooting stars are in the still frame (this screen's pixels); for preview crops.</summary>
+        public IReadOnlyList<Point> StillFrameMeteorHeads { get; private set; } = Array.Empty<Point>();
 
         // ================= setup =================
 
@@ -298,7 +307,9 @@ namespace OLED_Sleeper.Features.Sky
         // ================= shooting stars (shared by all screens) =================
 
         /// <summary>A shooting star in panorama coordinates: x runs over all screens side by side.</summary>
-        private readonly record struct Meteor(Point Start, Vector Direction, double Speed, double Length, double Life,
+        /// <param name="Life">How long the meteor itself burns (s).</param>
+        /// <param name="Persistence">How fast the trail fades behind it (s, exponential).</param>
+        private readonly record struct Meteor(Point Start, Vector Direction, double Speed, double Life, double Persistence,
                                               double Width, Color Color, double Age);
 
         /// <summary>
@@ -322,9 +333,10 @@ namespace OLED_Sleeper.Features.Sky
                 var startTime = DateTime.UnixEpoch.AddSeconds(slot + rng.NextDouble());
                 double age = (nowUtc - startTime).TotalSeconds;
 
-                bool fireball = rng.NextDouble() < 0.08;
-                double life = (fireball ? 3.0 : 2.2) + rng.NextDouble() * 1.3;
-                if (age < 0 || age >= life) continue;
+                bool fireball = rng.NextDouble() < FireballChance;
+                double life = fireball ? 1.6 + rng.NextDouble() * 0.9 : 0.45 + rng.NextDouble() * 0.6;
+                double persistence = fireball ? 0.35 : 0.11;
+                if (age < 0 || age >= life + persistence * 4) continue;
 
                 var start = new Point(totalWidth * (0.05 + 0.9 * rng.NextDouble()), ActualHeight * (0.05 + 0.45 * rng.NextDouble()));
 
@@ -348,12 +360,15 @@ namespace OLED_Sleeper.Features.Sky
                           : tint < 0.85 ? Color.FromRgb(200, 255, 215)     // groenig (magnesium)
                           : Color.FromRgb(255, 236, 190);                  // geelachtig (natrium)
 
+                // Path length on screen: normal 250-900 px, fireballs 700-1600 px.
+                double distance = fireball ? 700 + rng.NextDouble() * 900 : 250 + rng.NextDouble() * 650;
+
                 yield return new Meteor(start, dir,
-                    Speed: (fireball ? 260 : 300) + rng.NextDouble() * 220,     // px/s: rustig
-                    Length: (fireball ? 380 : 220) + rng.NextDouble() * 200,
+                    Speed: distance / life,
                     Life: life,
-                    Width: fireball ? 2.8 : 1.7,
-                    Color: color,
+                    Persistence: persistence,
+                    Width: fireball ? 2.6 : 1.3,
+                    Color: fireball ? Color.FromRgb(225, 255, 225) : color,
                     Age: age);
             }
         }
@@ -514,38 +529,59 @@ namespace OLED_Sleeper.Features.Sky
 
             void DrawMeteors(DrawingContext ctx, DateTime at)
             {
-                const int segments = 18;
+                const int samples = 28;
                 double offsetX = PanoramaIndex * Stride; // panorama -> this screen
+                var shift = new Vector(offsetX, 0);
+
+                // Brightness while burning: builds up, peaks late, then dies quickly (x = 0..1 of its life).
+                static double Burn(double x) => x <= 0 || x >= 1 ? 0 : Math.Pow(Math.Sin(Math.PI * Math.Pow(x, 0.8)), 1.3);
 
                 foreach (var m in ActiveMeteors(at))
                 {
-                    double t = m.Age / m.Life;
-                    // Rustig opgloeien, lang nagloeien.
-                    double brightness = Math.Clamp(Math.Pow(Math.Min(1, t / 0.12), 0.7) * Math.Pow(1 - t, 1.1) * 1.2, 0, 1);
-                    var head = m.Start + m.Direction * (m.Speed * m.Age) - new Vector(offsetX, 0);
-                    double tailLength = m.Length * Math.Min(1, t / 0.25 + 0.15);
+                    double headTime = Math.Min(m.Age, m.Life);
+                    double oldest = Math.Max(0, headTime - m.Persistence * 4);
+
+                    Point Position(double t) => m.Start + m.Direction * (m.Speed * t) - shift;
 
                     // Skip quickly when the whole streak is on another screen.
-                    var tailEnd = head - m.Direction * tailLength;
-                    if (Math.Max(head.X, tailEnd.X) < -20 || Math.Min(head.X, tailEnd.X) > ActualWidth + 20) continue;
+                    var head = Position(headTime);
+                    var tail = Position(oldest);
+                    if (Math.Max(head.X, tail.X) < -20 || Math.Min(head.X, tail.X) > ActualWidth + 20) continue;
 
-                    for (int i = 0; i < segments; i++)
+                    // The trail: every point along the path glows as bright as the meteor was when it passed,
+                    // fading away exponentially since then. That gives the natural tapering streak.
+                    Point prev = head;
+                    double prevAlpha = 0;
+                    for (int i = 0; i <= samples; i++)
                     {
-                        double f0 = (double)i / segments, f1 = (double)(i + 1) / segments;
-                        var a = head - m.Direction * (tailLength * f0);
-                        var b = head - m.Direction * (tailLength * f1);
-                        double fall = 1 - f0;
-                        var pen = new Pen(new SolidColorBrush(Color.FromArgb((byte)(230 * brightness * fall * fall), m.Color.R, m.Color.G, m.Color.B)),
-                                          Math.Max(0.3, m.Width * (1 - f0 * 0.85)))
-                        { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-                        pen.Freeze();
-                        ctx.DrawLine(pen, a, b);
+                        double t = headTime - (headTime - oldest) * i / samples;
+                        double alpha = Burn(t / m.Life) * Math.Exp(-(m.Age - t) / m.Persistence);
+                        var p = Position(t);
+                        if (i > 0)
+                        {
+                            double a = (alpha + prevAlpha) / 2;
+                            if (a > 0.01)
+                            {
+                                var pen = new Pen(new SolidColorBrush(Color.FromArgb((byte)(240 * Math.Clamp(a, 0, 1)), m.Color.R, m.Color.G, m.Color.B)),
+                                                  Math.Max(0.4, m.Width * (0.35 + 0.65 * Math.Clamp(a, 0, 1))))
+                                { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+                                pen.Freeze();
+                                ctx.DrawLine(pen, prev, p);
+                            }
+                        }
+                        prev = p;
+                        prevAlpha = alpha;
                     }
 
-                    var glow = new RadialGradientBrush(Color.FromArgb((byte)(170 * brightness), m.Color.R, m.Color.G, m.Color.B),
-                                                       Color.FromArgb(0, m.Color.R, m.Color.G, m.Color.B));
-                    glow.Freeze();
-                    ctx.DrawEllipse(glow, null, head, m.Width * 4, m.Width * 4);
+                    // Only a tiny bright point at the head while it is still burning (a bit more for a fireball).
+                    double headBrightness = m.Age < m.Life ? Burn(m.Age / m.Life) : 0;
+                    if (headBrightness > 0.05)
+                    {
+                        var glow = new RadialGradientBrush(Color.FromArgb((byte)(200 * headBrightness), 255, 255, 255),
+                                                           Color.FromArgb(0, m.Color.R, m.Color.G, m.Color.B));
+                        glow.Freeze();
+                        ctx.DrawEllipse(glow, null, head, m.Width * 2.2, m.Width * 2.2);
+                    }
                 }
             }
         }
