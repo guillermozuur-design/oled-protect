@@ -45,7 +45,11 @@ onofficiële versie met veel uitbreidingen.
 - Start je zelf een screensaver (snelmenu, tray of instellingen) terwijl een scherm al slaapt, dan wordt dat scherm eerst
   gewekt: je ziet alleen wat je zelf koos.
 - Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.fi met adsb.lol als reserve (open ADS-B-data), routes van adsbdb.com.
-  De coördinaten van de pin gaan naar die diensten; verder blijven ze op je pc.
+- **Privacy**: zolang er vliegtuigen in beeld zijn (de screensaver of het voorbeeld in de instellingen) vraagt de app
+  elke 8 seconden de vliegtuigen op rond je speldje of het vliegveld in beeld. Die plek gaat **afgerond op ongeveer
+  1 km** naar adsb.fi (of adsb.lol als reserve). De kaarttegels rond die plek komen van OpenFreeMap, vluchtroutes
+  (alleen het vluchtnummer) van adsbdb.com, en wat je zoekt gaat naar Nominatim. Verder blijft alles op je pc, in
+  `%APPDATA%\OLED-Space-Sleeper`. Bij het verwijderen vraagt de installer of die map ook weg mag.
 
 **Altijd bij de hand**
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
@@ -75,7 +79,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 314 tests
+dotnet test OLED-Sleeper.sln                       # 315 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

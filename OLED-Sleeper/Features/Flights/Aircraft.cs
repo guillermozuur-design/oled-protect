@@ -254,8 +254,10 @@ namespace OLED_Sleeper.Features.Flights
 
         public static string Url(Source source, double lat, double lon, double radiusNm) =>
             source.UrlTemplate
-                .Replace("{lat}", lat.ToString("0.####", CultureInfo.InvariantCulture))
-                .Replace("{lon}", lon.ToString("0.####", CultureInfo.InvariantCulture))
+                // Rounded to about a kilometre: plenty for "planes within 20 km", and the pin (often your home)
+                // is not sent to the exact house.
+                .Replace("{lat}", lat.ToString("0.##", CultureInfo.InvariantCulture))
+                .Replace("{lon}", lon.ToString("0.##", CultureInfo.InvariantCulture))
                 .Replace("{nm}", radiusNm.ToString("0", CultureInfo.InvariantCulture));
     }
 

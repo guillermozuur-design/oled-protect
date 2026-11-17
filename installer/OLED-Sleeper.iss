@@ -125,10 +125,23 @@ end;
 
 // Runs during uninstallation to ensure the autostart entry is removed.
 procedure CurUninstallStepChanged(UninstallStep: TUninstallStep);
+var
+  DataDir: String;
 begin
   if UninstallStep = usUninstall then
   begin
     RemoveStartupKey();
+  end;
+  // Settings (including the place of the pin), logs and stored map tiles: ask whether they may go too.
+  if (UninstallStep = usPostUninstall) and not UninstallSilent then
+  begin
+    DataDir := ExpandConstant('{userappdata}\OLED-Space-Sleeper');
+    if DirExists(DataDir) then
+      if MsgBox('Wil je ook je instellingen verwijderen?' + #13#10#13#10 +
+                'Dat zijn je schermkeuzes, de plek van je speldje, de logboeken en de opgeslagen kaarten (' + DataDir + ').' + #13#10 +
+                'Kies Nee als je de app later opnieuw wilt installeren met dezelfde instellingen.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(DataDir, True, True, True);
   end;
 end;
 

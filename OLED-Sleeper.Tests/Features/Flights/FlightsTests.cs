@@ -587,7 +587,7 @@ namespace OLED_Sleeper.Tests.Features.Flights
         [Fact]
         public void Url_FillsInThePlaceWithDots()
         {
-            Assert.Equal("https://a/52.0907/5.1214/35", OLED_Sleeper.Features.Flights.FeedSources.Url(Fast, 52.09071, 5.12139, 34.6));
+            Assert.Equal("https://a/52.09/5.12/35", OLED_Sleeper.Features.Flights.FeedSources.Url(Fast, 52.09071, 5.12139, 34.6)); // ~1 km, not the exact house
         }
     }
 }
