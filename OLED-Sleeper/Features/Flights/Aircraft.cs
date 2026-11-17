@@ -118,13 +118,10 @@ namespace OLED_Sleeper.Features.Flights
         public const double KnotsToKmPerSecond = 1.852 / 3600;
         private static readonly TimeSpan CorrectionTime = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan ForgetAfter = TimeSpan.FromSeconds(45);
-        private static readonly TimeSpan TrailLength = TimeSpan.FromSeconds(50);
-        private static readonly TimeSpan TrailStep = TimeSpan.FromSeconds(1);
 
         /// <summary>A plane's current state, in local kilometres.</summary>
         public sealed record Plane(string Hex, string Callsign, double X, double Y, double HeadingDeg,
-                                   double? AltitudeFeet, bool OnGround, IReadOnlyList<(double X, double Y, double AgeSeconds)> Trail,
-                                   AircraftKind Kind = AircraftKind.Narrowbody, string TypeCode = "");
+                                   double? AltitudeFeet, bool OnGround, AircraftKind Kind = AircraftKind.Narrowbody, string TypeCode = "");
 
         /// <summary>Below this speed the reported track is unreliable (hovering helicopter, taxiing plane):
         /// the symbol then keeps pointing where it last pointed instead of spinning around.</summary>
@@ -138,7 +135,7 @@ namespace OLED_Sleeper.Features.Flights
             public double CorrX, CorrY;            // offset still to blend away
             public DateTime CorrectionStart;
             public DateTime LastSeenUtc;
-            public readonly List<(double X, double Y, DateTime T)> Trail = new();
+            public AircraftKind Kind;              // worked out once per report, not every frame
         }
 
         private readonly Dictionary<string, Track> _tracks = new();
@@ -168,6 +165,7 @@ namespace OLED_Sleeper.Features.Flights
                 {
                     var (oldX, oldY) = Position(t, nowUtc);
                     t.Report = r;
+                    t.Kind = r.Kind;
                     if (r.GroundSpeedKnots >= ReliableTrackKnots) t.Heading = r.TrackDeg;
                     t.X0 = x; t.Y0 = y; t.Vx = vx; t.Vy = vy;
                     var (newX, newY) = Raw(t, nowUtc);
@@ -180,7 +178,7 @@ namespace OLED_Sleeper.Features.Flights
                 }
                 else
                 {
-                    _tracks[r.Hex] = new Track { Report = r, Heading = r.TrackDeg, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
+                    _tracks[r.Hex] = new Track { Report = r, Kind = r.Kind, Heading = r.TrackDeg, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
                 }
             }
 
@@ -191,23 +189,22 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>Ground speed of a plane in km/h (null when it is not tracked).</summary>
         public double? SpeedKmh(string hex) => _tracks.TryGetValue(hex, out var t) ? t.Report.GroundSpeedKnots * 1.852 : null;
 
-        /// <summary>All planes at this moment (also grows their trails).</summary>
+        /// <summary>All planes at this moment.</summary>
         public List<Plane> Snapshot(DateTime nowUtc)
         {
             var list = new List<Plane>(_tracks.Count);
             foreach (var t in _tracks.Values)
             {
                 var (x, y) = Position(t, nowUtc);
-                if (t.Trail.Count == 0 || nowUtc - t.Trail[^1].T >= TrailStep) t.Trail.Add((x, y, nowUtc));
-                while (t.Trail.Count > 0 && nowUtc - t.Trail[0].T > TrailLength) t.Trail.RemoveAt(0);
-
-                var trail = t.Trail.Select(p => (p.X, p.Y, (nowUtc - p.T).TotalSeconds)).ToList();
-                trail.Add((x, y, 0));
-                list.Add(new Plane(t.Report.Hex, t.Report.Callsign, x, y, t.Heading, t.Report.AltitudeFeet, t.Report.OnGround, trail,
-                                   t.Report.Kind, t.Report.TypeCode));
+                list.Add(new Plane(t.Report.Hex, t.Report.Callsign, x, y, t.Heading, t.Report.AltitudeFeet, t.Report.OnGround,
+                                   t.Kind, t.Report.TypeCode));
             }
             return list;
         }
+
+        /// <summary>Where one plane is at this moment (null when it is not tracked).</summary>
+        public (double X, double Y)? PositionOf(string hex, DateTime nowUtc) =>
+            _tracks.TryGetValue(hex, out var t) ? Position(t, nowUtc) : null;
 
         private static (double X, double Y) Raw(Track t, DateTime nowUtc)
         {

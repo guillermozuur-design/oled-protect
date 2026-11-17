@@ -406,7 +406,7 @@ namespace OLED_Sleeper.Features.Flights
         private static int _users;
         private static TourScene? _current, _next;
         private static IDisposable? _prepared;
-        private static string _settingsKey = "";
+        private static (string, bool, int) _settingsKey;
 
         /// <summary>
         /// A screen (or the preview) takes part; when the last one leaves, the tour starts afresh next time.
@@ -418,7 +418,7 @@ namespace OLED_Sleeper.Features.Flights
             lock (Gate)
             {
                 _users++;
-                if (screen is { } s) Screens.Add(s);
+                if (screen is { } s) { Screens.Add(s); _activeScreens = null; }
             }
             return new Leave(screen);
         }
@@ -428,8 +428,13 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>The screens of the row that show the planes now, left to right (empty: none registered).</summary>
         public static IReadOnlyList<int> ActiveScreens
         {
-            get { lock (Gate) return Screens.Distinct().Order().ToList(); }
+            get
+            {
+                lock (Gate) return _activeScreens ??= Screens.Distinct().Order().ToList();
+            }
         }
+
+        private static List<int>? _activeScreens;
 
         private sealed class Leave(int? screen) : IDisposable
         {
@@ -440,7 +445,7 @@ namespace OLED_Sleeper.Features.Flights
                 _done = true;
                 lock (Gate)
                 {
-                    if (screen is { } s) Screens.Remove(s);
+                    if (screen is { } s) { Screens.Remove(s); _activeScreens = null; }
                     if (--_users > 0) return;
                     Reset();
                 }
@@ -480,8 +485,16 @@ namespace OLED_Sleeper.Features.Flights
         }
 
         /// <summary>The pin scene, shown always when the tour is off.</summary>
-        public static TourScene HomeScene(FlightsSettings s) =>
-            new(0, SceneKind.Home, s.Latitude, s.Longitude, s.RadiusKm, DateTime.MinValue, DateTime.MaxValue, 0, s.PlaceName);
+        public static TourScene HomeScene(FlightsSettings s)
+        {
+            // The same object while nothing changed, so screens can tell quickly that the scene is the same.
+            var home = _home;
+            if (home != null && home.Lat == s.Latitude && home.Lon == s.Longitude && home.RadiusKm == s.RadiusKm && home.Title == s.PlaceName)
+                return home;
+            return _home = new(0, SceneKind.Home, s.Latitude, s.Longitude, s.RadiusKm, DateTime.MinValue, DateTime.MaxValue, 0, s.PlaceName);
+        }
+
+        private static TourScene? _home;
 
         /// <summary>The scene for this moment (and, near its end, the next one is prepared).</summary>
         public static TourScene SceneAt(DateTime now, FlightsSettings s)
@@ -489,7 +502,7 @@ namespace OLED_Sleeper.Features.Flights
             if (s.Mode != FlightsMode.Tour) return HomeScene(s);
             lock (Gate)
             {
-                string key = $"{s.TourCountries}|{s.FollowFlights}|{s.SceneSeconds}";
+                var key = (s.TourCountries, s.FollowFlights, s.SceneSeconds);
                 if (key != _settingsKey) { _settingsKey = key; Reset(); }
 
                 if (_current == null)

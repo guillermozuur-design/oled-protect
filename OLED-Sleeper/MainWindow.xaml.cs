@@ -73,6 +73,8 @@ namespace OLED_Sleeper
             _autoSaveTimer.Tick += (_, _) => AutoSave();
 
             Loaded += (_, _) => { ShowHotkey(); RefreshHeader(); BuildAppRows(); };
+            // Minimised: the live preview stops (no drawing, no questions to the plane service).
+            StateChanged += (_, _) => UpdateFlightsPreview();
             IsVisibleChanged += (_, _) =>
             {
                 // Only tick while the window is on screen.
@@ -239,7 +241,7 @@ namespace OLED_Sleeper
         /// </summary>
         private void UpdateFlightsPreview()
         {
-            bool wanted = IsVisible && MainTabs.SelectedItem == FlightsTab;
+            bool wanted = IsVisible && WindowState != WindowState.Minimized && MainTabs.SelectedItem == FlightsTab;
             if (wanted && _flightsPreview == null)
             {
                 _flightsPreview = new FlightsView(_flights);

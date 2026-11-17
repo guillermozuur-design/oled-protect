@@ -21,6 +21,11 @@ namespace OLED_Sleeper.Features.Flights
         /// in quarter-pixel steps (invisible) at a fraction of the cost.</summary>
         private const double MapFramesPerSecond = 20;
 
+        /// <summary>While following a plane the map slides along under it; then the ready-made picture would be
+        /// made again every time anyway, so it is switched off.</summary>
+        private const double FollowMapFramesPerSecond = 30;
+        private static readonly BitmapCache MapCache = Frozen(new BitmapCache { EnableClearType = false, SnapsToDevicePixels = false });
+
         // Night-map colours: dim and opaque on black (opaque, so overlapping tile edges never show).
         // Kept dim on purpose: on black an OLED shows even these clearly, and less light means less wear.
         private static readonly Color WaterColor = Color.FromRgb(0x10, 0x22, 0x38);   // coast and big lakes
@@ -141,7 +146,8 @@ namespace OLED_Sleeper.Features.Flights
 
         private readonly FlightsSettings _settings;
         private readonly Stopwatch _frameClock = new();
-        private readonly Dictionary<string, FormattedText> _textCache = new();
+        private readonly record struct TextKey(string Text, FontWeight Weight, double Size, Color Color);
+        private readonly Dictionary<TextKey, FormattedText> _textCache = new();
         private AircraftTracker _tracker;
         private MapGeometry? _map;
         private IDisposable? _feed;
@@ -164,7 +170,7 @@ namespace OLED_Sleeper.Features.Flights
             _settings = settings;
             // The map is kept as a ready-made picture between its redraws, so the planes moving over it every
             // frame cost almost nothing (also in the settings window, which is drawn in software).
-            _mapLayer.CacheMode = new BitmapCache { EnableClearType = false, SnapsToDevicePixels = false };
+            _mapLayer.CacheMode = MapCache;
             AddVisualChild(_mapLayer);
             AddVisualChild(_liveLayer);
             SizeChanged += (_, _) => _mapDirty = true;
@@ -227,6 +233,7 @@ namespace OLED_Sleeper.Features.Flights
             if (key == _locationKey) return;
             _locationKey = key;
 
+            _mapLayer.CacheMode = scene.Kind == SceneKind.Follow ? null : MapCache;
             var projection = new LocalProjection(scene.Lat, scene.Lon);
             _tracker.Reset(projection);
             _focus = new Point(0, 0);
@@ -271,17 +278,19 @@ namespace OLED_Sleeper.Features.Flights
 
         private void OnRendering(object? sender, EventArgs e)
         {
-            if (_frameClock.IsRunning && _frameClock.Elapsed.TotalMilliseconds < 1000.0 / MaxFramesPerSecond - 0.5) return;
+            // The small preview in the settings window (drawn in software) does not need more than 30 frames a second.
+            double fps = ActualWidth < 1200 ? 30 : MaxFramesPerSecond;
+            if (_frameClock.IsRunning && _frameClock.Elapsed.TotalMilliseconds < 1000.0 / fps - 0.5) return;
             _frameClock.Restart();
             var now = DateTime.UtcNow;
             var scene = FlightTour.SceneAt(now, _settings);
-            if (scene.Key != _locationKey) Connect(scene);
+            if (!ReferenceEquals(scene, _scene) && scene.Key != _locationKey) Connect(scene);
             // No map yet, or one with gaps (the internet was away): try again now and then.
             else if ((_map == null || !_map.Complete) && now - _mapAskedUtc > MapLoader.RetryAfter) LoadMap();
             _focus = FocusAt(now);
             // Small (the preview in the settings window): the map moves under a pixel per second, 5 redraws are plenty.
-            // Following a plane the map slides along quickly: then it is redrawn every frame.
-            double mapRate = _scene.Kind == SceneKind.Follow ? MaxFramesPerSecond : ActualWidth < 1200 ? 5 : MapFramesPerSecond;
+            // Following a plane the map slides along quickly: then it is redrawn 30 times a second.
+            double mapRate = _scene.Kind == SceneKind.Follow ? FollowMapFramesPerSecond : ActualWidth < 1200 ? 5 : MapFramesPerSecond;
             if (_mapDirty || !_mapClock.IsRunning || _mapClock.Elapsed.TotalMilliseconds >= 1000.0 / mapRate - 0.5)
             {
                 _mapClock.Restart();
@@ -301,8 +310,7 @@ namespace OLED_Sleeper.Features.Flights
         private Point FocusAt(DateTime now)
         {
             if (_scene.Kind != SceneKind.Follow) return new Point(0, 0);
-            var plane = _tracker.Snapshot(now).FirstOrDefault(p => p.Hex == _scene.FollowHex);
-            return plane != null ? new Point(plane.X, plane.Y) : _focus;
+            return _scene.FollowHex != null && _tracker.PositionOf(_scene.FollowHex, now) is { } at ? new Point(at.X, at.Y) : _focus;
         }
 
         /// <summary>World (km around the scene centre) to this screen's pixels, for this moment.</summary>
@@ -338,9 +346,14 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>Random per scene (the same on every screen) and fixed for the scene: 0..1 values.</summary>
         private (double A, double B, double C, double D) SceneRandom()
         {
+            if (_sceneRandomFor == _scene.Number) return _sceneRandom;
             var r = new Random(_scene.Number * 7919 + (int)(FlightCamera.SessionPhases[0] * 100000));
-            return (r.NextDouble(), r.NextDouble(), r.NextDouble(), r.NextDouble());
+            _sceneRandomFor = _scene.Number;
+            return _sceneRandom = (r.NextDouble(), r.NextDouble(), r.NextDouble(), r.NextDouble());
         }
+
+        private int _sceneRandomFor = -1;
+        private (double A, double B, double C, double D) _sceneRandom;
 
         /// <summary>Where the airport or plane sits, in pixels from the middle of its screen: a different spot
         /// each scene, gliding in a straight line (its own direction each scene) from start to end.</summary>
@@ -394,7 +407,7 @@ namespace OLED_Sleeper.Features.Flights
             DrawPlanes(dc, m, rotation, ui, bounds, now);
             // Between two scenes: fade through black.
             double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
-            if (visible < 1) dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)Math.Round((1 - visible) * 255), 0, 0, 0)), null, bounds);
+            if (visible < 1) dc.DrawRectangle(FadeBrushes[(int)Math.Round((1 - visible) * (FadeBrushes.Length - 1))], null, bounds);
             if (_map == null && AircraftFeed.LastRequestFailed)
             {
                 var text = Text("Geen verbinding: kaart en vliegtuigen zijn nu niet beschikbaar", LabelFace, 12 * ui, Color.FromRgb(0x50, 0x56, 0x60));
@@ -403,8 +416,28 @@ namespace OLED_Sleeper.Features.Flights
             dc.Pop();
         }
 
-        private void DrawMap(DrawingContext dc, Matrix m, double scale, double ui, Rect bounds)
+        private Dictionary<MapKind, Pen>? _pens;
+        private double _penScale, _penUi;
+
+        private static readonly Dictionary<MapKind, Brush> Fills = new()
         {
+            [MapKind.RunwayArea] = Frozen(new SolidColorBrush(RunwayAreaColor)),
+            [MapKind.Apron] = Frozen(new SolidColorBrush(ApronColor)),
+        };
+
+        private static readonly MapKind[] DrawOrder =
+        {
+            MapKind.Water, MapKind.AirportArea, MapKind.Apron, MapKind.RunwayArea, MapKind.Border, MapKind.River, MapKind.Rail,
+            MapKind.Minor, MapKind.Taxiway, MapKind.Major, MapKind.Motorway, MapKind.Runway
+        };
+
+        private static readonly Brush TownDot = Frozen(new SolidColorBrush(Color.FromRgb(0x3A, 0x3E, 0x45)));
+
+        /// <summary>The pens for the map lines, in map units, so they look the same width on screen. Made again
+        /// only when the zoom changed noticeably (it changes very slowly).</summary>
+        private Dictionary<MapKind, Pen> PensFor(double scale, double ui)
+        {
+            if (_pens != null && Math.Abs(scale / _penScale - 1) < 0.03 && ui == _penUi) return _pens;
             Pen PenFor(Color c, double px, DashStyle? dash = null)
             {
                 var pen = new Pen(new SolidColorBrush(c), px * ui / scale) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
@@ -412,10 +445,9 @@ namespace OLED_Sleeper.Features.Flights
                 pen.Freeze();
                 return pen;
             }
-
-            // Only the chunks that are (partly) on this screen.
-            var visible = new Rect(bounds.X - 4, bounds.Y - 4, bounds.Width + 8, bounds.Height + 8);
-            var pens = new Dictionary<MapKind, Pen>
+            _penScale = scale;
+            _penUi = ui;
+            return _pens = new Dictionary<MapKind, Pen>
             {
                 [MapKind.Water] = PenFor(WaterColor, 1.0),
                 [MapKind.Border] = PenFor(BorderColor, 1.2, new DashStyle(new double[] { 4, 3 }, 0)),
@@ -428,12 +460,15 @@ namespace OLED_Sleeper.Features.Flights
                 [MapKind.AirportArea] = PenFor(AirportAreaColor, 0.9),
                 [MapKind.Taxiway] = PenFor(TaxiwayColor, 0.8),
             };
-            var fills = new Dictionary<MapKind, Brush>
-            {
-                [MapKind.RunwayArea] = Frozen(new SolidColorBrush(RunwayAreaColor)),
-                [MapKind.Apron] = Frozen(new SolidColorBrush(ApronColor)),
-            };
-            MapKind[] order = { MapKind.Water, MapKind.AirportArea, MapKind.Apron, MapKind.RunwayArea, MapKind.Border, MapKind.River, MapKind.Rail, MapKind.Minor, MapKind.Taxiway, MapKind.Major, MapKind.Motorway, MapKind.Runway };
+        }
+
+        private void DrawMap(DrawingContext dc, Matrix m, double scale, double ui, Rect bounds)
+        {
+            // Only the chunks that are (partly) on this screen.
+            var visible = new Rect(bounds.X - 4, bounds.Y - 4, bounds.Width + 8, bounds.Height + 8);
+            var pens = PensFor(scale, ui);
+            var fills = Fills;
+            var order = DrawOrder;
 
             dc.PushTransform(new MatrixTransform(m));
             foreach (var kind in order)
@@ -452,7 +487,7 @@ namespace OLED_Sleeper.Features.Flights
             // Place names stay upright and readable; only the ones on this screen are drawn.
             var outside = bounds;
             outside.Inflate(150 * ui, 40 * ui);
-            var townBrush = new SolidColorBrush(Color.FromRgb(0x3A, 0x3E, 0x45));
+            var townBrush = TownDot;
             foreach (var place in _map!.Places)
             {
                 var p = m.Transform(new Point(place.X, place.Y));
@@ -492,13 +527,25 @@ namespace OLED_Sleeper.Features.Flights
             }
         }
 
+        /// <summary>Black of rising strength, for the fade between scenes (made once).</summary>
+        private static readonly Brush[] FadeBrushes = Enumerable.Range(0, 65)
+            .Select(i => Frozen<Brush>(new SolidColorBrush(Color.FromArgb((byte)Math.Round(i * 255.0 / 64), 0, 0, 0)))).ToArray();
+
+        private static Pen? _pinPen;
+        private static double _pinPenUi;
+
         private static void DrawPin(DrawingContext dc, Point p, double ui, DateTime now)
         {
             // Your spot: a pin stuck in the map, its point exactly on the spot (it drifts along with the map).
             double needle = 15 * ui, head = 4.6 * ui;
             var top = p - new Vector(0, needle);
             dc.DrawEllipse(PinShadow, null, p, 2.4 * ui, 1.1 * ui);
-            dc.DrawLine(new Pen(PinNeedle, 1.4 * ui) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, p, top);
+            if (_pinPen == null || _pinPenUi != ui)
+            {
+                _pinPen = Frozen(new Pen(PinNeedle, 1.4 * ui) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
+                _pinPenUi = ui;
+            }
+            dc.DrawLine(_pinPen, p, top);
             dc.DrawEllipse(PinHead, null, top, head, head);
             dc.DrawEllipse(PinShine, null, top + new Vector(-head * 0.35, -head * 0.35), head * 0.3, head * 0.3);
         }
@@ -516,10 +563,12 @@ namespace OLED_Sleeper.Features.Flights
 
                 bool followed = _scene.Kind == SceneKind.Follow && plane.Hex == _scene.FollowHex;
                 double size = (plane.OnGround ? 6 : 9) * ui * SizeOf(plane.Kind) * (followed ? 1.7 : 1);
-                var tf = new TransformGroup();
-                tf.Children.Add(new ScaleTransform(size, size));
-                tf.Children.Add(new RotateTransform(plane.HeadingDeg + rotation));
-                tf.Children.Add(new TranslateTransform(p.X, p.Y));
+                var place = Matrix.Identity;
+                place.Scale(size, size);
+                place.Rotate(plane.HeadingDeg + rotation);
+                place.Translate(p.X, p.Y);
+                var tf = new MatrixTransform(place);
+                tf.Freeze();
                 dc.PushTransform(tf);
                 var fill = plane.OnGround ? GroundFill : (plane.AltitudeFeet ?? 30000) < 5000 && plane.Kind != AircraftKind.Helicopter ? PlaneLowFill : PlaneFill;
                 dc.DrawGeometry(fill, PlaneOutline, Shapes[plane.Kind]);
@@ -538,16 +587,31 @@ namespace OLED_Sleeper.Features.Flights
 
                 if (labels && !plane.OnGround && plane.Callsign.Length > 0)
                 {
-                    string altitude = plane.AltitudeFeet is { } ft
-                        ? (Math.Round(ft * 0.3048 / 100) * 100).ToString("#,0", CultureInfo.GetCultureInfo("nl-NL")) + " m"
-                        : "";
-                    // Where it flies from and to (when known), else the type of aircraft.
-                    string middle = RouteLookup.For(plane.Callsign)?.ToString() ?? plane.TypeCode;
-                    string label = string.Join(" · ", new[] { plane.Callsign, middle, altitude }.Where(x => x.Length > 0));
-                    var t = Text(label, LabelFace, 10.5 * ui, Color.FromRgb(0x56, 0x61, 0x72));
+                    var t = Text(LabelFor(plane), LabelFace, 10.5 * ui, PlaneLabelColor);
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }
+        }
+
+        private static readonly Color PlaneLabelColor = Color.FromRgb(0x56, 0x61, 0x72);
+        private static readonly CultureInfo Dutch = CultureInfo.GetCultureInfo("nl-NL");
+        private readonly Dictionary<string, (string Callsign, int Metres, FlightRoute? Route, string Type, string Text)> _labels = new();
+
+        /// <summary>"KLM1234 · AMS→JFK · 10.700 m" (the type when the route is unknown); made again only when
+        /// something in it changed.</summary>
+        private string LabelFor(AircraftTracker.Plane plane)
+        {
+            int metres = plane.AltitudeFeet is { } ft ? (int)(Math.Round(ft * 0.3048 / 100) * 100) : -1;
+            var route = RouteLookup.For(plane.Callsign);
+            if (_labels.TryGetValue(plane.Hex, out var c) && c.Callsign == plane.Callsign && c.Metres == metres && c.Route == route && c.Type == plane.TypeCode)
+                return c.Text;
+            string altitude = metres >= 0 ? metres.ToString("#,0", Dutch) + " m" : "";
+            // Where it flies from and to (when known), else the type of aircraft.
+            string middle = route?.ToString() ?? plane.TypeCode;
+            string text = string.Join(" · ", new[] { plane.Callsign, middle, altitude }.Where(x => x.Length > 0));
+            if (_labels.Count > 2000) _labels.Clear();
+            _labels[plane.Hex] = (plane.Callsign, metres, route, plane.TypeCode, text);
+            return text;
         }
 
         /// <summary>The followed flight: call sign and route large, type, height and speed under it.</summary>
@@ -568,7 +632,7 @@ namespace OLED_Sleeper.Features.Flights
 
         private FormattedText Text(string text, Typeface face, double size, Color color)
         {
-            string key = FormattableString.Invariant($"{text}|{face.Weight}|{size:0.0}|{color}");
+            var key = new TextKey(text, face.Weight, Math.Round(size, 1), color);
             if (_textCache.TryGetValue(key, out var cached)) return cached;
             if (_textCache.Count > 2000) _textCache.Clear();
             var brush = new SolidColorBrush(color);

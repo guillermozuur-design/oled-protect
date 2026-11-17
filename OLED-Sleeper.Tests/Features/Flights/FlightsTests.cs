@@ -365,15 +365,16 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
-        public void Tracker_TrailGrowsBehindThePlane()
+        public void Tracker_PositionOfOnePlane_MatchesTheSnapshot()
         {
             var tracker = new AircraftTracker(new LocalProjection(52, 5));
             var t0 = new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc);
-            tracker.Update(new[] { new AircraftReport("a", "T", 52, 5, 90, 300, 20000, false, t0) }, t0);
-            for (int s = 0; s <= 20; s++) tracker.Snapshot(t0.AddSeconds(s));
+            tracker.Update(new[] { new AircraftReport("a", "T", 52, 5, 90, 300, 20000, false, t0, "B738") }, t0);
             var plane = tracker.Snapshot(t0.AddSeconds(20)).Single();
-            Assert.True(plane.Trail.Count >= 20);
-            Assert.True(plane.Trail[0].X < plane.Trail[^1].X); // oldest point is behind (west of) the plane
+            Assert.True(plane.X > 2.5);                       // flew east, about 3 km in 20 s
+            Assert.Equal((plane.X, plane.Y), tracker.PositionOf("a", t0.AddSeconds(20)));
+            Assert.Null(tracker.PositionOf("b", t0));
+            Assert.Equal(AircraftKind.Narrowbody, plane.Kind);
         }
     }
 
