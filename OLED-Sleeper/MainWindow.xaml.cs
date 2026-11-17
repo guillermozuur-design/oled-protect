@@ -216,7 +216,16 @@ namespace OLED_Sleeper
             RadiusSlider.Value = _flights.RadiusKm;
             RadiusText.Text = $"{_flights.RadiusKm:0} km";
             FlightLabelsCheck.IsChecked = _flights.ShowLabels;
-            FlightsPreviewCaption.Text = $"Live rond {_flights.PlaceName}";
+            bool tour = _flights.Mode == FlightsMode.Tour;
+            TourCheck.IsChecked = tour;
+            TourOptions.IsEnabled = tour;
+            TourOptions.Opacity = tour ? 1 : 0.45;
+            if (!CountriesBox.IsKeyboardFocusWithin) CountriesBox.Text = _flights.TourCountries;
+            ShowCountriesStatus(_flights.TourCountries);
+            FollowCheck.IsChecked = _flights.FollowFlights;
+            SceneSlider.Value = _flights.SceneSeconds;
+            SceneText.Text = $"{_flights.SceneSeconds} s";
+            FlightsPreviewCaption.Text = tour ? "Live: rondreis langs vliegvelden" : $"Live rond {_flights.PlaceName}";
         }
 
         private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -295,6 +304,51 @@ namespace OLED_Sleeper
         private DispatcherTimer? _radiusDebounce;
 
         private void FlightLabels_Click(object sender, RoutedEventArgs e) => _flights.SetShowLabels(FlightLabelsCheck.IsChecked == true);
+
+        private void Tour_Click(object sender, RoutedEventArgs e)
+        {
+            _flights.SetMode(TourCheck.IsChecked == true ? FlightsMode.Tour : FlightsMode.Home);
+            ShowFlightSettings();
+        }
+
+        private void Follow_Click(object sender, RoutedEventArgs e) => _flights.SetFollowFlights(FollowCheck.IsChecked == true);
+
+        private DispatcherTimer? _countriesDebounce;
+
+        private void CountriesBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!IsLoaded || !CountriesBox.IsKeyboardFocusWithin) return;
+            ShowCountriesStatus(CountriesBox.Text);
+            // Save after a short pause in typing (each change restarts the tour).
+            _countriesDebounce ??= new DispatcherTimer(TimeSpan.FromMilliseconds(900), DispatcherPriority.Normal,
+                (_, _) => { _countriesDebounce!.Stop(); _flights.SetTourCountries(CountriesBox.Text); }, Dispatcher);
+            _countriesDebounce.Stop();
+            _countriesDebounce.Start();
+        }
+
+        private void ShowCountriesStatus(string text)
+        {
+            var (known, unknown) = Countries.Read(text);
+            int airports = TourPlanner.AirportsIn(AirportCatalog.All, known.Select(k => k.Code)).Count;
+            string status = known.Count == 0
+                ? "Geen land herkend: dan Nederland."
+                : $"{string.Join(", ", known.Select(k => k.Name))}: {airports} vliegvelden.";
+            if (unknown.Count > 0) status += $" Niet herkend: {string.Join(", ", unknown)}.";
+            CountriesStatus.Text = status;
+        }
+
+        private DispatcherTimer? _sceneDebounce;
+
+        private void SceneSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (SceneText == null) return; // during InitializeComponent
+            SceneText.Text = $"{e.NewValue:0} s";
+            if (!IsLoaded) return;
+            _sceneDebounce ??= new DispatcherTimer(TimeSpan.FromMilliseconds(600), DispatcherPriority.Normal,
+                (_, _) => { _sceneDebounce!.Stop(); _flights.SetSceneSeconds((int)SceneSlider.Value); }, Dispatcher);
+            _sceneDebounce.Stop();
+            _sceneDebounce.Start();
+        }
 
         // ================= Algemeen tab =================
 

@@ -1,8 +1,10 @@
 using OLED_Sleeper.Features.Flights;
 using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services;
+using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.Sky;
+using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Native;
 using System.Diagnostics.CodeAnalysis;
 using System.Windows;
@@ -20,13 +22,18 @@ namespace OLED_Sleeper.UI.Services
         private readonly IMonitorInfoManager _monitorInfoManager;
         private readonly PanoramaSettings _panorama;
         private readonly FlightsSettings _flights;
+        private readonly IMonitorIdleDetectionService? _idle;
+        private readonly IWorkModeService? _workMode;
         private readonly List<OverlayWindow> _overlays = new();
 
-        public ScreensaverPreview(IMonitorInfoManager monitorInfoManager, PanoramaSettings panorama, FlightsSettings flights)
+        public ScreensaverPreview(IMonitorInfoManager monitorInfoManager, PanoramaSettings panorama, FlightsSettings flights,
+                                  IMonitorIdleDetectionService? idle = null, IWorkModeService? workMode = null)
         {
             _monitorInfoManager = monitorInfoManager;
             _panorama = panorama;
             _flights = flights;
+            _idle = idle;
+            _workMode = workMode;
         }
 
         /// <param name="allScreens">True: the sky on every screen at once (one continuous panorama).
@@ -43,6 +50,10 @@ namespace OLED_Sleeper.UI.Services
                 : new[] { monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(start.X, start.Y))) ?? monitors.FirstOrDefault() }
                     .Where(m => m != null).Select(m => m!).ToList();
             if (targets.Count == 0) return;
+
+            // What you chose to watch wins: a screen that is already asleep (black, stars or planes of its own)
+            // wakes first, and sleeping waits until you stop watching, so nothing is drawn half over it.
+            _idle?.SetPaused(true);
 
             foreach (var monitor in targets)
             {
@@ -80,6 +91,7 @@ namespace OLED_Sleeper.UI.Services
                 _keyHook = null;
                 foreach (var overlay in _overlays) overlay.Close();
                 _overlays.Clear();
+                _idle?.SetPaused(_workMode?.IsEnabled ?? false);
             };
             poll.Start();
         }

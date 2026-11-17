@@ -274,13 +274,56 @@
                                 <Border Style="{StaticResource Card}">
                                     <StackPanel>
                                         <DockPanel>
+                                            <CheckBox x:Name="TourCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Tour_Click" VerticalAlignment="Center" />
+                                            <StackPanel>
+                                                <TextBlock Text="Rondreis langs drukke vliegvelden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}" Text="Elke keer na een paar seconden fadet het beeld naar een ander vliegveld in de landen hieronder, zodat er altijd wat te zien is. Uit: altijd rond je speldje." />
+                                            </StackPanel>
+                                        </DockPanel>
+
+                                        <StackPanel x:Name="TourOptions" Margin="0,14,0,0">
+                                            <DockPanel>
+                                                <TextBox x:Name="CountriesBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="330" VerticalAlignment="Center"
+                                                         TextChanged="CountriesBox_TextChanged" ToolTip="Bijvoorbeeld: Nederland, België, Spanje, Verenigd Koninkrijk" />
+                                                <StackPanel>
+                                                    <TextBlock Text="Landen" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock x:Name="CountriesStatus" Style="{StaticResource CardText}" />
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <DockPanel Margin="0,14,0,0">
+                                                <CheckBox x:Name="FollowCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Follow_Click" VerticalAlignment="Center" />
+                                                <StackPanel>
+                                                    <TextBlock Text="Af en toe een vlucht volgen" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock Style="{StaticResource CardText}" Text="Om de paar vliegvelden volgt hij een tijdje één vliegtuig dat daar vliegt, met vluchtnummer, route, type, hoogte en snelheid." />
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <DockPanel Margin="0,14,0,0">
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Slider x:Name="SceneSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="10" Maximum="60" TickFrequency="5" IsSnapToTickEnabled="True"
+                                                            VerticalAlignment="Center" ValueChanged="SceneSlider_ValueChanged" />
+                                                    <TextBlock x:Name="SceneText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="Tijd per beeld" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock Style="{StaticResource CardText}" Text="Hoe lang een vliegveld of vlucht in beeld blijft." />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                                 <TextBox x:Name="PlaceBox" Style="{StaticResource Field}" Width="210" KeyDown="PlaceBox_KeyDown"
                                                          ToolTip="Een plaats, adres of postcode, of coördinaten zoals 52.09, 5.12" />
                                                 <Button x:Name="PlaceSearchButton" Content="Zoeken" Style="{StaticResource SubtleButton}" Margin="10,0,0,0" Click="PlaceSearch_Click" />
                                             </StackPanel>
                                             <StackPanel>
-                                                <TextBlock Text="Plek van de pin" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Text="Plek van je speldje" Style="{StaticResource CardTitle}" />
                                                 <TextBlock x:Name="PlaceStatus" Style="{StaticResource CardText}" />
                                             </StackPanel>
                                         </DockPanel>
@@ -295,7 +338,7 @@
                                             <TextBlock x:Name="RadiusText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
                                         </StackPanel>
                                         <StackPanel>
-                                            <TextBlock Text="Hoe ver om de pin heen" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Text="Hoe ver om het speldje heen" Style="{StaticResource CardTitle}" />
                                             <TextBlock Style="{StaticResource CardText}" Text="Kleiner = meer details en grotere plaatsnamen; groter = meer vliegtuigen." />
                                         </StackPanel>
                                     </DockPanel>
@@ -312,7 +355,7 @@
                                 </Border>
 
                                 <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
-                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com. Zoeken: Nominatim (OpenStreetMap). De coördinaten van de pin worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
+                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com, vliegvelden: OurAirports. Zoeken: Nominatim (OpenStreetMap). De coördinaten van het speldje en de vliegvelden worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

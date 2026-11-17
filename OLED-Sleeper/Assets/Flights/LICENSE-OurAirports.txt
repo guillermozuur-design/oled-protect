@@ -1,0 +1,2 @@
+Airport data (airports.txt) comes from OurAirports, https://ourairports.com/data/
+which is released into the Public Domain by its authors.

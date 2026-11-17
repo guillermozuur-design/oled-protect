@@ -188,6 +188,9 @@ namespace OLED_Sleeper.Features.Flights
                 _tracks.Remove(gone);
         }
 
+        /// <summary>Ground speed of a plane in km/h (null when it is not tracked).</summary>
+        public double? SpeedKmh(string hex) => _tracks.TryGetValue(hex, out var t) ? t.Report.GroundSpeedKnots * 1.852 : null;
+
         /// <summary>All planes at this moment (also grows their trails).</summary>
         public List<Plane> Snapshot(DateTime nowUtc)
         {
@@ -323,11 +326,15 @@ namespace OLED_Sleeper.Features.Flights
             lock (Gate)
             {
                 // A different place than what we have: the old planes are not wanted any more.
-                if (_latestPlace != PlaceKey(lat, lon)) Latest = null;
+                bool newPlace = _latestPlace != PlaceKey(lat, lon);
+                if (newPlace) Latest = null;
                 Subscribers.Add(s);
-                // Ask right away, unless we just did (opening and closing a preview should not hammer the service).
-                var first = DateTime.UtcNow - _lastAttemptUtc < TimeSpan.FromSeconds(4) ? Interval : TimeSpan.Zero;
-                _timer ??= new System.Threading.Timer(_ => _ = PollAsync(), null, first, Interval);
+                // Ask right away, unless we just did (opening and closing a preview should not hammer the service);
+                // for another place (the tour moves on) a short pause is enough.
+                var pause = TimeSpan.FromSeconds(newPlace ? 1.5 : 4);
+                var first = DateTime.UtcNow - _lastAttemptUtc < pause ? pause : TimeSpan.Zero;
+                if (_timer == null) _timer = new System.Threading.Timer(_ => _ = PollAsync(), null, first, Interval);
+                else if (newPlace) _timer.Change(first, Interval);
             }
             return s;
         }

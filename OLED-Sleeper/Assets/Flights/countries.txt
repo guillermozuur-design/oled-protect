@@ -1,0 +1,102 @@
+# Country names in Dutch for the tour: ISO code|Dutch name|other names (English, own language, short forms), comma separated
+NL|Nederland|Netherlands,Holland,The Netherlands
+BE|België|Belgium,Belgie,Belgique
+LU|Luxemburg|Luxembourg
+DE|Duitsland|Germany,Deutschland
+FR|Frankrijk|France
+GB|Verenigd Koninkrijk|United Kingdom,UK,Engeland,England,Groot-Brittannië,Groot-Brittannie,Great Britain,Schotland,Scotland,Wales
+IE|Ierland|Ireland
+ES|Spanje|Spain,España,Espana
+PT|Portugal|
+IT|Italië|Italy,Italia,Italie
+CH|Zwitserland|Switzerland,Schweiz,Suisse
+AT|Oostenrijk|Austria,Österreich,Osterreich
+DK|Denemarken|Denmark,Danmark
+NO|Noorwegen|Norway,Norge
+SE|Zweden|Sweden,Sverige
+FI|Finland|Suomi
+IS|IJsland|Iceland,Ijsland
+PL|Polen|Poland,Polska
+CZ|Tsjechië|Czechia,Czech Republic,Tsjechie,Česko
+SK|Slowakije|Slovakia
+HU|Hongarije|Hungary,Magyarország
+SI|Slovenië|Slovenia,Slovenie
+HR|Kroatië|Croatia,Kroatie,Hrvatska
+BA|Bosnië en Herzegovina|Bosnia,Bosnia and Herzegovina,Bosnie
+RS|Servië|Serbia,Servie
+ME|Montenegro|
+AL|Albanië|Albania,Albanie
+MK|Noord-Macedonië|North Macedonia,Macedonia,Macedonie
+GR|Griekenland|Greece,Hellas
+BG|Bulgarije|Bulgaria
+RO|Roemenië|Romania,Roemenie
+MD|Moldavië|Moldova,Moldavie
+UA|Oekraïne|Ukraine,Oekraine
+BY|Wit-Rusland|Belarus
+LT|Litouwen|Lithuania
+LV|Letland|Latvia
+EE|Estland|Estonia
+RU|Rusland|Russia
+TR|Turkije|Turkey,Türkiye,Turkiye
+CY|Cyprus|
+MT|Malta|
+GE|Georgië|Georgia,Georgie
+AM|Armenië|Armenia,Armenie
+AZ|Azerbeidzjan|Azerbaijan
+MA|Marokko|Morocco
+DZ|Algerije|Algeria
+TN|Tunesië|Tunisia,Tunesie
+EG|Egypte|Egypt
+IL|Israël|Israel
+JO|Jordanië|Jordan,Jordanie
+LB|Libanon|Lebanon
+AE|Verenigde Arabische Emiraten|United Arab Emirates,UAE,Emiraten,Dubai
+QA|Qatar|
+SA|Saoedi-Arabië|Saudi Arabia,Saoedi-Arabie
+OM|Oman|
+KW|Koeweit|Kuwait
+BH|Bahrein|Bahrain
+IR|Iran|
+IQ|Irak|Iraq
+IN|India|
+PK|Pakistan|
+LK|Sri Lanka|
+NP|Nepal|
+MV|Malediven|Maldives
+CN|China|
+HK|Hongkong|Hong Kong
+TW|Taiwan|
+JP|Japan|
+KR|Zuid-Korea|South Korea,Korea
+TH|Thailand|
+VN|Vietnam|
+MY|Maleisië|Malaysia,Maleisie
+SG|Singapore|
+ID|Indonesië|Indonesia,Indonesie,Bali
+PH|Filipijnen|Philippines
+AU|Australië|Australia,Australie
+NZ|Nieuw-Zeeland|New Zealand
+US|Verenigde Staten|United States,USA,VS,Amerika,America
+CA|Canada|
+MX|Mexico|México
+CU|Cuba|
+DO|Dominicaanse Republiek|Dominican Republic
+JM|Jamaica|
+CW|Curaçao|Curacao
+AW|Aruba|
+BQ|Bonaire|Caribisch Nederland
+SX|Sint Maarten|
+SR|Suriname|
+BR|Brazilië|Brazil,Brasil,Brazilie
+AR|Argentinië|Argentina,Argentinie
+CL|Chili|Chile
+PE|Peru|
+CO|Colombia|
+ZA|Zuid-Afrika|South Africa
+KE|Kenia|Kenya
+TZ|Tanzania|
+ET|Ethiopië|Ethiopia,Ethiopie
+NG|Nigeria|
+GH|Ghana|
+SN|Senegal|
+CV|Kaapverdië|Cape Verde,Kaapverdie

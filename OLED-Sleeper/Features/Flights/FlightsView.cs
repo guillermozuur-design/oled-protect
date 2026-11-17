@@ -145,6 +145,10 @@ namespace OLED_Sleeper.Features.Flights
         private bool _running;
         private double _pixelsPerDip = 1;
         private string _locationKey = "";
+        private IDisposable? _tourUse;
+        private TourScene _scene;
+        /// <summary>Where the view looks (km from the scene centre): the followed plane, or the scene centre.</summary>
+        private Point _focus;
 
         // Two layers: the map (redrawn now and then) and the live layer with planes and pin (every frame).
         private readonly DrawingVisual _mapLayer = new();
@@ -161,6 +165,7 @@ namespace OLED_Sleeper.Features.Flights
             AddVisualChild(_mapLayer);
             AddVisualChild(_liveLayer);
             SizeChanged += (_, _) => _mapDirty = true;
+            _scene = FlightTour.HomeScene(settings);
             _tracker = new AircraftTracker(new LocalProjection(settings.Latitude, settings.Longitude));
             Loaded += (_, _) => Start();
             Unloaded += (_, _) => Stop();
@@ -190,9 +195,9 @@ namespace OLED_Sleeper.Features.Flights
             if (_running) return;
             _running = true;
             _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-            _settings.Changed += OnSettingsChanged;
+            _tourUse = FlightTour.Attach();
             AircraftFeed.Updated += OnFeedUpdated;
-            Connect();
+            Connect(FlightTour.SceneAt(DateTime.UtcNow, _settings));
             CompositionTarget.Rendering += OnRendering;
         }
 
@@ -202,32 +207,35 @@ namespace OLED_Sleeper.Features.Flights
             if (!_running) return;
             _running = false;
             CompositionTarget.Rendering -= OnRendering;
-            _settings.Changed -= OnSettingsChanged;
             AircraftFeed.Updated -= OnFeedUpdated;
             _feed?.Dispose();
             _feed = null;
+            _tourUse?.Dispose();
+            _tourUse = null;
+            _locationKey = "";
         }
 
-        private void OnSettingsChanged() => Dispatcher.BeginInvoke(Connect);
-
-        /// <summary>(Re)connects to the map and the aircraft feed for the current pin.</summary>
-        private void Connect()
+        /// <summary>(Re)connects to the map and the aircraft feed for a scene: the pin, an airport or a flight.</summary>
+        private void Connect(TourScene scene)
         {
             if (!_running) return;
-            string key = FormattableString.Invariant($"{_settings.Latitude},{_settings.Longitude},{_settings.RadiusKm}");
+            _scene = scene;
+            string key = scene.Key;
             if (key == _locationKey) return;
             _locationKey = key;
 
-            var projection = new LocalProjection(_settings.Latitude, _settings.Longitude);
+            var projection = new LocalProjection(scene.Lat, scene.Lon);
             _tracker.Reset(projection);
+            _focus = new Point(0, 0);
             _map = null;
             _mapDirty = true;
-            _feed?.Dispose();
-            _feed = AircraftFeed.Subscribe(_settings.Latitude, _settings.Longitude, FeedRadiusKm(_settings));
-            // Planes from a moment ago (e.g. fetched during the fade to black): show them at once.
-            if (AircraftFeed.RecentFor(_settings.Latitude, _settings.Longitude) is { } recent) _tracker.Update(recent, DateTime.UtcNow);
+            var old = _feed;
+            _feed = AircraftFeed.Subscribe(scene.Lat, scene.Lon, FeedRadiusKm(scene.RadiusKm));
+            old?.Dispose();
+            // Planes from a moment ago (fetched during the fade, or while the previous scene was on): at once.
+            if (AircraftFeed.RecentFor(scene.Lat, scene.Lon) is { } recent) _tracker.Update(recent, DateTime.UtcNow);
 
-            MapLoader.GetAsync(_settings.Latitude, _settings.Longitude, _settings.RadiusKm, _settings.CacheDirectory)
+            MapLoader.GetAsync(scene.Lat, scene.Lon, scene.RadiusKm, _settings.CacheDirectory)
                 .ContinueWith(t =>
                 {
                     if (t.Status != TaskStatus.RanToCompletion || t.Result == null) return;
@@ -239,24 +247,25 @@ namespace OLED_Sleeper.Features.Flights
         }
 
         /// <summary>How far around the pin to ask for planes: the drifting view plus a margin for planes flying in.</summary>
-        public static double FeedRadiusKm(FlightsSettings settings) => settings.RadiusKm * 1.6;
+        public static double FeedRadiusKm(double radiusKm) => radiusKm * 1.6;
 
-        private void OnFeedUpdated()
+        private void OnFeedUpdated() => Dispatcher.BeginInvoke(() =>
         {
-            if (AircraftFeed.Latest is not { } latest) return;
-            Dispatcher.BeginInvoke(() =>
-            {
-                if (_running) _tracker.Update(latest.Reports, DateTime.UtcNow);
-            });
-        }
+            // Only planes for this scene (the tour may already be fetching the next place).
+            if (_running && AircraftFeed.RecentFor(_scene.Lat, _scene.Lon) is { } reports) _tracker.Update(reports, DateTime.UtcNow);
+        });
 
         private void OnRendering(object? sender, EventArgs e)
         {
             if (_frameClock.IsRunning && _frameClock.Elapsed.TotalMilliseconds < 1000.0 / MaxFramesPerSecond - 0.5) return;
             _frameClock.Restart();
             var now = DateTime.UtcNow;
+            var scene = FlightTour.SceneAt(now, _settings);
+            if (scene.Key != _locationKey) Connect(scene);
+            _focus = FocusAt(now);
             // Small (the preview in the settings window): the map moves under a pixel per second, 5 redraws are plenty.
-            double mapRate = ActualWidth < 1200 ? 5 : MapFramesPerSecond;
+            // Following a plane the map slides along quickly: then it is redrawn every frame.
+            double mapRate = _scene.Kind == SceneKind.Follow ? MaxFramesPerSecond : ActualWidth < 1200 ? 5 : MapFramesPerSecond;
             if (_mapDirty || !_mapClock.IsRunning || _mapClock.Elapsed.TotalMilliseconds >= 1000.0 / mapRate - 0.5)
             {
                 _mapClock.Restart();
@@ -272,23 +281,40 @@ namespace OLED_Sleeper.Features.Flights
 
         // ================= drawing =================
 
-        /// <summary>World (km around the pin) to this screen's pixels, for this moment.</summary>
+        /// <summary>The followed plane's position (smoothly moving), or the scene centre.</summary>
+        private Point FocusAt(DateTime now)
+        {
+            if (_scene.Kind != SceneKind.Follow) return new Point(0, 0);
+            var plane = _tracker.Snapshot(now).FirstOrDefault(p => p.Hex == _scene.FollowHex);
+            return plane != null ? new Point(plane.X, plane.Y) : _focus;
+        }
+
+        /// <summary>World (km around the scene centre) to this screen's pixels, for this moment.</summary>
         private (Matrix Matrix, double Scale, double RotationDeg) ViewAt(DateTime utc)
         {
             var cam = FlightCamera.At(utc);
-            double radius = _settings.RadiusKm;
+            double radius = _scene.RadiusKm;
             double totalWidth = Math.Max(1, TotalWidth);
             double scale = totalWidth / (2 * radius) * cam.Zoom;          // px per km
             double halfHeightKm = radius * ActualHeight / totalWidth;
 
-            double cx = cam.Dx * radius, cy = cam.Dy * halfHeightKm;      // view centre, km from the pin
+            // The pin: the whole map drifts around it. An airport drifts less (it stays well in view); a followed
+            // plane stays in the middle.
+            double drift = _scene.Kind == SceneKind.Home ? 1 : _scene.Kind == SceneKind.Airport ? 0.45 : 0;
+            double cx = _focus.X + cam.Dx * radius * drift, cy = _focus.Y + cam.Dy * halfHeightKm * drift;
+            // The pin is in the middle of all screens together; an airport or plane in the middle of one screen.
+            int count = Math.Max(1, PanoramaCount);
+            double targetX = _scene.Kind == SceneKind.Home ? totalWidth / 2 : FocusScreen * Stride + ActualWidth / 2;
             var m = Matrix.Identity;
             m.Translate(-cx, -cy);
             m.Rotate(cam.RotationDeg);
             m.Scale(scale, scale);
-            m.Translate(totalWidth / 2 - PanoramaIndex * Stride, ActualHeight / 2);
+            m.Translate(targetX - PanoramaIndex * Stride, ActualHeight / 2);
             return (m, scale, cam.RotationDeg);
         }
+
+        /// <summary>The screen the airport or plane of this scene is on (alternating between the screens).</summary>
+        private int FocusScreen => _scene.FocusScreen % Math.Max(1, PanoramaCount);
 
         protected override void OnRender(DrawingContext dc)
         {
@@ -314,8 +340,18 @@ namespace OLED_Sleeper.Features.Flights
             var (m, _, rotation) = ViewAt(now);
             double ui = Ui;
             dc.PushClip(new RectangleGeometry(bounds));
-            DrawPin(dc, m.Transform(new Point(0, 0)), ui, now);
+            if (_scene.Kind == SceneKind.Home) DrawPin(dc, m.Transform(new Point(0, 0)), ui, now);
             DrawPlanes(dc, m, rotation, ui, bounds, now);
+            if (_scene.Kind == SceneKind.Airport && _scene.Airport is { } airport && (int)Math.Round(PanoramaIndex) == FocusScreen)
+            {
+                // Where we are: small, in the corner of the screen with the airport.
+                string country = Countries.All.FirstOrDefault(c => c.Code == airport.Country)?.Name ?? airport.Country;
+                var title = Text($"{airport.Code} · {MapBuilder.ShortAirportName(airport.Name)} · {country}", LabelFace, 13 * ui, Color.FromRgb(0x50, 0x58, 0x66));
+                dc.DrawText(title, new Point(28 * ui, ActualHeight - 28 * ui - title.Height));
+            }
+            // Between two scenes: fade through black.
+            double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
+            if (visible < 1) dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)Math.Round((1 - visible) * 255), 0, 0, 0)), null, bounds);
             if (_map == null && AircraftFeed.LastRequestFailed)
             {
                 var text = Text("Geen verbinding: kaart en vliegtuigen zijn nu niet beschikbaar", LabelFace, 12 * ui, Color.FromRgb(0x50, 0x56, 0x60));
@@ -430,7 +466,8 @@ namespace OLED_Sleeper.Features.Flights
                 var p = m.Transform(new Point(plane.X, plane.Y));
                 if (!outside.Contains(p)) continue;
 
-                double size = (plane.OnGround ? 6 : 9) * ui * SizeOf(plane.Kind);
+                bool followed = _scene.Kind == SceneKind.Follow && plane.Hex == _scene.FollowHex;
+                double size = (plane.OnGround ? 6 : 9) * ui * SizeOf(plane.Kind) * (followed ? 1.7 : 1);
                 var tf = new TransformGroup();
                 tf.Children.Add(new ScaleTransform(size, size));
                 tf.Children.Add(new RotateTransform(plane.HeadingDeg + rotation));
@@ -445,6 +482,12 @@ namespace OLED_Sleeper.Features.Flights
                 }
                 dc.Pop();
 
+                if (followed)
+                {
+                    DrawFollowLabel(dc, plane, p, size, ui);
+                    continue;
+                }
+
                 if (labels && !plane.OnGround && plane.Callsign.Length > 0)
                 {
                     string altitude = plane.AltitudeFeet is { } ft
@@ -457,6 +500,22 @@ namespace OLED_Sleeper.Features.Flights
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }
+        }
+
+        /// <summary>The followed flight: call sign and route large, type, height and speed under it.</summary>
+        private void DrawFollowLabel(DrawingContext dc, AircraftTracker.Plane plane, Point p, double size, double ui)
+        {
+            var route = RouteLookup.For(plane.Callsign);
+            string title = route != null ? $"{plane.Callsign}   {route}" : plane.Callsign;
+            string altitude = plane.AltitudeFeet is { } ft
+                ? (Math.Round(ft * 0.3048 / 100) * 100).ToString("#,0", CultureInfo.GetCultureInfo("nl-NL")) + " m"
+                : "";
+            string speed = _tracker.SpeedKmh(plane.Hex) is { } kmh ? $"{Math.Round(kmh / 10) * 10:0} km/u" : "";
+            string details = string.Join(" · ", new[] { plane.TypeCode, altitude, speed }.Where(x => x.Length > 0));
+            var t1 = Text(title, CityFace, 17 * ui, Color.FromRgb(0x8A, 0x92, 0xA0));
+            var at = p + new Vector(size + 12 * ui, -t1.Height * 0.8);
+            dc.DrawText(t1, at);
+            if (details.Length > 0) dc.DrawText(Text(details, LabelFace, 12.5 * ui, Color.FromRgb(0x5E, 0x66, 0x74)), at + new Vector(0, t1.Height));
         }
 
         private FormattedText Text(string text, Typeface face, double size, Color color)

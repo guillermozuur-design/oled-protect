@@ -416,6 +416,26 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void Tour_DefaultsAndClamping()
+        {
+            var store = new MemoryStore();
+            var s = new FlightsSettings(store);
+            Assert.Equal(FlightsMode.Home, s.Mode);
+            Assert.True(s.FollowFlights);
+            Assert.Equal(FlightsSettings.DefaultSceneSeconds, s.SceneSeconds);
+
+            s.SetMode(FlightsMode.Tour);
+            s.SetTourCountries("  Spanje  ");
+            s.SetSceneSeconds(500);
+            s.SetFollowFlights(false);
+            Assert.Equal(FlightsMode.Tour, s.Mode);
+            Assert.Equal("Spanje", s.TourCountries);
+            Assert.Equal(FlightsSettings.MaxSceneSeconds, s.SceneSeconds);
+            Assert.False(s.FollowFlights);
+            Assert.Equal(FlightsMode.Tour, new FlightsSettings(store).Mode);
+        }
+
+        [Fact]
         public void Changes_AreClampedSavedAndAnnounced()
         {
             var store = new MemoryStore();

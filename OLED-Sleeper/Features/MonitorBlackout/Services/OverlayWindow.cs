@@ -76,8 +76,7 @@ namespace OLED_Sleeper.Features.MonitorBlackout.Services
             // soon as the screen is black (instead of only starting then).
             if (_scene == OverlayScene.Flights && _flights != null)
             {
-                _flightsWarmUp = AircraftFeed.Subscribe(_flights.Latitude, _flights.Longitude, FlightsView.FeedRadiusKm(_flights));
-                _ = MapLoader.GetAsync(_flights.Latitude, _flights.Longitude, _flights.RadiusKm, _flights.CacheDirectory);
+                _flightsWarmUp = FlightTour.WarmUp(_flights);
             }
             StartFade(0, 1, FadeInDuration, () =>
             {

@@ -34,6 +34,11 @@ onofficiële versie met veel uitbreidingen.
   klein vliegtuig, helikopter), vluchtnummer, route (bijv. RTM→TFS; anders het toesteltype) en hoogte.
 - De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,
   zodat niets op dezelfde pixels blijft. Over twee schermen één doorlopende kaart.
+- **Rondreis** (optie): elke 10–60 seconden fadet het beeld naar een ander druk vliegveld in de landen die je invult
+  (bijv. "Nederland, Spanje, UK"), afwisselend op het ene en het andere scherm. Om de paar vliegvelden volgt hij een tijdje
+  één vlucht (vluchtnummer, route, type, hoogte, snelheid). Zo is er altijd wat te zien.
+- Start je zelf een screensaver (snelmenu, tray of instellingen) terwijl een scherm al slaapt, dan wordt dat scherm eerst
+  gewekt: je ziet alleen wat je zelf koos.
 - Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.fi met adsb.lol als reserve (open ADS-B-data), routes van adsbdb.com.
   De coördinaten van de pin gaan naar die diensten; verder blijven ze op je pc.
 
@@ -65,7 +70,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 289 tests
+dotnet test OLED-Sleeper.sln                       # 303 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
@@ -98,6 +103,6 @@ Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.js
 
 - Kaartdata: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-bijdragers (ODbL), tegels via
   [OpenFreeMap](https://openfreemap.org) / [OpenMapTiles](https://openmaptiles.org). Plaatsen zoeken: Nominatim.
-- Vliegtuigdata: [adsb.fi](https://adsb.fi) (open data, persoonlijk gebruik) en [adsb.lol](https://adsb.lol) (open data, ODbL); routes: [adsbdb](https://www.adsbdb.com).
+- Vliegtuigdata: [adsb.fi](https://adsb.fi) (open data, persoonlijk gebruik) en [adsb.lol](https://adsb.lol) (open data, ODbL); routes: [adsbdb](https://www.adsbdb.com); vliegvelden voor de rondreis: [OurAirports](https://ourairports.com/data/) (publiek domein).
 
-Dit project is niet verbonden aan de makers van OLED Sleeper, d3-celestial, OpenStreetMap, OpenFreeMap, adsb.fi, adsb.lol of adsbdb.
+Dit project is niet verbonden aan de makers van OLED Sleeper, d3-celestial, OpenStreetMap, OpenFreeMap, adsb.fi, adsb.lol, adsbdb of OurAirports.
