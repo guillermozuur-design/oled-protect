@@ -232,7 +232,6 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>Smallest size of text and symbols (the small preview raises it, so its labels stay readable).</summary>
         public double MinUi { get; set; } = 0.35;
 
-        private DateTime _connectedUtc;
 
         /// <summary>What is going on, in a few words, when something is missing ("" when all is well).</summary>
         public string Status
@@ -242,8 +241,7 @@ namespace OLED_Sleeper.Features.Flights
                 if (AircraftFeed.LastRequestFailed)
                     return _map == null ? "Geen verbinding: kaart en vliegtuigen kunnen nu niet worden opgehaald" : "Geen verbinding: vliegtuigen nu niet beschikbaar";
                 if (_map == null) return "Kaart laden…";
-                bool answered = AircraftFeed.RecentFor(_scene.Lat, _scene.Lon) != null;
-                if (answered && _tracker.Count == 0 && DateTime.UtcNow - _connectedUtc > TimeSpan.FromSeconds(15)) return "Nu geen vliegtuigen in de buurt";
+                // No planes nearby needs no words: the map simply shows none.
                 return "";
             }
         }
@@ -283,7 +281,6 @@ namespace OLED_Sleeper.Features.Flights
             _locationKey = key;
 
             _mapLayer.CacheMode = scene.Kind == SceneKind.Follow ? null : MapCache;
-            _connectedUtc = DateTime.UtcNow;
             var projection = new LocalProjection(scene.Lat, scene.Lon);
             _tracker.Reset(projection);
             _focus = new Point(0, 0);
@@ -458,7 +455,7 @@ namespace OLED_Sleeper.Features.Flights
             // Between two scenes: fade through black.
             double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
             if (visible < 1) dc.DrawRectangle(FadeBrushes[(int)Math.Round((1 - visible) * (FadeBrushes.Length - 1))], null, bounds);
-            // No connection, or simply nothing flying: say so (it moves along with the map, so nothing burns in).
+            // No connection: say so (it moves along with the map, so nothing burns in).
             if (Status is { Length: > 0 } status && status != "Kaart laden…" && (_scene.Kind == SceneKind.Home || (int)Math.Round(PanoramaIndex) == FocusScreen))
             {
                 var text = Text(status, LabelFace, 12.5 * ui, Color.FromRgb(0x7A, 0x80, 0x90));
