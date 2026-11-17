@@ -197,7 +197,26 @@ namespace OLED_Sleeper.Features.Flights
         private double TotalWidth => ActualWidth * Math.Max(1, PanoramaCount) + Gap * (Math.Max(1, PanoramaCount) - 1);
 
         /// <summary>Size of text and symbols, relative to a 1080-pixel-high screen.</summary>
-        private double Ui => Math.Clamp(ActualHeight / 1080, 0.35, 1.6);
+        private double Ui => Math.Clamp(ActualHeight / 1080, MinUi, 1.6);
+
+        /// <summary>Smallest size of text and symbols (the small preview raises it, so its labels stay readable).</summary>
+        public double MinUi { get; set; } = 0.35;
+
+        private DateTime _connectedUtc;
+
+        /// <summary>What is going on, in a few words, when something is missing ("" when all is well).</summary>
+        public string Status
+        {
+            get
+            {
+                if (AircraftFeed.LastRequestFailed)
+                    return _map == null ? "Geen verbinding: kaart en vliegtuigen kunnen nu niet worden opgehaald" : "Geen verbinding: vliegtuigen nu niet beschikbaar";
+                if (_map == null) return "Kaart laden…";
+                bool answered = AircraftFeed.RecentFor(_scene.Lat, _scene.Lon) != null;
+                if (answered && _tracker.Count == 0 && DateTime.UtcNow - _connectedUtc > TimeSpan.FromSeconds(15)) return "Nu geen vliegtuigen in de buurt";
+                return "";
+            }
+        }
 
         private void Start()
         {
@@ -234,6 +253,7 @@ namespace OLED_Sleeper.Features.Flights
             _locationKey = key;
 
             _mapLayer.CacheMode = scene.Kind == SceneKind.Follow ? null : MapCache;
+            _connectedUtc = DateTime.UtcNow;
             var projection = new LocalProjection(scene.Lat, scene.Lon);
             _tracker.Reset(projection);
             _focus = new Point(0, 0);
@@ -408,10 +428,11 @@ namespace OLED_Sleeper.Features.Flights
             // Between two scenes: fade through black.
             double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
             if (visible < 1) dc.DrawRectangle(FadeBrushes[(int)Math.Round((1 - visible) * (FadeBrushes.Length - 1))], null, bounds);
-            if (_map == null && AircraftFeed.LastRequestFailed)
+            // No connection, or simply nothing flying: say so (it moves along with the map, so nothing burns in).
+            if (Status is { Length: > 0 } status && status != "Kaart laden…" && (_scene.Kind == SceneKind.Home || (int)Math.Round(PanoramaIndex) == FocusScreen))
             {
-                var text = Text("Geen verbinding: kaart en vliegtuigen zijn nu niet beschikbaar", LabelFace, 12 * ui, Color.FromRgb(0x50, 0x56, 0x60));
-                dc.DrawText(text, m.Transform(new Point(0, 0)) + new Vector(-text.Width / 2, 24 * ui));
+                var text = Text(status, LabelFace, 12.5 * ui, Color.FromRgb(0x7A, 0x80, 0x90));
+                dc.DrawText(text, m.Transform(_focus) + new Vector(-text.Width / 2, 28 * ui));
             }
             dc.Pop();
         }

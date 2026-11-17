@@ -160,10 +160,13 @@ namespace OLED_Sleeper.UI.Services
             contextMenu.Items.Add(CreatePreviewMenuItem());
             contextMenu.Items.Add(CreateFlightsPreviewMenuItem());
             contextMenu.Items.Add(CreateShowSettingsMenuItem());
-            contextMenu.Items.Add(CreateStartupMenuItem());
+            var startupItem = CreateStartupMenuItem();
+            contextMenu.Items.Add(startupItem);
             contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(CreateExitMenuItem());
 
+            // It can also be changed in the settings window: show the real state each time the menu opens.
+            contextMenu.Opened += (_, _) => startupItem.IsChecked = StartupHelper.IsRunAtStartupEnabled();
             _notifyIcon.ContextMenu = contextMenu;
         }
 
@@ -185,7 +188,7 @@ namespace OLED_Sleeper.UI.Services
 
         private MenuItem CreatePreviewMenuItem()
         {
-            var item = new MenuItem { Header = "Sterrenhemel bekijken" };
+            var item = new MenuItem { Header = "Sterren bekijken" };
             item.Click += (_, _) => ShowScreensaverPreview();
             return item;
         }

@@ -397,7 +397,7 @@
                     <!-- Idle Timer Section -->
                     <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,20,0,0" ToolTipService.InitialShowDelay="200">
                         <StackPanel.ToolTip>
-                            <ToolTip Content="Hoe lang het scherm stil moet staan voordat het zwart wordt, dimt of de sterren laat zien." />
+                            <ToolTip Content="Hoe lang het scherm stil moet staan voordat het zwart wordt, dimt of een screensaver (sterren of vliegtuigen) laat zien." />
                         </StackPanel.ToolTip>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="WACHTTIJD" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" FontWeight="Light" />

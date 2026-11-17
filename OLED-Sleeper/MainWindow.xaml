@@ -89,6 +89,7 @@
             </Setter>
         </Style>
         <Style x:Key="ModernSlider" TargetType="Slider">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -165,7 +166,7 @@
                         <Button x:Name="WorkModeButton" Style="{StaticResource SubtleButton}" Click="WorkMode_Click" Padding="16,9">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="WorkModeIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="15" VerticalAlignment="Center" />
-                                <TextBlock x:Name="WorkModeLabel" Text="Werkmodus aan" Margin="9,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock x:Name="WorkModeLabel" Text="Werkmodus starten" Margin="9,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                         <TextBlock x:Name="HotkeyHint" FontSize="11.5" Margin="0,6,0,0" HorizontalAlignment="Center" Foreground="{StaticResource SecondaryForegroundColor}" />
@@ -274,16 +275,16 @@
                                 <Border Style="{StaticResource Card}">
                                     <StackPanel>
                                         <DockPanel>
-                                            <CheckBox x:Name="TourCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Tour_Click" VerticalAlignment="Center" />
+                                            <CheckBox x:Name="TourCheck" AutomationProperties.Name="Rondreis langs drukke vliegvelden" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Tour_Click" VerticalAlignment="Center" />
                                             <StackPanel>
                                                 <TextBlock Text="Rondreis langs drukke vliegvelden" Style="{StaticResource CardTitle}" />
-                                                <TextBlock Style="{StaticResource CardText}" Text="Elke keer na een paar seconden fadet het beeld naar een ander vliegveld in de landen hieronder, zodat er altijd wat te zien is. Uit: altijd rond je speldje." />
+                                                <TextBlock Style="{StaticResource CardText}" Text="Het beeld gaat steeds over naar een ander druk vliegveld in de landen of plekken hieronder, het liefst waar op dat moment vliegtuigen landen en opstijgen. Staat dit uit, dan blijft de kaart rond je speldje." />
                                             </StackPanel>
                                         </DockPanel>
 
                                         <StackPanel x:Name="TourOptions" Margin="0,14,0,0">
                                             <DockPanel>
-                                                <TextBox x:Name="CountriesBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="330" VerticalAlignment="Center"
+                                                <TextBox x:Name="CountriesBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="330" HorizontalContentAlignment="Left" VerticalAlignment="Center"
                                                          TextChanged="CountriesBox_TextChanged" ToolTip="Landen, eilanden, plaatsen of vliegveldcodes, bijvoorbeeld: Nederland, Spanje, Tenerife, Mallorca, JFK" />
                                                 <StackPanel>
                                                     <TextBlock Text="Landen of plekken" Style="{StaticResource CardTitle}" />
@@ -292,10 +293,10 @@
                                             </DockPanel>
 
                                             <DockPanel Margin="0,14,0,0">
-                                                <CheckBox x:Name="FollowCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Follow_Click" VerticalAlignment="Center" />
+                                                <CheckBox x:Name="FollowCheck" AutomationProperties.Name="Af en toe een vlucht volgen" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Follow_Click" VerticalAlignment="Center" />
                                                 <StackPanel>
                                                     <TextBlock Text="Af en toe een vlucht volgen" Style="{StaticResource CardTitle}" />
-                                                    <TextBlock Style="{StaticResource CardText}" Text="Om de paar vliegvelden volgt hij een tijdje één vliegtuig dat daar vliegt, met vluchtnummer, route, type, hoogte en snelheid." />
+                                                    <TextBlock Style="{StaticResource CardText}" Text="Na elke twee vliegvelden volgt de kaart een tijdje één vliegtuig van daar, met vluchtnummer, route, type, hoogte en snelheid." />
                                                 </StackPanel>
                                             </DockPanel>
 
@@ -314,11 +315,14 @@
                                     </StackPanel>
                                 </Border>
 
+                                <TextBlock x:Name="PinOptionsNote" Margin="6,4,6,6" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Speldje en afstand worden niet gebruikt zolang de rondreis aan staat." />
+                                <StackPanel x:Name="PinOptions">
                                 <Border Style="{StaticResource Card}">
                                     <StackPanel>
                                         <DockPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBox x:Name="PlaceBox" Style="{StaticResource Field}" Width="210" KeyDown="PlaceBox_KeyDown"
+                                                <TextBox x:Name="PlaceBox" Style="{StaticResource Field}" Width="210" HorizontalContentAlignment="Left" KeyDown="PlaceBox_KeyDown"
                                                          ToolTip="Een plaats, adres of postcode, of coördinaten zoals 52.09, 5.12" />
                                                 <Button x:Name="PlaceSearchButton" Content="Zoeken" Style="{StaticResource SubtleButton}" Margin="10,0,0,0" Click="PlaceSearch_Click" />
                                             </StackPanel>
@@ -343,19 +347,20 @@
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
+                                </StackPanel>
 
                                 <Border Style="{StaticResource Card}">
                                     <DockPanel>
-                                        <CheckBox x:Name="FlightLabelsCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="FlightLabels_Click" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="FlightLabelsCheck" AutomationProperties.Name="Vluchtnummer, route en hoogte bij elk vliegtuig" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="FlightLabels_Click" VerticalAlignment="Center" />
                                         <StackPanel>
-                                            <TextBlock Text="Vluchtnummer en hoogte bij elk vliegtuig" Style="{StaticResource CardTitle}" />
-                                            <TextBlock Style="{StaticResource CardText}" Text="Kleur van het vliegtuig: oranje = laag (opstijgen of landen), lichtblauw = hoog." />
+                                            <TextBlock Text="Vluchtnummer, route en hoogte bij elk vliegtuig" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Kleur van het vliegtuig: geel = in de lucht, oranje = laag (opstijgen of landen), grijs = aan de grond." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
 
                                 <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
-                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com, vliegvelden: OurAirports. Zoeken: Nominatim (OpenStreetMap). De coördinaten van het speldje en de vliegvelden worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
+                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com, vliegvelden: OurAirports. Zoeken: Nominatim (OpenStreetMap). Zolang er vliegtuigen in beeld zijn (de screensaver of het voorbeeld hierboven) vraagt de app elke 8 seconden de vliegtuigen op rond je speldje of het vliegveld in beeld; die plek gaat afgerond op ongeveer 1 km naar adsb.fi (of adsb.lol als reserve). Wat je zoekt gaat naar Nominatim. Verder blijft alles alleen op deze pc." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
@@ -386,12 +391,12 @@
                                                 <TextBox x:Name="GlobalIdleBox" Style="{StaticResource Field}" Width="56"
                                                          LostKeyboardFocus="GlobalIdleBox_LostFocus" KeyDown="GlobalIdleBox_KeyDown" />
                                                 <TextBlock Text="min" Margin="8,0,16,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
-                                                <CheckBox x:Name="GlobalIdleCheck" Style="{StaticResource Switch}" Click="GlobalIdle_Changed" VerticalAlignment="Center" />
+                                                <CheckBox x:Name="GlobalIdleCheck" AutomationProperties.Name="Alle schermen uit als je weg bent" Style="{StaticResource Switch}" Click="GlobalIdle_Changed" VerticalAlignment="Center" />
                                             </StackPanel>
                                             <StackPanel>
                                                 <TextBlock Text="Alle schermen uit als je weg bent" Style="{StaticResource CardTitle}" />
                                                 <TextBlock x:Name="GlobalIdleStatus" Style="{StaticResource CardText}"
-                                                           Text="Na deze tijd zonder muis of toets gaan alle bewaakte schermen naar hun stand. Speelt er een video, dan blijft het scherm met die video aan." />
+                                                           Text="Na deze tijd zonder muis of toets krijgen alle bewaakte schermen hun ingestelde gedrag (zwart, dimmen, sterren of vliegtuigen). Speelt er een video, dan blijft het scherm met die video aan." />
                                             </StackPanel>
                                         </DockPanel>
                                     </StackPanel>
@@ -414,10 +419,10 @@
 
                                 <Border Style="{StaticResource Card}">
                                     <DockPanel>
-                                        <CheckBox x:Name="StartupCheck" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="StartupCheck" AutomationProperties.Name="Starten met Windows" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />
                                         <StackPanel>
                                             <TextBlock Text="Starten met Windows" Style="{StaticResource CardTitle}" />
-                                            <TextBlock Style="{StaticResource CardText}" Text="Start verborgen in het systeemvak bij het inloggen." />
+                                            <TextBlock x:Name="StartupStatus" Style="{StaticResource CardText}" Text="Start verborgen in het systeemvak bij het inloggen." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
@@ -437,7 +442,7 @@
                 <!-- ===== Footer ===== -->
                 <Border Grid.Row="3" BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="0,1,0,0" Padding="22,9">
                     <DockPanel>
-                        <TextBlock x:Name="VersionText" DockPanel.Dock="Right" FontSize="11.5" Foreground="#5C6272" />
+                        <TextBlock x:Name="VersionText" DockPanel.Dock="Right" FontSize="11.5" Foreground="{StaticResource SecondaryForegroundColor}" />
                         <TextBlock x:Name="SaveStatusText" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}"
                                    Text="Wijzigingen worden automatisch opgeslagen" />
                     </DockPanel>

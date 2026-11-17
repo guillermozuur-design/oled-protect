@@ -80,7 +80,7 @@ namespace OLED_Sleeper.UI.Views
             var until = _workMode.EnabledUntil;
             _options = new List<Option>
             {
-                new("", "Bescherming aan", "Stilstaande schermen op zwart, dim of sterren", !on, () => _workMode.SetEnabled(false)),
+                new("", "Bescherming aan", "Stilstaande schermen op zwart, gedimd, sterren of vliegtuigen", !on, () => _workMode.SetEnabled(false)),
                 new("", "Werkmodus", "Alle schermen blijven aan", on && until == null, () => _workMode.SetEnabled(true)),
                 new("", until != null ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm}" : "Werkmodus 1 uur",
                     "Daarna gaat de bescherming vanzelf weer aan", on && until != null, () => _workMode.EnableFor(TimedWorkMode)),

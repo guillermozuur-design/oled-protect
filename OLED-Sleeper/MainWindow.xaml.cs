@@ -75,6 +75,8 @@ namespace OLED_Sleeper
             Loaded += (_, _) => { ShowHotkey(); RefreshHeader(); BuildAppRows(); };
             // Minimised: the live preview stops (no drawing, no questions to the plane service).
             StateChanged += (_, _) => UpdateFlightsPreview();
+            // "Starten met Windows" can also be changed from the tray menu: show the real state when coming back.
+            Activated += (_, _) => StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
             IsVisibleChanged += (_, _) =>
             {
                 // Only tick while the window is on screen.
@@ -108,7 +110,7 @@ namespace OLED_Sleeper
                     ? $"Alle schermen blijven aan tot {until.Value.ToLocalTime():HH:mm}"
                     : "Alle schermen blijven aan";
                 StatusDot.Fill = (Brush)FindResource("StarGoldBrush");
-                WorkModeLabel.Text = "Bescherming aan";
+                WorkModeLabel.Text = "Werkmodus stoppen";
                 WorkModeIcon.Text = "";
             }
             else
@@ -121,7 +123,7 @@ namespace OLED_Sleeper
                     _ => $"{managed} schermen bewaakt"
                 };
                 StatusDot.Fill = (Brush)FindResource("AccentColorBrush");
-                WorkModeLabel.Text = "Werkmodus aan";
+                WorkModeLabel.Text = "Werkmodus starten";
                 WorkModeIcon.Text = "";
             }
 
@@ -222,6 +224,10 @@ namespace OLED_Sleeper
             TourCheck.IsChecked = tour;
             TourOptions.IsEnabled = tour;
             TourOptions.Opacity = tour ? 1 : 0.45;
+            // The pin and its distance do nothing during the tour: greyed out, with a short note.
+            PinOptions.IsEnabled = !tour;
+            PinOptions.Opacity = tour ? 0.45 : 1;
+            PinOptionsNote.Visibility = tour ? Visibility.Visible : Visibility.Collapsed;
             if (!CountriesBox.IsKeyboardFocusWithin) CountriesBox.Text = _flights.TourCountries;
             ShowCountriesStatus(_flights.TourCountries);
             FollowCheck.IsChecked = _flights.FollowFlights;
@@ -239,16 +245,30 @@ namespace OLED_Sleeper
         /// The live preview only runs while its tab is open and the window is visible, so the app never fetches
         /// aircraft in the background for nothing.
         /// </summary>
+        private DispatcherTimer? _previewStatusTimer;
+
+        /// <summary>The caption above the preview: what it shows, and what is wrong if something is missing.</summary>
+        private void ShowPreviewStatus()
+        {
+            string caption = _flights.Mode == FlightsMode.Tour ? "Live: rondreis langs vliegvelden" : $"Live rond {_flights.PlaceName}";
+            string status = _flightsPreview?.Status ?? "";
+            FlightsPreviewCaption.Text = status.Length > 0 ? $"{caption} · {status}" : caption;
+        }
+
         private void UpdateFlightsPreview()
         {
             bool wanted = IsVisible && WindowState != WindowState.Minimized && MainTabs.SelectedItem == FlightsTab;
             if (wanted && _flightsPreview == null)
             {
-                _flightsPreview = new FlightsView(_flights);
+                // Text a little bigger than its size would give, so labels and messages stay readable.
+                _flightsPreview = new FlightsView(_flights) { MinUi = 0.8 };
                 FlightsPreviewHost.Content = _flightsPreview;
+                _previewStatusTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => ShowPreviewStatus(), Dispatcher);
+                _previewStatusTimer.Start();
             }
             else if (!wanted && _flightsPreview != null)
             {
+                _previewStatusTimer?.Stop();
                 _flightsPreview.Stop();
                 FlightsPreviewHost.Content = null;
                 _flightsPreview = null;
@@ -323,7 +343,12 @@ namespace OLED_Sleeper
             ShowCountriesStatus(CountriesBox.Text);
             // Save after a short pause in typing (each change restarts the tour).
             _countriesDebounce ??= new DispatcherTimer(TimeSpan.FromMilliseconds(900), DispatcherPriority.Normal,
-                (_, _) => { _countriesDebounce!.Stop(); _flights.SetTourCountries(CountriesBox.Text); }, Dispatcher);
+                (_, _) =>
+                {
+                    _countriesDebounce!.Stop();
+                    _flights.SetTourCountries(CountriesBox.Text);
+                    CountriesStatus.Text += "  Opgeslagen ✓";
+                }, Dispatcher);
             _countriesDebounce.Stop();
             _countriesDebounce.Start();
         }
@@ -332,9 +357,10 @@ namespace OLED_Sleeper
         {
             var selection = TourSelection.From(text);
             string status = selection.Airports.Count == 0
-                ? "Niets herkend: dan Nederland."
+                ? "Niets herkend: de rondreis gebruikt nu Nederland. Typ bijvoorbeeld: Spanje, Tenerife, JFK."
                 : $"{string.Join(", ", selection.Recognised)}: {selection.Airports.Count} vliegvelden.";
-            if (selection.Unknown.Count > 0) status += $" Niet herkend: {string.Join(", ", selection.Unknown)}.";
+            if (selection.Unknown.Count > 0)
+                status += $" Niet gevonden: {string.Join(", ", selection.Unknown)} (controleer de spelling, of gebruik een vliegveldcode).";
             CountriesStatus.Text = status;
         }
 
@@ -377,8 +403,10 @@ namespace OLED_Sleeper
 
         private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            e.Handled = true;
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            // Tab (and Shift+Tab) just move on to the next field, as everywhere else.
+            if (key == Key.Tab) return;
+            e.Handled = true;
 
             if (key == Key.Escape)
             {
@@ -429,20 +457,26 @@ namespace OLED_Sleeper
 
             _globalIdle.Set(GlobalIdleCheck.IsChecked == true, minutes);
             GlobalIdleStatus.Text = _globalIdle.Enabled
-                ? $"Aan ✓ — na {minutes} min zonder muis of toets gaan alle bewaakte schermen uit (behalve het scherm met een video die speelt)."
+                ? $"Aan ✓ — na {minutes} min zonder muis of toets krijgen alle bewaakte schermen hun ingestelde gedrag (behalve het scherm met een video die speelt)."
                 : "Uit — alleen de instellingen per scherm gelden.";
         }
 
         private void Startup_Click(object sender, RoutedEventArgs e)
         {
+            bool wanted = StartupCheck.IsChecked == true;
             try
             {
-                StartupHelper.SetRunAtStartup(StartupCheck.IsChecked == true);
+                StartupHelper.SetRunAtStartup(wanted);
             }
-            catch
+            catch (Exception ex)
             {
-                StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
+                Serilog.Log.Warning("Run at startup could not be changed: {Message}", ex.Message);
             }
+            bool now = StartupHelper.IsRunAtStartupEnabled();
+            StartupCheck.IsChecked = now;
+            StartupStatus.Text = now == wanted
+                ? "Start verborgen in het systeemvak bij het inloggen."
+                : "Lukt niet: Windows staat het instellen nu niet toe. Probeer het later nog eens.";
         }
 
         // ================= apps that keep the screen awake =================

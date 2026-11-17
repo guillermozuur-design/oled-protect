@@ -33,7 +33,7 @@
         <StackPanel>
             <TextBlock Text="OLED Space Sleeper" Margin="8,2,0,8" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource SecondaryForegroundColor}" />
             <StackPanel x:Name="Rows" />
-            <TextBlock x:Name="HintText" Margin="8,6,8,2" FontSize="10.5" TextWrapping="Wrap" Foreground="#6E6E73" />
+            <TextBlock x:Name="HintText" Margin="8,6,8,2" FontSize="11.5" TextWrapping="Wrap" Foreground="#8B91A1" />
         </StackPanel>
     </Border>
 </Window>
