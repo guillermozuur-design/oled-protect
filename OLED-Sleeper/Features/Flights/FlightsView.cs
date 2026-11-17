@@ -195,7 +195,7 @@ namespace OLED_Sleeper.Features.Flights
             if (_running) return;
             _running = true;
             _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-            _tourUse = FlightTour.Attach();
+            _tourUse = FlightTour.Attach(PanoramaCount > 1 ? (int)Math.Round(PanoramaIndex) : null);
             AircraftFeed.Updated += OnFeedUpdated;
             Connect(FlightTour.SceneAt(DateTime.UtcNow, _settings));
             CompositionTarget.Rendering += OnRendering;
@@ -304,7 +304,11 @@ namespace OLED_Sleeper.Features.Flights
             double cx = _focus.X + cam.Dx * radius * drift, cy = _focus.Y + cam.Dy * halfHeightKm * drift;
             // The pin is in the middle of all screens together; an airport or plane in the middle of one screen.
             int count = Math.Max(1, PanoramaCount);
-            double targetX = _scene.Kind == SceneKind.Home ? totalWidth / 2 : FocusScreen * Stride + ActualWidth / 2;
+            // When only one screen of the row shows the planes, the pin goes in the middle of that screen.
+            var active = PanoramaCount > 1 ? FlightTour.ActiveScreens : Array.Empty<int>();
+            double targetX = _scene.Kind != SceneKind.Home ? FocusScreen * Stride + ActualWidth / 2
+                           : active.Count == 1 ? active[0] * Stride + ActualWidth / 2
+                           : totalWidth / 2;
             var m = Matrix.Identity;
             m.Translate(-cx, -cy);
             m.Rotate(cam.RotationDeg);
@@ -349,7 +353,15 @@ namespace OLED_Sleeper.Features.Flights
         }
 
         /// <summary>The screen the airport or plane of this scene is on (alternating between the screens).</summary>
-        private int FocusScreen => _scene.FocusScreen % Math.Max(1, PanoramaCount);
+        private int FocusScreen
+        {
+            get
+            {
+                // Only screens that show the planes (one asleep, the other in use: everything on the sleeping one).
+                var active = PanoramaCount > 1 ? FlightTour.ActiveScreens : Array.Empty<int>();
+                return active.Count > 0 ? active[_scene.FocusScreen % active.Count] : _scene.FocusScreen % Math.Max(1, PanoramaCount);
+            }
+        }
 
         protected override void OnRender(DrawingContext dc)
         {

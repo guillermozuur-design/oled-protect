@@ -166,6 +166,22 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void ActiveScreens_AreTheScreensShowingThePlanes()
+        {
+            using (FlightTour.Attach(null))
+            using (var right = FlightTour.Attach(1))
+            {
+                Assert.Equal(new[] { 1 }, FlightTour.ActiveScreens); // only the right screen is asleep
+                using (FlightTour.Attach(0))
+                    Assert.Equal(new[] { 0, 1 }, FlightTour.ActiveScreens);
+                Assert.Equal(new[] { 1 }, FlightTour.ActiveScreens);
+                right.Dispose();
+                right.Dispose(); // twice is harmless
+                Assert.Empty(FlightTour.ActiveScreens);
+            }
+        }
+
+        [Fact]
         public void Flying_CountsOnlyPlanesInTheAir()
         {
             var t = DateTime.UtcNow;

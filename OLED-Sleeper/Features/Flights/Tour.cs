@@ -341,14 +341,30 @@ namespace OLED_Sleeper.Features.Flights
         private static IDisposable? _prepared;
         private static string _settingsKey = "";
 
-        /// <summary>A screen (or the preview) takes part; when the last one leaves, the tour starts afresh next time.</summary>
-        public static IDisposable Attach()
+        /// <summary>
+        /// A screen (or the preview) takes part; when the last one leaves, the tour starts afresh next time.
+        /// <paramref name="screen"/>: which screen of the row it is (null: not a screen of the row, e.g. the
+        /// small preview or the warm-up), so the airport is only put on screens that really show the planes.
+        /// </summary>
+        public static IDisposable Attach(int? screen = null)
         {
-            lock (Gate) _users++;
-            return new Leave();
+            lock (Gate)
+            {
+                _users++;
+                if (screen is { } s) Screens.Add(s);
+            }
+            return new Leave(screen);
         }
 
-        private sealed class Leave : IDisposable
+        private static readonly List<int> Screens = new();
+
+        /// <summary>The screens of the row that show the planes now, left to right (empty: none registered).</summary>
+        public static IReadOnlyList<int> ActiveScreens
+        {
+            get { lock (Gate) return Screens.Distinct().Order().ToList(); }
+        }
+
+        private sealed class Leave(int? screen) : IDisposable
         {
             private bool _done;
             public void Dispose()
@@ -357,6 +373,7 @@ namespace OLED_Sleeper.Features.Flights
                 _done = true;
                 lock (Gate)
                 {
+                    if (screen is { } s) Screens.Remove(s);
                     if (--_users > 0) return;
                     Reset();
                 }

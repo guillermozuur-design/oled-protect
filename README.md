@@ -39,7 +39,8 @@ onofficiële versie met veel uitbreidingen.
   één vlucht (vluchtnummer, route, type, hoogte, snelheid). Een vliegveld waar op dat moment bijna niets vliegt
   (minder dan 2 toestellen in de lucht) ruilt hij in voor een ander veld in hetzelfde land of dezelfde plek; is daar
   alles rustig, dan komt die plek minder vaak (maar wel) langs. Vliegveld, gevolgd vliegtuig en titel staan elke keer
-  ergens anders en bewegen langzaam. Zo is er altijd wat te zien.
+  ergens anders en bewegen langzaam. Slaapt maar één scherm,
+  dan komt alles (ook het speldje) op dat scherm. Zo is er altijd wat te zien.
 - Start je zelf een screensaver (snelmenu, tray of instellingen) terwijl een scherm al slaapt, dan wordt dat scherm eerst
   gewekt: je ziet alleen wat je zelf koos.
 - Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.fi met adsb.lol als reserve (open ADS-B-data), routes van adsbdb.com.
@@ -73,7 +74,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 309 tests
+dotnet test OLED-Sleeper.sln                       # 310 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
