@@ -195,7 +195,7 @@ namespace OLED_Sleeper.Features.Flights
         public const int RememberAirports = 3;
 
         /// <summary>An airport with fewer planes in the air around it than this is skipped (when there is time).</summary>
-        public const int MinFlying = 5;
+        public const int MinFlying = 2;
 
         /// <summary>Planes in the air (not taxiing or parked).</summary>
         public static int Flying(IEnumerable<AircraftReport> reports) => reports.Count(r => !r.OnGround && (r.AltitudeFeet ?? 0) >= 300);
@@ -223,20 +223,32 @@ namespace OLED_Sleeper.Features.Flights
         public const double BigWeight = 3;
 
         /// <summary>
-        /// A random group first (each country or place typed gets an equal turn, but not twice in a row), then an
-        /// airport in it.
+        /// A random group first (each country or place typed gets its turn, but not twice in a row; one where
+        /// everything is quiet right now less often), then an airport in it.
         /// </summary>
         public TourAirport PickAirport(IReadOnlyList<IReadOnlyList<TourAirport>> groups)
         {
             var usable = groups.Where(g => g.Count > 0).ToList();
-            // A group where nothing flies right now (all its airports quiet) waits, if another group has something.
-            var lively = usable.Where(g => g.Any(a => !IsQuiet(a.Code))).ToList();
-            if (lively.Count > 0) usable = lively;
             var other = usable.Where(g => g[0].Code != _lastGroup).ToList();
             var pool = other.Count > 0 ? other : usable;
-            var group = pool[_random.Next(pool.Count)];
+            double Weight(IReadOnlyList<TourAirport> g) => g.Any(a => !IsQuiet(a.Code)) ? 1 : QuietGroupChance;
+            double roll = _random.NextDouble() * pool.Sum(Weight);
+            var group = pool[^1];
+            foreach (var g in pool)
+            {
+                roll -= Weight(g);
+                if (roll < 0) { group = g; break; }
+            }
             _lastGroup = group[0].Code;
             return PickAirport(group);
+        }
+
+        /// <summary>Another airport of the same country or place that is not quiet, or null when there is none.</summary>
+        public TourAirport? Alternative(IReadOnlyList<IReadOnlyList<TourAirport>> groups, TourAirport quiet)
+        {
+            var group = groups.FirstOrDefault(g => g.Contains(quiet));
+            if (group == null || !group.Any(a => a != quiet && !IsQuiet(a.Code))) return null;
+            return PickAirport(group.Where(a => a != quiet).ToList());
         }
 
         private string? _lastGroup;
@@ -245,7 +257,10 @@ namespace OLED_Sleeper.Features.Flights
         private readonly Dictionary<string, DateTime> _quiet = new();
 
         /// <summary>How long an airport that turned out quiet is skipped.</summary>
-        public static readonly TimeSpan QuietFor = TimeSpan.FromMinutes(45);
+        public static readonly TimeSpan QuietFor = TimeSpan.FromMinutes(20);
+
+        /// <summary>How often a country or place where everything is quiet still gets its turn, relative to the others.</summary>
+        public const double QuietGroupChance = 0.35;
 
         /// <summary>The clock (replaceable in tests).</summary>
         public Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
@@ -431,10 +446,14 @@ namespace OLED_Sleeper.Features.Flights
             if (AircraftFeed.RecentFor(next.Lat, next.Lon) is not { } reports) return; // not in yet
             int flying = TourPlanner.Flying(reports);
             if (flying >= TourPlanner.MinFlying || _swaps >= MaxSwaps) { _nextChecked = true; return; }
+            if (next.Airport == null) { _nextChecked = true; return; }
+            Planner.MarkQuiet(next.Airport.Code);
+            // Another airport of the same country or place; none (Tenerife, both quiet): show it anyway.
+            var other = Planner.Alternative(Groups(s), next.Airport);
+            Serilog.Log.Debug("Tour: {Code} is quiet ({Flying} in the air), {Action}.", next.Airport.Code, flying, other != null ? $"taking {other.Code}" : "showing it anyway");
+            if (other == null) { _nextChecked = true; return; }
             _swaps++;
-            if (next.Airport != null) Planner.MarkQuiet(next.Airport.Code);
-            Serilog.Log.Debug("Tour: {Code} is quiet ({Flying} in the air), taking another airport.", next.Airport?.Code, flying);
-            _next = AirportScene(next.Number, next.StartUtc, s);
+            _next = AirportSceneAt(next.Number, next.StartUtc, s, other);
             Prepare(_next, s);
         }
 
@@ -460,9 +479,18 @@ namespace OLED_Sleeper.Features.Flights
 
         private static TourScene AirportScene(int number, DateTime start, FlightsSettings s)
         {
+            return AirportSceneAt(number, start, s, Planner.PickAirport(Groups(s)));
+        }
+
+        private static List<IReadOnlyList<TourAirport>> Groups(FlightsSettings s)
+        {
             var groups = TourSelection.From(s.TourCountries).Groups.Where(g => g.Count > 0).ToList<IReadOnlyList<TourAirport>>();
             if (groups.Count == 0) groups.Add(TourPlanner.AirportsIn(AirportCatalog.All, new[] { "NL" }));
-            var airport = Planner.PickAirport(groups);
+            return groups;
+        }
+
+        private static TourScene AirportSceneAt(int number, DateTime start, FlightsSettings s, TourAirport airport)
+        {
             return new TourScene(number, SceneKind.Airport, airport.Lat, airport.Lon, AirportRadiusKm, start, start + Duration(s),
                                  number, airport.Name, Airport: airport);
         }

@@ -136,20 +136,33 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
-        public void QuietAirports_AreSkippedForAWhile()
+        public void QuietAirports_AreAvoidedWithinTheirPlace_ForAWhile()
         {
             var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var planner = new TourPlanner(new Random(2)) { Now = () => now };
-            var beb = new List<TourAirport> { new("BEB", "GB", 57, -7, 1, "Benbecula") };
             var frankfurt = new List<TourAirport> { new("FRA", "DE", 50, 8, 8, "Frankfurt Main"), new("HHN", "DE", 49.9, 7.3, 3, "Frankfurt-Hahn") };
-            var groups = new IReadOnlyList<TourAirport>[] { beb, frankfurt };
-            planner.MarkQuiet("BEB");
             planner.MarkQuiet("HHN");
-
-            Assert.All(Enumerable.Range(0, 6), _ => Assert.Equal("FRA", planner.PickAirport(groups).Code));
+            Assert.All(Enumerable.Range(0, 6), _ => Assert.Equal("FRA", planner.PickAirport(frankfurt).Code));
+            Assert.Equal("FRA", planner.Alternative(new IReadOnlyList<TourAirport>[] { frankfurt }, frankfurt[1])!.Code);
 
             now += TourPlanner.QuietFor;
-            Assert.Contains("BEB", Enumerable.Range(0, 6).Select(_ => planner.PickAirport(groups).Code));
+            Assert.False(planner.IsQuiet("HHN"));
+        }
+
+        [Fact]
+        public void QuietPlace_StillGetsTurns_ButFewer()
+        {
+            var planner = new TourPlanner(new Random(4));
+            var tenerife = new List<TourAirport> { new("TFS", "ES", 28, -16, 3, "Tenerife Sur") };
+            var nl = new List<TourAirport> { new("AMS", "NL", 52, 4, 8, "Schiphol"), new("RTM", "NL", 51.9, 4.4, 3, "Rotterdam") };
+            var be = new List<TourAirport> { new("BRU", "BE", 50.9, 4.5, 8, "Brussels") };
+            var groups = new IReadOnlyList<TourAirport>[] { nl, tenerife, be };
+            planner.MarkQuiet("TFS");
+            Assert.Null(planner.Alternative(groups, tenerife[0])); // no other airport there: shown anyway
+            var picks = Enumerable.Range(0, 600).Select(_ => planner.PickAirport(groups).Code).ToList();
+            int tfs = picks.Count(c => c == "TFS");
+            Assert.InRange(tfs, 40, 170);                  // fewer than a third (200), but not never
+            Assert.Contains("RTM", picks);
         }
 
         [Fact]

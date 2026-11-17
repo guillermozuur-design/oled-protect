@@ -300,7 +300,7 @@ namespace OLED_Sleeper.Features.Flights
 
             // The pin: the whole map drifts around it. An airport drifts less (it stays well in view); a followed
             // plane stays in the middle.
-            double drift = _scene.Kind == SceneKind.Home ? 1 : _scene.Kind == SceneKind.Airport ? 0.45 : 0;
+            double drift = _scene.Kind == SceneKind.Home ? 1 : _scene.Kind == SceneKind.Airport ? 0.45 : 0.2;
             double cx = _focus.X + cam.Dx * radius * drift, cy = _focus.Y + cam.Dy * halfHeightKm * drift;
             // The pin is in the middle of all screens together; an airport or plane in the middle of one screen.
             int count = Math.Max(1, PanoramaCount);
@@ -309,8 +309,43 @@ namespace OLED_Sleeper.Features.Flights
             m.Translate(-cx, -cy);
             m.Rotate(cam.RotationDeg);
             m.Scale(scale, scale);
-            m.Translate(targetX - PanoramaIndex * Stride, ActualHeight / 2);
+            // An airport or plane is never exactly in the middle: each scene somewhere else, slowly wandering.
+            var (offX, offY) = _scene.Kind == SceneKind.Home ? (0.0, 0.0) : SceneOffset(utc);
+            m.Translate(targetX + offX - PanoramaIndex * Stride, ActualHeight / 2 + offY);
             return (m, scale, cam.RotationDeg);
+        }
+
+        /// <summary>Random per scene (the same on every screen) and fixed for the scene: 0..1 values.</summary>
+        private (double A, double B, double C, double D) SceneRandom()
+        {
+            var r = new Random(_scene.Number * 7919 + (int)(FlightCamera.SessionPhases[0] * 100000));
+            return (r.NextDouble(), r.NextDouble(), r.NextDouble(), r.NextDouble());
+        }
+
+        /// <summary>Where the airport or plane sits, in pixels from the middle of its screen: a different spot
+        /// each scene, and slowly moving during it.</summary>
+        private (double X, double Y) SceneOffset(DateTime utc)
+        {
+            var (a, b, c, d) = SceneRandom();
+            double t = (utc - _scene.StartUtc).TotalSeconds;
+            double x = (a - 0.5) * 0.42 * ActualWidth + 0.035 * ActualWidth * Math.Sin(2 * Math.PI * (t / 37 + c));
+            double y = (b - 0.5) * 0.36 * ActualHeight + 0.035 * ActualHeight * Math.Sin(2 * Math.PI * (t / 29 + d));
+            return (x, y);
+        }
+
+        /// <summary>Where the airport title goes: on the other side of the screen than the airport, a different
+        /// spot each scene, slowly moving.</summary>
+        private Point TitlePosition(DateTime utc, Size text)
+        {
+            var (a, b, c, d) = SceneRandom();
+            double t = (utc - _scene.StartUtc).TotalSeconds;
+            double margin = 0.05 * ActualWidth;
+            // The airport is left of the middle when a < 0.5: then the title goes right, and the other way round.
+            double fx = a < 0.5 ? 0.55 + 0.4 * c : 0.05 + 0.4 * c;
+            double fy = 0.08 + 0.84 * d;
+            double x = fx * ActualWidth + 0.02 * ActualWidth * Math.Sin(2 * Math.PI * t / 31);
+            double y = fy * ActualHeight + 0.02 * ActualHeight * Math.Sin(2 * Math.PI * t / 23);
+            return new Point(Math.Clamp(x, margin, ActualWidth - margin - text.Width), Math.Clamp(y, margin, ActualHeight - margin - text.Height));
         }
 
         /// <summary>The screen the airport or plane of this scene is on (alternating between the screens).</summary>
@@ -344,10 +379,10 @@ namespace OLED_Sleeper.Features.Flights
             DrawPlanes(dc, m, rotation, ui, bounds, now);
             if (_scene.Kind == SceneKind.Airport && _scene.Airport is { } airport && (int)Math.Round(PanoramaIndex) == FocusScreen)
             {
-                // Where we are: small, in the corner of the screen with the airport.
+                // Where we are: small, somewhere else on the screen with the airport every scene, and moving.
                 string country = Countries.All.FirstOrDefault(c => c.Code == airport.Country)?.Name ?? airport.Country;
                 var title = Text($"{airport.Code} · {MapBuilder.ShortAirportName(airport.Name)} · {country}", LabelFace, 13 * ui, Color.FromRgb(0x50, 0x58, 0x66));
-                dc.DrawText(title, new Point(28 * ui, ActualHeight - 28 * ui - title.Height));
+                dc.DrawText(title, TitlePosition(now, new Size(title.Width, title.Height)));
             }
             // Between two scenes: fade through black.
             double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
