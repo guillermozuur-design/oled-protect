@@ -32,7 +32,7 @@ onofficiële versie met veel uitbreidingen.
 - Een donkere kaart (hoofdwegen, kleinere wegen als dun wit lijntje en de kustlijn, plaatsnamen, luchthavens met hun landingsbanen en code) rond een **speldje** dat je zelf plaatst, met de
   **echte vliegtuigen van dit moment** erboven: eigen symbolen per soort toestel (jumbo, widebody, 737/A320, regionaal,
   klein vliegtuig, helikopter), vluchtnummer, route (bijv. RTM→TFS; anders het toesteltype) en hoogte met ↑/↓
-  (stijgt of daalt). Toestellen in de landing hebben kleine landingslichten; bijzondere toestellen (A380, 747, Beluga,
+  (stijgt of daalt). Toestellen in de landing hebben kleine landingslichten vanuit de vleugels; bijzondere toestellen (A380, 747, Beluga,
   An-124 ...) krijgen een gouden gloed en hun naam. Rivieren en kanalen als donkerblauwe lijn; bij elk vliegveld ook
   het aantal banen, de langste baan en de hoogte. Bij het volgen van een vlucht kiest hij liefst een landing of start.
 - De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,

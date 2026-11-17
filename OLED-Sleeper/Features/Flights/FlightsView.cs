@@ -83,20 +83,26 @@ namespace OLED_Sleeper.Features.Flights
             [AircraftKind.Helicopter] = Helicopter(),
         };
 
-        /// <summary>The beam of the landing lights: a small cone in front of the nose, fading out.</summary>
-        private static readonly Geometry LightBeam = Frozen<Geometry>(new PathGeometry(new[]
+        /// <summary>Where the landing lights sit: in the wing roots, just beside the body at the front of the wing.</summary>
+        private static readonly Point[] LightSources = { new(-0.17, -0.22), new(0.17, -0.22) };
+
+        /// <summary>The beams of the landing lights: two small cones from the wing roots, shining ahead and a little
+        /// towards each other, fading out.</summary>
+        private static readonly Geometry LightBeam = Frozen<Geometry>(new PathGeometry(LightSources.Select(src =>
         {
-            new PathFigure(new Point(-0.06, -1.0), new PathSegment[]
+            double side = Math.Sign(src.X);
+            var tip = new Point(side * 0.32, -2.7);
+            return new PathFigure(new Point(src.X - 0.05, src.Y), new PathSegment[]
             {
-                new LineSegment(new Point(-0.55, -3.3), true),
-                new ArcSegment(new Point(0.55, -3.3), new Size(0.6, 0.25), 0, false, SweepDirection.Clockwise, true),
-                new LineSegment(new Point(0.06, -1.0), true),
-            }, true)
-        }));
+                new LineSegment(new Point(tip.X - 0.38, tip.Y), true),
+                new ArcSegment(new Point(tip.X + 0.38, tip.Y), new Size(0.4, 0.2), 0, false, SweepDirection.Clockwise, true),
+                new LineSegment(new Point(src.X + 0.05, src.Y), true),
+            }, true);
+        })));
 
         private static readonly Brush LightBeamFill = Frozen<Brush>(new LinearGradientBrush(
             new GradientStopCollection { new(Color.FromArgb(0x80, 0xFF, 0xF4, 0xD6), 0), new(Color.FromArgb(0x00, 0xFF, 0xF4, 0xD6), 1) },
-            new Point(0.5, 1), new Point(0.5, 0)));   // bright at the nose (bottom of the cone), fading forward
+            new Point(0.5, 1), new Point(0.5, 0)));   // bright at the wings (bottom of the cones), fading forward
 
         private static readonly Brush LightDot = Frozen<Brush>(new SolidColorBrush(Color.FromArgb(0xD0, 0xFF, 0xF8, 0xE6)));
 
@@ -624,7 +630,7 @@ namespace OLED_Sleeper.Features.Flights
                 if (plane.OnApproach && plane.Kind != AircraftKind.Helicopter)
                 {
                     dc.DrawGeometry(LightBeamFill, null, LightBeam);
-                    dc.DrawEllipse(LightDot, null, new Point(0, -1.0), 0.09, 0.09);
+                    foreach (var src in LightSources) dc.DrawEllipse(LightDot, null, src, 0.07, 0.07);
                 }
                 dc.DrawGeometry(fill, PlaneOutline, Shapes[plane.Kind]);
                 if (plane.Kind == AircraftKind.Helicopter && !plane.OnGround)
