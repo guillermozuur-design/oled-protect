@@ -337,21 +337,6 @@ namespace OLED_Sleeper.Features.Flights
             return (x, y);
         }
 
-        /// <summary>Where the airport title goes: on the other side of the screen than the airport, a different
-        /// spot each scene, slowly moving.</summary>
-        private Point TitlePosition(DateTime utc, Size text)
-        {
-            var (a, b, c, d) = SceneRandom();
-            double t = (utc - _scene.StartUtc).TotalSeconds;
-            double margin = 0.05 * ActualWidth;
-            // The airport is left of the middle when a < 0.5: then the title goes right, and the other way round.
-            double fx = a < 0.5 ? 0.55 + 0.4 * c : 0.05 + 0.4 * c;
-            double fy = 0.08 + 0.84 * d;
-            double x = fx * ActualWidth + 0.02 * ActualWidth * Math.Sin(2 * Math.PI * t / 31);
-            double y = fy * ActualHeight + 0.02 * ActualHeight * Math.Sin(2 * Math.PI * t / 23);
-            return new Point(Math.Clamp(x, margin, ActualWidth - margin - text.Width), Math.Clamp(y, margin, ActualHeight - margin - text.Height));
-        }
-
         /// <summary>The screen the airport or plane of this scene is on (alternating between the screens).</summary>
         private int FocusScreen
         {
@@ -389,13 +374,6 @@ namespace OLED_Sleeper.Features.Flights
             dc.PushClip(new RectangleGeometry(bounds));
             if (_scene.Kind == SceneKind.Home) DrawPin(dc, m.Transform(new Point(0, 0)), ui, now);
             DrawPlanes(dc, m, rotation, ui, bounds, now);
-            if (_scene.Kind == SceneKind.Airport && _scene.Airport is { } airport && (int)Math.Round(PanoramaIndex) == FocusScreen)
-            {
-                // Where we are: small, somewhere else on the screen with the airport every scene, and moving.
-                string country = Countries.All.FirstOrDefault(c => c.Code == airport.Country)?.Name ?? airport.Country;
-                var title = Text($"{airport.Code} · {MapBuilder.ShortAirportName(airport.Name)} · {country}", LabelFace, 13 * ui, Color.FromRgb(0x50, 0x58, 0x66));
-                dc.DrawText(title, TitlePosition(now, new Size(title.Width, title.Height)));
-            }
             // Between two scenes: fade through black.
             double visible = _scene.Visibility(now, FlightTour.FadeSeconds);
             if (visible < 1) dc.DrawRectangle(new SolidColorBrush(Color.FromArgb((byte)Math.Round((1 - visible) * 255), 0, 0, 0)), null, bounds);
@@ -478,7 +456,7 @@ namespace OLED_Sleeper.Features.Flights
                 }
             }
 
-            // Airports: the code, with the short name under it, next to the runways.
+            // Airports: the code, with the short name and the country under it, next to the runways.
             foreach (var airport in _map!.Airports)
             {
                 var p = m.Transform(new Point(airport.X, airport.Y));
@@ -486,8 +464,10 @@ namespace OLED_Sleeper.Features.Flights
                 var code = Text(airport.Code, CityFace, 12.5 * ui, AirportCodeColor);
                 var at = p + new Vector(8 * ui, -code.Height);
                 dc.DrawText(code, at);
-                if (airport.Name.Length > 0)
-                    dc.DrawText(Text(airport.Name, LabelFace, 10.5 * ui, AirportNameColor), at + new Vector(0, code.Height * 0.92));
+                string country = AirportCatalog.CountryName(airport.Code) ?? "";
+                string line = string.Join(" · ", new[] { airport.Name, country }.Where(x => x.Length > 0));
+                if (line.Length > 0)
+                    dc.DrawText(Text(line, LabelFace, 10.5 * ui, AirportNameColor), at + new Vector(0, code.Height * 0.92));
             }
         }
 

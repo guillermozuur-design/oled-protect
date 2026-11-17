@@ -38,7 +38,7 @@ onofficiële versie met veel uitbreidingen.
   plekken, eilanden of vliegveldcodes die je invult (bijv. "Nederland, Amerika, Tenerife, JFK"; elk krijgt evenveel beurten), afwisselend op het ene en het andere scherm. Om de paar vliegvelden volgt hij een tijdje
   één vlucht (vluchtnummer, route, type, hoogte, snelheid). Een vliegveld waar op dat moment bijna niets vliegt
   (minder dan 2 toestellen in de lucht) ruilt hij in voor een ander veld in hetzelfde land of dezelfde plek; is daar
-  alles rustig, dan komt die plek minder vaak (maar wel) langs. Vliegveld, gevolgd vliegtuig en titel staan elke keer
+  alles rustig, dan komt die plek minder vaak (maar wel) langs. Bij elk vliegveld staan code, naam en land. Vliegveld en gevolgd vliegtuig staan elke keer
   ergens anders en bewegen langzaam. Slaapt maar één scherm,
   dan komt alles (ook het speldje) op dat scherm. Zo is er altijd wat te zien.
 - Start je zelf een screensaver (snelmenu, tray of instellingen) terwijl een scherm al slaapt, dan wordt dat scherm eerst
@@ -74,7 +74,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 310 tests
+dotnet test OLED-Sleeper.sln                       # 311 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

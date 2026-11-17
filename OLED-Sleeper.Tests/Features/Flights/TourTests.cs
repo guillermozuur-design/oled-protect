@@ -18,6 +18,14 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void CountryName_OfAnAirportInDutch()
+        {
+            Assert.Equal("Spanje", AirportCatalog.CountryName("TFS"));
+            Assert.Equal("Nederland", AirportCatalog.CountryName("RTM"));
+            Assert.Null(AirportCatalog.CountryName("EHXX"));
+        }
+
+        [Fact]
         public void Catalog_BuiltInListIsThere()
         {
             Assert.True(AirportCatalog.All.Count > 1000);

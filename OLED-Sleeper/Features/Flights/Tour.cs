@@ -32,6 +32,18 @@ namespace OLED_Sleeper.Features.Flights
 
         public static IReadOnlyList<TourAirport> All => Embedded.Value;
 
+        private static readonly Lazy<Dictionary<string, string>> CountryByCode =
+            new(() => All.GroupBy(a => a.Code).ToDictionary(g => g.Key, g => g.First().Country));
+
+        /// <summary>The country of an airport in Dutch ("Spanje"), by its IATA code; null when unknown.</summary>
+        public static string? CountryName(string code)
+        {
+            if (!CountryByCode.Value.TryGetValue(code, out var iso)) return null;
+            if (Countries.All.FirstOrDefault(c => c.Code == iso) is { } dutch) return dutch.Name;
+            try { return new RegionInfo(iso).EnglishName; }
+            catch (ArgumentException) { return iso; }
+        }
+
         /// <summary>Lines "IATA|country|lat|lon|weight|name"; lines starting with # are notes.</summary>
         public static List<TourAirport> Parse(string text)
         {
