@@ -9,7 +9,7 @@ using System.Windows.Media;
 namespace OLED_Sleeper.Features.Flights
 {
     /// <summary>What a line or area on the map is.</summary>
-    public enum MapKind { Water, River, Border, Minor, Major, Motorway, Rail, Runway, RunwayArea }
+    public enum MapKind { Water, River, Border, Minor, Major, Motorway, Rail, Runway, RunwayArea, AirportArea, Apron, Taxiway }
 
     public enum PlaceKind { City, Town, Village }
 
@@ -78,6 +78,16 @@ namespace OLED_Sleeper.Features.Flights
                     case "aeroway" when cls == "runway":
                         if (f.Type == VectorTile.GeometryType.Line) AddLines(content, MapKind.Runway, f, zoom, tileX, tileY, projection);
                         else if (f.Type == VectorTile.GeometryType.Polygon) AddAreas(content, MapKind.RunwayArea, f, zoom, tileX, tileY, projection);
+                        break;
+                    // The rest of the airport: taxiways, aprons and the edge of the grounds.
+                    case "aeroway" when cls == "taxiway" && f.Type == VectorTile.GeometryType.Line:
+                        AddLines(content, MapKind.Taxiway, f, zoom, tileX, tileY, projection);
+                        break;
+                    case "aeroway" when cls == "apron" && f.Type == VectorTile.GeometryType.Polygon:
+                        AddAreas(content, MapKind.Apron, f, zoom, tileX, tileY, projection);
+                        break;
+                    case "aeroway" when cls == "aerodrome" && f.Type == VectorTile.GeometryType.Polygon:
+                        AddLines(content, MapKind.AirportArea, f, zoom, tileX, tileY, projection);
                         break;
                     case "boundary" when f.Type == VectorTile.GeometryType.Line
                                          && f.Tags.TryGetValue("admin_level", out var level) && level == "2"
@@ -320,7 +330,7 @@ namespace OLED_Sleeper.Features.Flights
             int points = 0;
             foreach (var (kind, shapes) in content.Shapes)
             {
-                bool filled = kind == MapKind.RunwayArea;
+                bool filled = kind is MapKind.RunwayArea or MapKind.Apron;
                 var cells = new Dictionary<(int, int), List<(double X, double Y)[]>>();
                 foreach (var shape in shapes)
                 {

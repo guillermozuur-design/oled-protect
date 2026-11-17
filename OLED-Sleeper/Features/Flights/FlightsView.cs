@@ -26,6 +26,9 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Color WaterColor = Color.FromRgb(0x10, 0x22, 0x38);   // coast and big lakes
         private static readonly Color RunwayAreaColor = Color.FromRgb(0x1C, 0x1F, 0x27);
         private static readonly Color RunwayColor = Color.FromRgb(0x3A, 0x3F, 0x4B);
+        private static readonly Color AirportAreaColor = Color.FromRgb(0x1F, 0x23, 0x2B);  // edge of the airport grounds
+        private static readonly Color ApronColor = Color.FromRgb(0x13, 0x15, 0x1A);        // aprons, filled very dark
+        private static readonly Color TaxiwayColor = Color.FromRgb(0x29, 0x2D, 0x36);
         private static readonly Color AirportCodeColor = Color.FromRgb(0x5E, 0x6B, 0x82);
         private static readonly Color AirportNameColor = Color.FromRgb(0x3E, 0x44, 0x50);
         private static readonly Color BorderColor = Color.FromRgb(0x27, 0x20, 0x30);
@@ -422,12 +425,15 @@ namespace OLED_Sleeper.Features.Flights
                 [MapKind.Major] = PenFor(MajorColor, 1.15),
                 [MapKind.Motorway] = PenFor(MotorwayColor, 1.7),
                 [MapKind.Runway] = PenFor(RunwayColor, 2.4),
+                [MapKind.AirportArea] = PenFor(AirportAreaColor, 0.9),
+                [MapKind.Taxiway] = PenFor(TaxiwayColor, 0.8),
             };
             var fills = new Dictionary<MapKind, Brush>
             {
                 [MapKind.RunwayArea] = Frozen(new SolidColorBrush(RunwayAreaColor)),
+                [MapKind.Apron] = Frozen(new SolidColorBrush(ApronColor)),
             };
-            MapKind[] order = { MapKind.Water, MapKind.RunwayArea, MapKind.Border, MapKind.River, MapKind.Rail, MapKind.Minor, MapKind.Major, MapKind.Motorway, MapKind.Runway };
+            MapKind[] order = { MapKind.Water, MapKind.AirportArea, MapKind.Apron, MapKind.RunwayArea, MapKind.Border, MapKind.River, MapKind.Rail, MapKind.Minor, MapKind.Taxiway, MapKind.Major, MapKind.Motorway, MapKind.Runway };
 
             dc.PushTransform(new MatrixTransform(m));
             foreach (var kind in order)
