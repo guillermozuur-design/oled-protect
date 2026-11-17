@@ -190,6 +190,44 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void Activity_CountsLowPlanesNearTheAirport()
+        {
+            var t = DateTime.UtcNow;
+            var reports = new[]
+            {
+                new AircraftReport("a", "KLM1", 52.32, 4.76, 0, 150, 1500, false, t),  // landing, close
+                new AircraftReport("b", "KLM2", 52.30, 4.80, 0, 170, 3000, false, t),  // climbing out, close
+                new AircraftReport("c", "KLM3", 52.31, 4.76, 0, 450, 35000, false, t), // high overhead
+                new AircraftReport("d", "KLM4", 52.31, 4.76, 0, 10, null, true, t),    // taxiing
+                new AircraftReport("e", "KLM5", 52.80, 4.76, 0, 150, 1500, false, t),  // low, but 55 km away
+            };
+            Assert.Equal(2, TourPlanner.Activity(reports, 52.31, 4.76));
+        }
+
+        [Fact]
+        public void MostActive_PicksTheBusiest_OnATieTheFirst()
+        {
+            var a = new TourAirport("AMS", "NL", 52, 4, 8, "x");
+            var b = new TourAirport("RTM", "NL", 51, 4, 3, "x");
+            var c = new TourAirport("EIN", "NL", 51, 5, 3, "x");
+            Assert.Equal("RTM", TourPlanner.MostActive(new[] { (a, 1), (b, 4), (c, 2) }).Code);
+            Assert.Equal("AMS", TourPlanner.MostActive(new[] { (a, 0), (b, 0), (c, 0) }).Code);
+        }
+
+        [Fact]
+        public void Candidates_AreDifferent_AndNotRememberedUntilChosen()
+        {
+            var planner = new TourPlanner(new Random(6));
+            var picks = planner.Candidates(Sample, 3);
+            Assert.Equal(3, picks.Distinct().Count());
+            Assert.Equal(3, planner.Candidates(Sample, 3).Count); // nothing remembered yet
+            foreach (var p in picks) planner.Remember(p);
+            var left = planner.Candidates(Sample, 3);
+            Assert.Single(left);
+            Assert.DoesNotContain(left[0], picks);
+        }
+
+        [Fact]
         public void Flying_CountsOnlyPlanesInTheAir()
         {
             var t = DateTime.UtcNow;

@@ -238,7 +238,10 @@ namespace OLED_Sleeper.Features.Flights
         /// A random group first (each country or place typed gets its turn, but not twice in a row; one where
         /// everything is quiet right now less often), then an airport in it.
         /// </summary>
-        public TourAirport PickAirport(IReadOnlyList<IReadOnlyList<TourAirport>> groups)
+        public TourAirport PickAirport(IReadOnlyList<IReadOnlyList<TourAirport>> groups) => PickAirport(PickGroup(groups));
+
+        /// <summary>Whose turn it is: a country or place typed (not twice in a row; a quiet one less often).</summary>
+        public IReadOnlyList<TourAirport> PickGroup(IReadOnlyList<IReadOnlyList<TourAirport>> groups)
         {
             var usable = groups.Where(g => g.Count > 0).ToList();
             var other = usable.Where(g => g[0].Code != _lastGroup).ToList();
@@ -252,7 +255,7 @@ namespace OLED_Sleeper.Features.Flights
                 if (roll < 0) { group = g; break; }
             }
             _lastGroup = group[0].Code;
-            return PickAirport(group);
+            return group;
         }
 
         /// <summary>Another airport of the same country or place that is not quiet, or null when there is none.</summary>
@@ -284,23 +287,65 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>A random airport, busy ones more often, not one of the last few.</summary>
         public TourAirport PickAirport(IReadOnlyList<TourAirport> airports)
         {
+            var pick = Candidates(airports, 1)[0];
+            Remember(pick);
+            return pick;
+        }
+
+        /// <summary>
+        /// Up to <paramref name="count"/> different airports to choose from, drawn like <see cref="PickAirport(IReadOnlyList{TourAirport})"/>
+        /// (busy ones more likely, not quiet ones, not the last few), most likely first. Nothing is remembered yet.
+        /// </summary>
+        public List<TourAirport> Candidates(IReadOnlyList<TourAirport> airports, int count)
+        {
             var awake = airports.Where(a => !IsQuiet(a.Code)).ToList();
             if (awake.Count > 0) airports = awake;
             var choice = airports.Where(a => !_recent.Contains(a.Code)).ToList();
             // All shown just now: anything but the very last one (when there is a choice at all).
             if (choice.Count == 0) choice = airports.Where(a => a.Code != _recent.LastOrDefault()).ToList();
             if (choice.Count == 0) choice = airports.ToList();
-            double total = choice.Sum(a => a.Weight), roll = _random.NextDouble() * total;
-            var pick = choice[^1];
-            foreach (var a in choice)
+
+            var picks = new List<TourAirport>();
+            while (picks.Count < count && choice.Count > 0)
             {
-                roll -= a.Weight;
-                if (roll < 0) { pick = a; break; }
+                double roll = _random.NextDouble() * choice.Sum(a => a.Weight);
+                var pick = choice[^1];
+                foreach (var a in choice)
+                {
+                    roll -= a.Weight;
+                    if (roll < 0) { pick = a; break; }
+                }
+                picks.Add(pick);
+                choice.Remove(pick);
             }
-            _recent.Enqueue(pick.Code);
-            while (_recent.Count > RememberAirports) _recent.Dequeue();
-            return pick;
+            return picks;
         }
+
+        /// <summary>This airport is shown: not again right away.</summary>
+        public void Remember(TourAirport airport)
+        {
+            _recent.Enqueue(airport.Code);
+            while (_recent.Count > RememberAirports) _recent.Dequeue();
+        }
+
+        /// <summary>Around an airport, closer than this, low planes are landing or taking off there.</summary>
+        public const double ActivityRadiusKm = 20;
+
+        /// <summary>Planes landing or taking off at an airport now: in the air, low, close to it.</summary>
+        public static int Activity(IEnumerable<AircraftReport> reports, double lat, double lon)
+        {
+            var projection = new LocalProjection(lat, lon);
+            return reports.Count(r =>
+            {
+                if (r.OnGround || r.AltitudeFeet is not { } ft || ft < 100 || ft > 5000 || r.GroundSpeedKnots < 60) return false;
+                var (x, y) = projection.ToKm(r.Lat, r.Lon);
+                return x * x + y * y <= ActivityRadiusKm * ActivityRadiusKm;
+            });
+        }
+
+        /// <summary>The candidate where most is landing and taking off; on a tie the first (the likelier one).</summary>
+        public static TourAirport MostActive(IReadOnlyList<(TourAirport Airport, int Activity)> scouted) =>
+            scouted.Aggregate((best, next) => next.Activity > best.Activity ? next : best).Airport;
 
         /// <summary>Every third scene follows a flight (when that is switched on and there is one).</summary>
         public static bool IsFollowTurn(int number, bool followFlights) => followFlights && number % 3 == 2;
@@ -343,6 +388,15 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>Until this long before the switch a quiet next airport may still be swapped for another.</summary>
         private static readonly TimeSpan LastMomentToSwap = TimeSpan.FromSeconds(2.5);
         private const int MaxSwaps = 3;
+
+        /// <summary>How many airports are looked at before choosing the next one, and how far apart (the open
+        /// data services ask for at most about one question a second).</summary>
+        private const int ScoutCount = 3;
+        private static readonly TimeSpan ScoutPause = TimeSpan.FromSeconds(1.2);
+        private static readonly TimeSpan ScoutAhead = TimeSpan.FromSeconds(13);
+        private static int _scoutFor = -1;
+        private static int _scoutGeneration;
+        private static readonly List<(TourAirport Airport, int Activity)> Scouted = new();
         private static bool _nextChecked;
         private static int _swaps;
 
@@ -395,6 +449,9 @@ namespace OLED_Sleeper.Features.Flights
         private static void Reset()
         {
             _current = _next = null;
+            _scoutFor = -1;
+            _scoutGeneration++;
+            Scouted.Clear();
             _nextChecked = false;
             _swaps = 0;
             _prepared?.Dispose();
@@ -438,6 +495,11 @@ namespace OLED_Sleeper.Features.Flights
                     _current = AirportScene(0, now, s);
                     Prepare(_current, s);
                 }
+                // Look around first: which of a few airports of the next country or place is busiest right now.
+                int upcoming = _current.Number + 1;
+                if (_scoutFor != upcoming && !TourPlanner.IsFollowTurn(upcoming, s.FollowFlights)
+                    && now >= Max(_current.StartUtc + TimeSpan.FromSeconds(0.5), _current.EndUtc - ScoutAhead))
+                    StartScout(upcoming, s);
                 if (_next == null && now >= _current.EndUtc - PrepareAhead)
                 {
                     // A flight to follow needs the planes of this scene; when they are not in yet, wait a little.
@@ -503,7 +565,38 @@ namespace OLED_Sleeper.Features.Flights
                                          number, flight.Callsign, flight.Hex);
                 if (waitForFlight) return null;
             }
+            if (_scoutFor == number && Scouted.Count > 0)
+            {
+                var best = TourPlanner.MostActive(Scouted);
+                Serilog.Log.Debug("Tour: scouted {Airports}, showing {Best}.", string.Join(" ", Scouted.Select(x => $"{x.Airport.Code}={x.Activity}")), best.Code);
+                Planner.Remember(best);
+                return AirportSceneAt(number, start, s, best);
+            }
             return AirportScene(number, start, s);
+        }
+
+        private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
+
+        /// <summary>Ask, one after the other, how much is landing and taking off at a few airports of whoever's turn it is.</summary>
+        private static void StartScout(int number, FlightsSettings s)
+        {
+            _scoutFor = number;
+            Scouted.Clear();
+            int generation = ++_scoutGeneration;
+            var candidates = Planner.Candidates(Planner.PickGroup(Groups(s)), ScoutCount);
+            _ = Task.Run(async () =>
+            {
+                foreach (var airport in candidates)
+                {
+                    var reports = await AircraftFeed.FetchOnceAsync(airport.Lat, airport.Lon, TourPlanner.ActivityRadiusKm);
+                    lock (Gate)
+                    {
+                        if (generation != _scoutGeneration) return;
+                        if (reports != null) Scouted.Add((airport, TourPlanner.Activity(reports, airport.Lat, airport.Lon)));
+                    }
+                    await Task.Delay(ScoutPause);
+                }
+            });
         }
 
         private static TourScene AirportScene(int number, DateTime start, FlightsSettings s)

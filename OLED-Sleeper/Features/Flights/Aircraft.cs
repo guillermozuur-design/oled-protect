@@ -398,6 +398,34 @@ namespace OLED_Sleeper.Features.Flights
             }
         }
 
+        /// <summary>
+        /// One question about another place, without changing the feed (the tour looks at a few airports
+        /// before choosing one). Null when no source answered.
+        /// </summary>
+        public static async Task<List<AircraftReport>?> FetchOnceAsync(double lat, double lon, double radiusKm)
+        {
+            double nm = Math.Clamp(Math.Ceiling(radiusKm / 1.852), 5, 250);
+            foreach (var source in Sources.Available(DateTime.UtcNow))
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                    using var response = await Http.GetAsync(FeedSources.Url(source, lat, lon, nm), cts.Token);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Sources.Refused(source, DateTime.UtcNow, (int)response.StatusCode == 429, response.Headers.RetryAfter?.Delta);
+                        continue;
+                    }
+                    return AircraftParser.Parse(await response.Content.ReadAsStringAsync(cts.Token), DateTime.UtcNow);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+                {
+                    Sources.Refused(source, DateTime.UtcNow, tooManyRequests: false);
+                }
+            }
+            return null;
+        }
+
         internal static HttpClient CreateClient()
         {
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
