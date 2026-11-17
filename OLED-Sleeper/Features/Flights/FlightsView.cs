@@ -31,7 +31,7 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Color BorderColor = Color.FromRgb(0x27, 0x20, 0x30);
         private static readonly Color RiverColor = Color.FromRgb(0x12, 0x2A, 0x45);
         private static readonly Color RailColor = Color.FromRgb(0x29, 0x2E, 0x37);
-        private static readonly Color MinorColor = Color.FromRgb(0x23, 0x25, 0x29);
+        private static readonly Color MinorColor = Color.FromRgb(0x2C, 0x2E, 0x32);   // smaller roads: a faint white
         private static readonly Color MajorColor = Color.FromRgb(0x27, 0x26, 0x24);
         private static readonly Color MotorwayColor = Color.FromRgb(0x40, 0x33, 0x1F);
         private static readonly Brush PinHead = Frozen(new SolidColorBrush(Color.FromRgb(0xB8, 0x2A, 0x2A)));
@@ -403,7 +403,7 @@ namespace OLED_Sleeper.Features.Flights
                 [MapKind.Border] = PenFor(BorderColor, 1.2, new DashStyle(new double[] { 4, 3 }, 0)),
                 [MapKind.River] = PenFor(RiverColor, 1.3),
                 [MapKind.Rail] = PenFor(RailColor, 0.9),
-                [MapKind.Minor] = PenFor(MinorColor, 0.8),
+                [MapKind.Minor] = PenFor(MinorColor, 0.55),
                 [MapKind.Major] = PenFor(MajorColor, 1.15),
                 [MapKind.Motorway] = PenFor(MotorwayColor, 1.7),
                 [MapKind.Runway] = PenFor(RunwayColor, 2.4),

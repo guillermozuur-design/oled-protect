@@ -29,7 +29,7 @@ onofficiële versie met veel uitbreidingen.
 - Af en toe een realistische **vallende ster**; tijdens een meteorenzwerm (Perseïden, Leoniden, …) vanuit de echte richting.
 
 **Vliegtuigen-screensaver**
-- Een donkere kaart (hoofdwegen en kustlijn als dunne lijnen, plaatsnamen, luchthavens met hun landingsbanen en code) rond een **speldje** dat je zelf plaatst, met de
+- Een donkere kaart (hoofdwegen, kleinere wegen als dun wit lijntje en de kustlijn, plaatsnamen, luchthavens met hun landingsbanen en code) rond een **speldje** dat je zelf plaatst, met de
   **echte vliegtuigen van dit moment** erboven: eigen symbolen per soort toestel (jumbo, widebody, 737/A320, regionaal,
   klein vliegtuig, helikopter), vluchtnummer, route (bijv. RTM→TFS; anders het toesteltype) en hoogte.
 - De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,

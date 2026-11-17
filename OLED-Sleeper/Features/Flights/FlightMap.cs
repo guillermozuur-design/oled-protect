@@ -62,6 +62,7 @@ namespace OLED_Sleeper.Features.Flights
                             {
                                 "motorway" => MapKind.Motorway,
                                 "trunk" or "primary" => MapKind.Major,
+                                "secondary" or "tertiary" => MapKind.Minor,
                                 _ => null
                             };
                             if (kind != null) AddLines(content, kind.Value, f, zoom, tileX, tileY, projection);

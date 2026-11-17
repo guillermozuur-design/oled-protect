@@ -185,6 +185,7 @@ namespace OLED_Sleeper.Tests.Features.Flights
             {
                 new("transportation", tags("motorway"), VectorTile.GeometryType.Line, line, 4096),
                 new("transportation", tags("service"), VectorTile.GeometryType.Line, line, 4096),
+                new("transportation", tags("secondary"), VectorTile.GeometryType.Line, line, 4096),
                 new("waterway", tags("river"), VectorTile.GeometryType.Line, line, 4096),
                 new("place", new Dictionary<string, string> { ["class"] = "city", ["name"] = "Utrecht" }, VectorTile.GeometryType.Point, point, 4096),
                 new("place", new Dictionary<string, string> { ["class"] = "city", ["name"] = "Elders" }, VectorTile.GeometryType.Point, outsidePoint, 4096),
@@ -196,7 +197,7 @@ namespace OLED_Sleeper.Tests.Features.Flights
 
             Assert.Single(content.Shapes[MapKind.Motorway]);
             Assert.False(content.Shapes.ContainsKey(MapKind.River)); // rivers stay black
-            Assert.False(content.Shapes.ContainsKey(MapKind.Minor));
+            Assert.Single(content.Shapes[MapKind.Minor]); // secondary roads, not service roads
             var place = Assert.Single(content.Places);
             Assert.Equal("Utrecht", place.Name);
             Assert.Equal(PlaceKind.City, place.Kind);
