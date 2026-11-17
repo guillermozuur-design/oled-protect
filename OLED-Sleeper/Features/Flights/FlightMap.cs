@@ -16,7 +16,13 @@ namespace OLED_Sleeper.Features.Flights
     public sealed record MapPlace(string Name, PlaceKind Kind, double X, double Y);
 
     /// <summary>An airport: its short code (IATA, else ICAO), a short name and where its label goes, in local km.</summary>
-    public sealed record MapAirport(string Code, string Name, double X, double Y);
+    public sealed record MapAirport(string Code, string Name, double X, double Y)
+    {
+        /// <summary>Where the label goes: just right of the airport grounds, halfway up, so the text does not run
+        /// across runways and taxiways (the airport point itself when the grounds are unknown).</summary>
+        public double LabelX { get; init; } = X;
+        public double LabelY { get; init; } = Y;
+    }
 
     /// <summary>The map around the pin: lines and areas per kind, and place names, all in local kilometres.</summary>
     public sealed class MapContent
@@ -365,7 +371,33 @@ namespace OLED_Sleeper.Features.Flights
                     chunks.Add(new Chunk(kind, new Rect(minX, minY, maxX - minX, maxY - minY), g));
                 }
             }
-            return new MapGeometry { Projection = projection, RadiusKm = radiusKm, Chunks = chunks, Places = content.Places.ToList(), Airports = content.Airports.ToList(), PointCount = points };
+            var airports = content.Airports.Select(a => WithLabelBesideGrounds(a, content)).ToList();
+            return new MapGeometry { Projection = projection, RadiusKm = radiusKm, Chunks = chunks, Places = content.Places.ToList(), Airports = airports, PointCount = points };
+        }
+
+        private static readonly MapKind[] Grounds = { MapKind.Runway, MapKind.RunwayArea, MapKind.AirportArea, MapKind.Apron, MapKind.Taxiway };
+
+        /// <summary>How far from the airport point its runways and aprons may lie (a big airport is ~6 km across).</summary>
+        private const double GroundsReachKm = 5;
+
+        /// <summary>The airport with its label just right of its runways and aprons, halfway up.</summary>
+        public static MapAirport WithLabelBesideGrounds(MapAirport airport, MapContent content)
+        {
+            double maxX = double.MinValue, minY = double.MaxValue, maxY = double.MinValue;
+            foreach (var kind in Grounds)
+            {
+                if (!content.Shapes.TryGetValue(kind, out var shapes)) continue;
+                foreach (var shape in shapes)
+                    foreach (var (x, y) in shape)
+                    {
+                        double dx = x - airport.X, dy = y - airport.Y;
+                        if (dx * dx + dy * dy > GroundsReachKm * GroundsReachKm) continue;
+                        maxX = Math.Max(maxX, x);
+                        minY = Math.Min(minY, y);
+                        maxY = Math.Max(maxY, y);
+                    }
+            }
+            return maxX == double.MinValue ? airport : airport with { LabelX = maxX, LabelY = (minY + maxY) / 2 };
         }
     }
 

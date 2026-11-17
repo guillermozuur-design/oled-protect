@@ -208,6 +208,19 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void AirportLabel_GoesBesideItsGrounds()
+        {
+            var content = new MapContent();
+            content.Add(MapKind.Runway, new[] { (-2.0, 1.0), (3.0, -1.5) });   // a runway through the airport point
+            content.Add(MapKind.Runway, new[] { (40.0, 0.0), (45.0, 0.0) });   // another airport far away: ignored
+            var placed = MapGeometry.WithLabelBesideGrounds(new MapAirport("AMS", "Schiphol", 0, 0), content);
+            Assert.Equal(3.0, placed.LabelX);   // right edge of its runways
+            Assert.Equal(-0.25, placed.LabelY); // halfway between the top (-1.5) and bottom (1.0) edge
+            var lonely = MapGeometry.WithLabelBesideGrounds(new MapAirport("XXX", "Nergens", 100, 100), content);
+            Assert.Equal((100.0, 100.0), (lonely.LabelX, lonely.LabelY));
+        }
+
+        [Fact]
         public void AddTile_KeepsAirportsWithACodeOnce()
         {
             var p = new LocalProjection(52.09, 5.12);

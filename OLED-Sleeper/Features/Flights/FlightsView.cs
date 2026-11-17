@@ -536,15 +536,16 @@ namespace OLED_Sleeper.Features.Flights
             // Airports: the code, with the short name and the country under it, next to the runways.
             foreach (var airport in _map!.Airports)
             {
-                var p = m.Transform(new Point(airport.X, airport.Y));
+                var p = m.Transform(new Point(airport.LabelX, airport.LabelY));
                 if (!outside.Contains(p)) continue;
+                // Both lines right of the grounds, centred on their middle, so nothing runs across them.
                 var code = Text(airport.Code, CityFace, 12.5 * ui, AirportCodeColor);
-                var at = p + new Vector(8 * ui, -code.Height);
+                string line = AirportLine(airport);
+                var name = line.Length > 0 ? Text(line, LabelFace, 10.5 * ui, AirportNameColor) : null;
+                double below = name != null ? code.Height * 0.92 + name.Height : code.Height;
+                var at = p + new Vector(10 * ui, -below / 2);
                 dc.DrawText(code, at);
-                string country = AirportCatalog.CountryName(airport.Code) ?? "";
-                string line = string.Join(" · ", new[] { airport.Name, country }.Where(x => x.Length > 0));
-                if (line.Length > 0)
-                    dc.DrawText(Text(line, LabelFace, 10.5 * ui, AirportNameColor), at + new Vector(0, code.Height * 0.92));
+                if (name != null) dc.DrawText(name, at + new Vector(0, code.Height * 0.92));
             }
         }
 
@@ -612,6 +613,18 @@ namespace OLED_Sleeper.Features.Flights
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }
+        }
+
+        private readonly Dictionary<string, string> _airportLines = new();
+
+        /// <summary>"Schiphol · Nederland" (made once per airport).</summary>
+        private string AirportLine(MapAirport airport)
+        {
+            if (_airportLines.TryGetValue(airport.Code, out var line)) return line;
+            string country = AirportCatalog.CountryName(airport.Code) ?? "";
+            line = string.Join(" · ", new[] { airport.Name, country }.Where(x => x.Length > 0));
+            if (_airportLines.Count > 500) _airportLines.Clear();
+            return _airportLines[airport.Code] = line;
         }
 
         private static readonly Color PlaneLabelColor = Color.FromRgb(0x56, 0x61, 0x72);
