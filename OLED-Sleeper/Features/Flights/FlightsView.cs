@@ -327,13 +327,15 @@ namespace OLED_Sleeper.Features.Flights
         }
 
         /// <summary>Where the airport or plane sits, in pixels from the middle of its screen: a different spot
-        /// each scene, and slowly moving during it.</summary>
+        /// each scene, gliding in a straight line (its own direction each scene) from start to end.</summary>
         private (double X, double Y) SceneOffset(DateTime utc)
         {
-            var (a, b, c, d) = SceneRandom();
-            double t = (utc - _scene.StartUtc).TotalSeconds;
-            double x = (a - 0.5) * 0.42 * ActualWidth + 0.035 * ActualWidth * Math.Sin(2 * Math.PI * (t / 37 + c));
-            double y = (b - 0.5) * 0.36 * ActualHeight + 0.035 * ActualHeight * Math.Sin(2 * Math.PI * (t / 29 + d));
+            var (a, b, c, _) = SceneRandom();
+            double duration = Math.Max(1, (_scene.EndUtc - _scene.StartUtc).TotalSeconds);
+            double along = Math.Clamp((utc - _scene.StartUtc).TotalSeconds / duration, 0, 1) - 0.5; // -0.5 .. 0.5
+            double angle = c * 2 * Math.PI, length = 0.14 * ActualWidth;
+            double x = (a - 0.5) * 0.42 * ActualWidth + along * length * Math.Cos(angle);
+            double y = (b - 0.5) * 0.36 * ActualHeight + along * length * Math.Sin(angle);
             return (x, y);
         }
 
