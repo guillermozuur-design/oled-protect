@@ -36,7 +36,8 @@ onofficiële versie met veel uitbreidingen.
   zodat niets op dezelfde pixels blijft. Over twee schermen één doorlopende kaart.
 - **Rondreis** (optie): elke 10–60 seconden fadet het beeld naar een ander druk vliegveld in de landen,
   plekken, eilanden of vliegveldcodes die je invult (bijv. "Nederland, Amerika, Tenerife, JFK"; elk krijgt evenveel beurten), afwisselend op het ene en het andere scherm. Om de paar vliegvelden volgt hij een tijdje
-  één vlucht (vluchtnummer, route, type, hoogte, snelheid). Zo is er altijd wat te zien.
+  één vlucht (vluchtnummer, route, type, hoogte, snelheid). Een vliegveld waar op dat moment bijna niets vliegt
+  (minder dan 5 toestellen in de lucht) slaat hij over en laat hij 45 minuten met rust. Zo is er altijd wat te zien.
 - Start je zelf een screensaver (snelmenu, tray of instellingen) terwijl een scherm al slaapt, dan wordt dat scherm eerst
   gewekt: je ziet alleen wat je zelf koos.
 - Kaart van OpenStreetMap (via OpenFreeMap, één keer per plek opgehaald en bewaard), vliegtuigen van adsb.fi met adsb.lol als reserve (open ADS-B-data), routes van adsbdb.com.
@@ -70,7 +71,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 303 tests
+dotnet test OLED-Sleeper.sln                       # 308 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

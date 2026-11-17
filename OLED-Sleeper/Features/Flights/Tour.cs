@@ -192,7 +192,13 @@ namespace OLED_Sleeper.Features.Flights
     public sealed class TourPlanner
     {
         /// <summary>How many earlier airports are not visited again right away.</summary>
-        public const int RememberAirports = 6;
+        public const int RememberAirports = 3;
+
+        /// <summary>An airport with fewer planes in the air around it than this is skipped (when there is time).</summary>
+        public const int MinFlying = 5;
+
+        /// <summary>Planes in the air (not taxiing or parked).</summary>
+        public static int Flying(IEnumerable<AircraftReport> reports) => reports.Count(r => !r.OnGround && (r.AltitudeFeet ?? 0) >= 300);
 
         private readonly Random _random;
         private readonly Queue<string> _recent = new();
@@ -223,6 +229,9 @@ namespace OLED_Sleeper.Features.Flights
         public TourAirport PickAirport(IReadOnlyList<IReadOnlyList<TourAirport>> groups)
         {
             var usable = groups.Where(g => g.Count > 0).ToList();
+            // A group where nothing flies right now (all its airports quiet) waits, if another group has something.
+            var lively = usable.Where(g => g.Any(a => !IsQuiet(a.Code))).ToList();
+            if (lively.Count > 0) usable = lively;
             var other = usable.Where(g => g[0].Code != _lastGroup).ToList();
             var pool = other.Count > 0 ? other : usable;
             var group = pool[_random.Next(pool.Count)];
@@ -232,9 +241,24 @@ namespace OLED_Sleeper.Features.Flights
 
         private string? _lastGroup;
 
+        /// <summary>Airports where hardly anything flew, and until when they are left alone.</summary>
+        private readonly Dictionary<string, DateTime> _quiet = new();
+
+        /// <summary>How long an airport that turned out quiet is skipped.</summary>
+        public static readonly TimeSpan QuietFor = TimeSpan.FromMinutes(45);
+
+        /// <summary>The clock (replaceable in tests).</summary>
+        public Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
+
+        public void MarkQuiet(string code) => _quiet[code] = Now() + QuietFor;
+
+        public bool IsQuiet(string code) => _quiet.TryGetValue(code, out var until) && until > Now();
+
         /// <summary>A random airport, busy ones more often, not one of the last few.</summary>
         public TourAirport PickAirport(IReadOnlyList<TourAirport> airports)
         {
+            var awake = airports.Where(a => !IsQuiet(a.Code)).ToList();
+            if (awake.Count > 0) airports = awake;
             var choice = airports.Where(a => !_recent.Contains(a.Code)).ToList();
             // All shown just now: anything but the very last one (when there is a choice at all).
             if (choice.Count == 0) choice = airports.Where(a => a.Code != _recent.LastOrDefault()).ToList();
@@ -289,6 +313,11 @@ namespace OLED_Sleeper.Features.Flights
         public const double FadeSeconds = 1.2;
         private static readonly TimeSpan PrepareAhead = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan LastMomentToPlan = TimeSpan.FromSeconds(3);
+        /// <summary>Until this long before the switch a quiet next airport may still be swapped for another.</summary>
+        private static readonly TimeSpan LastMomentToSwap = TimeSpan.FromSeconds(2.5);
+        private const int MaxSwaps = 3;
+        private static bool _nextChecked;
+        private static int _swaps;
 
         private static readonly object Gate = new();
         private static readonly TourPlanner Planner = new(new Random());
@@ -322,6 +351,8 @@ namespace OLED_Sleeper.Features.Flights
         private static void Reset()
         {
             _current = _next = null;
+            _nextChecked = false;
+            _swaps = 0;
             _prepared?.Dispose();
             _prepared = null;
         }
@@ -370,15 +401,41 @@ namespace OLED_Sleeper.Features.Flights
                     _next = Plan(_current, s, waitForFlight: !lastChance);
                     if (_next != null) Prepare(_next, s);
                 }
+                CheckNextIsBusy(now, s);
                 if (now >= _current.EndUtc)
                 {
                     // Long gap (the computer slept): start the next scene now instead of in the past.
                     var next = _next ?? Plan(_current, s, waitForFlight: false)!;
                     _current = now - next.EndUtc > TimeSpan.Zero ? next with { StartUtc = now, EndUtc = now + Duration(s) } : next;
                     _next = null;
+                    _nextChecked = false;
+                    _swaps = 0;
                 }
                 return _current;
             }
+        }
+
+        /// <summary>
+        /// As soon as the planes around the next airport are in: when hardly anything flies there (night, a quiet
+        /// field), take another airport instead, a few times at most and only while there is time to fetch it.
+        /// </summary>
+        private static void CheckNextIsBusy(DateTime now, FlightsSettings s)
+        {
+            // The airport on screen now (e.g. the very first one) turns out quiet: not again for a while.
+            if (_current is { Kind: SceneKind.Airport, Airport: { } shown } && !Planner.IsQuiet(shown.Code)
+                && AircraftFeed.RecentFor(_current.Lat, _current.Lon) is { } current && TourPlanner.Flying(current) < TourPlanner.MinFlying)
+                Planner.MarkQuiet(shown.Code);
+
+            if (_next is not { Kind: SceneKind.Airport } next || _nextChecked || _current == null) return;
+            if (now >= _current.EndUtc - LastMomentToSwap) { _nextChecked = true; return; }
+            if (AircraftFeed.RecentFor(next.Lat, next.Lon) is not { } reports) return; // not in yet
+            int flying = TourPlanner.Flying(reports);
+            if (flying >= TourPlanner.MinFlying || _swaps >= MaxSwaps) { _nextChecked = true; return; }
+            _swaps++;
+            if (next.Airport != null) Planner.MarkQuiet(next.Airport.Code);
+            Serilog.Log.Debug("Tour: {Code} is quiet ({Flying} in the air), taking another airport.", next.Airport?.Code, flying);
+            _next = AirportScene(next.Number, next.StartUtc, s);
+            Prepare(_next, s);
         }
 
         private static TimeSpan Duration(FlightsSettings s) => TimeSpan.FromSeconds(s.SceneSeconds);

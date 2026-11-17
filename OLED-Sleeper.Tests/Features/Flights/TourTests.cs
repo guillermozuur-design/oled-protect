@@ -136,6 +136,37 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void QuietAirports_AreSkippedForAWhile()
+        {
+            var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var planner = new TourPlanner(new Random(2)) { Now = () => now };
+            var beb = new List<TourAirport> { new("BEB", "GB", 57, -7, 1, "Benbecula") };
+            var frankfurt = new List<TourAirport> { new("FRA", "DE", 50, 8, 8, "Frankfurt Main"), new("HHN", "DE", 49.9, 7.3, 3, "Frankfurt-Hahn") };
+            var groups = new IReadOnlyList<TourAirport>[] { beb, frankfurt };
+            planner.MarkQuiet("BEB");
+            planner.MarkQuiet("HHN");
+
+            Assert.All(Enumerable.Range(0, 6), _ => Assert.Equal("FRA", planner.PickAirport(groups).Code));
+
+            now += TourPlanner.QuietFor;
+            Assert.Contains("BEB", Enumerable.Range(0, 6).Select(_ => planner.PickAirport(groups).Code));
+        }
+
+        [Fact]
+        public void Flying_CountsOnlyPlanesInTheAir()
+        {
+            var t = DateTime.UtcNow;
+            var reports = new[]
+            {
+                new AircraftReport("a", "KLM1", 52, 4, 0, 300, 20000, false, t),
+                new AircraftReport("b", "KLM2", 52, 4, 0, 10, null, true, t),     // parked
+                new AircraftReport("c", "KLM3", 52, 4, 0, 20, 0, false, t),       // taxiing, no ground flag
+                new AircraftReport("d", "KLM4", 52, 4, 0, 140, 1200, false, t),   // landing
+            };
+            Assert.Equal(2, TourPlanner.Flying(reports));
+        }
+
+        [Fact]
         public void Scene_FadesInAndOut_HomeAlwaysVisible()
         {
             var start = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
