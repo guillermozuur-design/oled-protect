@@ -165,6 +165,31 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void PickFlight_PrefersOneLandingOrTakingOff()
+        {
+            var t = DateTime.UtcNow;
+            var reports = new[]
+            {
+                new AircraftReport("cruise", "KLM1", 52.30, 4.76, 90, 450, 33000, false, t, VerticalRateFpm: 0),
+                new AircraftReport("landing", "KLM2", 52.31, 4.70, 90, 150, 2500, false, t, VerticalRateFpm: -800),
+            };
+            var planner = new TourPlanner(new Random(1));
+            Assert.Equal("landing", planner.PickFlight(reports, 52.31, 4.76, 30, cs => cs == "KLM1")!.Hex); // even without a route
+            Assert.True(TourPlanner.IsLandingOrDeparting(reports[1]));
+            Assert.False(TourPlanner.IsLandingOrDeparting(reports[0]));
+        }
+
+        [Fact]
+        public void AirportFacts_InDutch()
+        {
+            Assert.Equal("6 banen · langste 3,8 km · 3 m onder zeeniveau",
+                AirportCatalog.Facts(new TourAirport("AMS", "NL", 52.3, 4.76, 8, "Schiphol", 6, 3800, -3)));
+            Assert.Equal("1 baan · 3,2 km · 64 m hoog", AirportCatalog.Facts(new TourAirport("TFS", "ES", 28, -16.5, 3, "Tenerife Sur", 1, 3200, 64)));
+            Assert.Null(AirportCatalog.Facts(new TourAirport("XXX", "NL", 0, 0, 1, "x")));
+            Assert.StartsWith("6 banen", AirportCatalog.Facts("AMS")); // from the built-in list
+        }
+
+        [Fact]
         public void QuietAirports_AreAvoidedWithinTheirPlace_ForAWhile()
         {
             var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

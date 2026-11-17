@@ -198,7 +198,7 @@ namespace OLED_Sleeper.Tests.Features.Flights
             MapBuilder.AddTile(content, features.Where(f => f.Layer == "place"), 10, 526, 337, p);
 
             Assert.Single(content.Shapes[MapKind.Motorway]);
-            Assert.False(content.Shapes.ContainsKey(MapKind.River)); // rivers stay black
+            Assert.Single(content.Shapes[MapKind.River]); // rivers and canals as a thin line
             Assert.Single(content.Shapes[MapKind.Minor]); // secondary roads, not service roads
             Assert.Single(content.Shapes[MapKind.Taxiway]);
             Assert.Single(content.Shapes[MapKind.AirportArea]); // the edge of the grounds, as a line
@@ -375,6 +375,40 @@ namespace OLED_Sleeper.Tests.Features.Flights
             tracker.Update(new[] { new AircraftReport("a", "T", 52, 5, 0, 300, 20000, false, t0) }, t0);
             tracker.Update(Array.Empty<AircraftReport>(), t0.AddMinutes(2));
             Assert.Equal(0, tracker.Count);
+        }
+
+        [Fact]
+        public void Parser_ReadsTheClimbRate()
+        {
+            const string json = """
+                {"ac":[{"hex":"a1","flight":"KLM1 ","lat":52,"lon":5,"track":90,"gs":160,"alt_baro":2000,"baro_rate":-768,"t":"B744"},
+                       {"hex":"a2","flight":"KLM2 ","lat":52,"lon":5,"track":90,"gs":460,"alt_baro":35000,"geom_rate":64}]}
+                """;
+            var reports = AircraftParser.Parse(json, DateTime.UtcNow);
+            Assert.Equal(-768, reports[0].VerticalRateFpm);
+            Assert.Equal(64, reports[1].VerticalRateFpm);
+        }
+
+        [Fact]
+        public void Plane_TrendApproachAndSpecialName()
+        {
+            var tracker = new AircraftTracker(new LocalProjection(52, 5));
+            var t0 = new DateTime(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc);
+            tracker.Update(new[]
+            {
+                new AircraftReport("land", "KLM1", 52, 5, 90, 150, 2000, false, t0, "B744", VerticalRateFpm: -800),
+                new AircraftReport("climb", "KLM2", 52, 5, 90, 160, 2000, false, t0, "A320", VerticalRateFpm: 1500),
+                new AircraftReport("level", "KLM3", 52, 5, 90, 450, 35000, false, t0, "A388", VerticalRateFpm: 100),
+            }, t0);
+            var planes = tracker.Snapshot(t0).ToDictionary(p => p.Hex);
+            Assert.True(planes["land"].OnApproach);
+            Assert.Equal(-1, planes["land"].Trend);
+            Assert.False(planes["climb"].OnApproach);     // taking off: no landing lights drawn
+            Assert.Equal(1, planes["climb"].Trend);
+            Assert.Equal(0, planes["level"].Trend);
+            Assert.Equal("Boeing 747", planes["land"].SpecialName);
+            Assert.Equal("Airbus A380", planes["level"].SpecialName);
+            Assert.Null(planes["climb"].SpecialName);
         }
 
         [Fact]

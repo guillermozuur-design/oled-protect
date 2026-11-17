@@ -81,6 +81,10 @@ namespace OLED_Sleeper.Features.Flights
                         // the rings like lines also removes the artificial edges where a tile cut the polygon.
                         AddLines(content, MapKind.Water, f, zoom, tileX, tileY, projection);
                         break;
+                    // Rivers and canals as thin dark blue lines (streams and ditches stay black).
+                    case "waterway" when f.Type == VectorTile.GeometryType.Line && cls is "river" or "canal":
+                        AddLines(content, MapKind.River, f, zoom, tileX, tileY, projection);
+                        break;
                     case "aeroway" when cls == "runway":
                         if (f.Type == VectorTile.GeometryType.Line) AddLines(content, MapKind.Runway, f, zoom, tileX, tileY, projection);
                         else if (f.Type == VectorTile.GeometryType.Polygon) AddAreas(content, MapKind.RunwayArea, f, zoom, tileX, tileY, projection);

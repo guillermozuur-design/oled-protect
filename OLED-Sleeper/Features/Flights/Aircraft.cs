@@ -8,7 +8,8 @@ namespace OLED_Sleeper.Features.Flights
     /// <summary>One aircraft as reported by the ADS-B feed.</summary>
     public sealed record AircraftReport(string Hex, string Callsign, double Lat, double Lon, double TrackDeg,
                                         double GroundSpeedKnots, double? AltitudeFeet, bool OnGround,
-                                        DateTime PositionTimeUtc, string TypeCode = "", string Category = "")
+                                        DateTime PositionTimeUtc, string TypeCode = "", string Category = "",
+                                        double? VerticalRateFpm = null)
     {
         public AircraftKind Kind => AircraftKinds.Classify(TypeCode, Category);
     }
@@ -27,6 +28,26 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly string[] NarrowPrefixes = { "A318", "A319", "A32", "A20N", "A21N", "B37", "B38", "B39", "B73", "B75", "BCS", "C919", "MD8", "MD9", "B71", "E29", "T204" };
         private static readonly string[] RegionalPrefixes = { "E1", "E2", "E5", "E6", "CRJ", "AT4", "AT7", "ATP", "DH8", "F70", "F100", "F50", "SF34", "SB20", "J328", "D328", "RJ", "B46", "AN2", "SW4", "JS3", "BE20", "C208", "PC12", "B190", "DHC6" };
         private static readonly string[] HelicopterPrefixes = { "EC", "H125", "H130", "H135", "H145", "H155", "H160", "H175", "H215", "H225", "AS3", "AS5", "AS6", "AW1", "A109", "A119", "A139", "A169", "A189", "B06", "B407", "B412", "B429", "S76", "S92", "R22", "R44", "R66", "NH90", "EH10", "MI8", "BK17", "CH47", "H60", "UH1", "LYNX", "PUMA", "GAZL" };
+
+        /// <summary>Rare or famous aircraft, worth a closer look: their name, or null for an ordinary one.</summary>
+        public static string? SpecialName(string typeCode) => (typeCode ?? "").Trim().ToUpperInvariant() switch
+        {
+            "A388" => "Airbus A380",
+            "B741" or "B742" or "B743" or "B744" or "B748" or "B74S" or "B74R" or "B74D" => "Boeing 747",
+            "A124" => "Antonov An-124",
+            "A225" => "Antonov An-225",
+            "A3ST" => "Airbus Beluga",
+            "A337" => "Airbus Beluga XL",
+            "A400" => "Airbus A400M",
+            "C17" => "Boeing C-17",
+            "C5M" or "C5" => "Lockheed C-5 Galaxy",
+            "B52" => "Boeing B-52",
+            "DC3" or "C47" => "Douglas DC-3",
+            "CONC" => "Concorde",
+            "SPIT" => "Spitfire",
+            "B17" => "Boeing B-17",
+            _ => null
+        };
 
         public static AircraftKind Classify(string typeCode, string category)
         {
@@ -91,8 +112,10 @@ namespace OLED_Sleeper.Features.Flights
 
                 string type = a.TryGetProperty("t", out var ty) && ty.ValueKind == JsonValueKind.String ? ty.GetString() ?? "" : "";
                 string category = a.TryGetProperty("category", out var ca) && ca.ValueKind == JsonValueKind.String ? ca.GetString() ?? "" : "";
+                // Climbing or descending, in feet per minute (barometric, else from GPS height).
+                double? rate = TryNumber(a, "baro_rate", out double br) ? br : TryNumber(a, "geom_rate", out double gr) ? gr : null;
                 result.Add(new AircraftReport(hex, callsign, lat, lon, track, gs, altitude, onGround,
-                                              receivedUtc - TimeSpan.FromSeconds(seenPos), type, category));
+                                              receivedUtc - TimeSpan.FromSeconds(seenPos), type, category, rate));
             }
             return result;
         }
@@ -121,7 +144,15 @@ namespace OLED_Sleeper.Features.Flights
 
         /// <summary>A plane's current state, in local kilometres.</summary>
         public sealed record Plane(string Hex, string Callsign, double X, double Y, double HeadingDeg,
-                                   double? AltitudeFeet, bool OnGround, AircraftKind Kind = AircraftKind.Narrowbody, string TypeCode = "");
+                                   double? AltitudeFeet, bool OnGround, AircraftKind Kind = AircraftKind.Narrowbody, string TypeCode = "",
+                                   double? VerticalRateFpm = null, string? SpecialName = null)
+        {
+            /// <summary>Climbing or descending noticeably (not just a little up and down in level flight).</summary>
+            public int Trend => VerticalRateFpm is { } r && !OnGround ? (r > 300 ? 1 : r < -300 ? -1 : 0) : 0;
+
+            /// <summary>On approach: low and descending towards a runway, with the landing lights on.</summary>
+            public bool OnApproach => !OnGround && AltitudeFeet is { } ft && ft < 4000 && Trend < 0;
+        }
 
         /// <summary>Below this speed the reported track is unreliable (hovering helicopter, taxiing plane):
         /// the symbol then keeps pointing where it last pointed instead of spinning around.</summary>
@@ -136,6 +167,7 @@ namespace OLED_Sleeper.Features.Flights
             public DateTime CorrectionStart;
             public DateTime LastSeenUtc;
             public AircraftKind Kind;              // worked out once per report, not every frame
+            public string? SpecialName;
         }
 
         private readonly Dictionary<string, Track> _tracks = new();
@@ -166,6 +198,7 @@ namespace OLED_Sleeper.Features.Flights
                     var (oldX, oldY) = Position(t, nowUtc);
                     t.Report = r;
                     t.Kind = r.Kind;
+                    t.SpecialName = AircraftKinds.SpecialName(r.TypeCode);
                     if (r.GroundSpeedKnots >= ReliableTrackKnots) t.Heading = r.TrackDeg;
                     t.X0 = x; t.Y0 = y; t.Vx = vx; t.Vy = vy;
                     var (newX, newY) = Raw(t, nowUtc);
@@ -178,7 +211,7 @@ namespace OLED_Sleeper.Features.Flights
                 }
                 else
                 {
-                    _tracks[r.Hex] = new Track { Report = r, Kind = r.Kind, Heading = r.TrackDeg, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
+                    _tracks[r.Hex] = new Track { Report = r, Kind = r.Kind, SpecialName = AircraftKinds.SpecialName(r.TypeCode), Heading = r.TrackDeg, X0 = x, Y0 = y, Vx = vx, Vy = vy, LastSeenUtc = nowUtc, CorrectionStart = nowUtc };
                 }
             }
 
@@ -197,7 +230,7 @@ namespace OLED_Sleeper.Features.Flights
             {
                 var (x, y) = Position(t, nowUtc);
                 list.Add(new Plane(t.Report.Hex, t.Report.Callsign, x, y, t.Heading, t.Report.AltitudeFeet, t.Report.OnGround,
-                                   t.Kind, t.Report.TypeCode));
+                                   t.Kind, t.Report.TypeCode, t.Report.VerticalRateFpm, t.SpecialName));
             }
             return list;
         }

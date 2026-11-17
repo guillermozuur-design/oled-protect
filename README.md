@@ -31,7 +31,10 @@ onofficiële versie met veel uitbreidingen.
 **Vliegtuigen-screensaver**
 - Een donkere kaart (hoofdwegen, kleinere wegen als dun wit lijntje en de kustlijn, plaatsnamen, luchthavens met hun landingsbanen en code) rond een **speldje** dat je zelf plaatst, met de
   **echte vliegtuigen van dit moment** erboven: eigen symbolen per soort toestel (jumbo, widebody, 737/A320, regionaal,
-  klein vliegtuig, helikopter), vluchtnummer, route (bijv. RTM→TFS; anders het toesteltype) en hoogte.
+  klein vliegtuig, helikopter), vluchtnummer, route (bijv. RTM→TFS; anders het toesteltype) en hoogte met ↑/↓
+  (stijgt of daalt). Toestellen in de landing hebben kleine landingslichten; bijzondere toestellen (A380, 747, Beluga,
+  An-124 ...) krijgen een gouden gloed en hun naam. Rivieren en kanalen als donkerblauwe lijn; bij elk vliegveld ook
+  het aantal banen, de langste baan en de hoogte. Bij het volgen van een vlucht kiest hij liefst een landing of start.
 - De kaart drijft, draait en zoomt heel langzaam in een patroon dat zich niet herhaalt en start elke keer ergens anders,
   zodat niets op dezelfde pixels blijft. Over twee schermen één doorlopende kaart.
 - **Rondreis** (optie): elke 10–60 seconden fadet het beeld naar een ander druk vliegveld in de landen,
@@ -79,7 +82,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 316 tests
+dotnet test OLED-Sleeper.sln                       # 320 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

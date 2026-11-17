@@ -36,8 +36,9 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Color TaxiwayColor = Color.FromRgb(0x29, 0x2D, 0x36);
         private static readonly Color AirportCodeColor = Color.FromRgb(0x5E, 0x6B, 0x82);
         private static readonly Color AirportNameColor = Color.FromRgb(0x3E, 0x44, 0x50);
+        private static readonly Color AirportFactsColor = Color.FromRgb(0x34, 0x39, 0x43);
         private static readonly Color BorderColor = Color.FromRgb(0x27, 0x20, 0x30);
-        private static readonly Color RiverColor = Color.FromRgb(0x12, 0x2A, 0x45);
+        private static readonly Color RiverColor = Color.FromRgb(0x0F, 0x20, 0x36);   // rivers and canals, as dark as the coast
         private static readonly Color RailColor = Color.FromRgb(0x29, 0x2E, 0x37);
         private static readonly Color MinorColor = Color.FromRgb(0x2C, 0x2E, 0x32);   // smaller roads: a faint white
         private static readonly Color MajorColor = Color.FromRgb(0x27, 0x26, 0x24);
@@ -81,6 +82,29 @@ namespace OLED_Sleeper.Features.Flights
             }),
             [AircraftKind.Helicopter] = Helicopter(),
         };
+
+        /// <summary>The beam of the landing lights: a small cone in front of the nose, fading out.</summary>
+        private static readonly Geometry LightBeam = Frozen<Geometry>(new PathGeometry(new[]
+        {
+            new PathFigure(new Point(-0.06, -1.0), new PathSegment[]
+            {
+                new LineSegment(new Point(-0.55, -3.3), true),
+                new ArcSegment(new Point(0.55, -3.3), new Size(0.6, 0.25), 0, false, SweepDirection.Clockwise, true),
+                new LineSegment(new Point(0.06, -1.0), true),
+            }, true)
+        }));
+
+        private static readonly Brush LightBeamFill = Frozen<Brush>(new LinearGradientBrush(
+            new GradientStopCollection { new(Color.FromArgb(0x80, 0xFF, 0xF4, 0xD6), 0), new(Color.FromArgb(0x00, 0xFF, 0xF4, 0xD6), 1) },
+            new Point(0.5, 1), new Point(0.5, 0)));   // bright at the nose (bottom of the cone), fading forward
+
+        private static readonly Brush LightDot = Frozen<Brush>(new SolidColorBrush(Color.FromArgb(0xD0, 0xFF, 0xF8, 0xE6)));
+
+        /// <summary>A soft golden glow around a rare aircraft (A380, 747, Beluga ...).</summary>
+        private static readonly Brush SpecialGlow = Frozen<Brush>(new RadialGradientBrush(
+            new GradientStopCollection { new(Color.FromArgb(0x55, 0xF5, 0xC8, 0x50), 0), new(Color.FromArgb(0x00, 0xF5, 0xC8, 0x50), 1) }));
+
+        private static readonly Geometry GlowShape = Frozen<Geometry>(new EllipseGeometry(new Point(0, 0), 2.4, 2.4));
 
         /// <summary>The rotor disc of a helicopter, on top of its body.</summary>
         private static readonly Geometry RotorShape = Rotor();
@@ -472,7 +496,7 @@ namespace OLED_Sleeper.Features.Flights
             {
                 [MapKind.Water] = PenFor(WaterColor, 1.0),
                 [MapKind.Border] = PenFor(BorderColor, 1.2, new DashStyle(new double[] { 4, 3 }, 0)),
-                [MapKind.River] = PenFor(RiverColor, 1.3),
+                [MapKind.River] = PenFor(RiverColor, 0.9),
                 [MapKind.Rail] = PenFor(RailColor, 0.9),
                 [MapKind.Minor] = PenFor(MinorColor, 0.55),
                 [MapKind.Major] = PenFor(MajorColor, 1.15),
@@ -542,10 +566,12 @@ namespace OLED_Sleeper.Features.Flights
                 var code = Text(airport.Code, CityFace, 12.5 * ui, AirportCodeColor);
                 string line = AirportLine(airport);
                 var name = line.Length > 0 ? Text(line, LabelFace, 10.5 * ui, AirportNameColor) : null;
-                double below = name != null ? code.Height * 0.92 + name.Height : code.Height;
+                var facts = AirportCatalog.Facts(airport.Code) is { } f ? Text(f, LabelFace, 9.5 * ui, AirportFactsColor) : null;
+                double below = code.Height * 0.92 + (name?.Height ?? 0) + (facts?.Height ?? 0);
                 var at = p + new Vector(10 * ui, -below / 2);
                 dc.DrawText(code, at);
                 if (name != null) dc.DrawText(name, at + new Vector(0, code.Height * 0.92));
+                if (facts != null) dc.DrawText(facts, at + new Vector(0, code.Height * 0.92 + (name?.Height ?? 0)));
             }
         }
 
@@ -593,6 +619,13 @@ namespace OLED_Sleeper.Features.Flights
                 tf.Freeze();
                 dc.PushTransform(tf);
                 var fill = plane.OnGround ? GroundFill : (plane.AltitudeFeet ?? 30000) < 5000 && plane.Kind != AircraftKind.Helicopter ? PlaneLowFill : PlaneFill;
+                if (plane.SpecialName != null && !plane.OnGround) dc.DrawGeometry(SpecialGlow, null, GlowShape);
+                // On approach: the landing lights shine ahead (small, fading out).
+                if (plane.OnApproach && plane.Kind != AircraftKind.Helicopter)
+                {
+                    dc.DrawGeometry(LightBeamFill, null, LightBeam);
+                    dc.DrawEllipse(LightDot, null, new Point(0, -1.0), 0.09, 0.09);
+                }
                 dc.DrawGeometry(fill, PlaneOutline, Shapes[plane.Kind]);
                 if (plane.Kind == AircraftKind.Helicopter && !plane.OnGround)
                 {
@@ -609,7 +642,9 @@ namespace OLED_Sleeper.Features.Flights
 
                 if (labels && !plane.OnGround && plane.Callsign.Length > 0)
                 {
-                    var t = Text(LabelFor(plane), LabelFace, 10.5 * ui, PlaneLabelColor);
+                    var t = plane.SpecialName != null
+                        ? Text(LabelFor(plane), CityFace, 11.5 * ui, SpecialLabelColor)
+                        : Text(LabelFor(plane), LabelFace, 10.5 * ui, PlaneLabelColor);
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
             }
@@ -628,8 +663,12 @@ namespace OLED_Sleeper.Features.Flights
         }
 
         private static readonly Color PlaneLabelColor = Color.FromRgb(0x56, 0x61, 0x72);
+        private static readonly Color SpecialLabelColor = Color.FromRgb(0xB8, 0x9A, 0x55);
+
+        /// <summary>" ↑" climbing, " ↓" descending, "" level.</summary>
+        private static string TrendArrow(AircraftTracker.Plane plane) => plane.Trend > 0 ? " ↑" : plane.Trend < 0 ? " ↓" : "";
         private static readonly CultureInfo Dutch = CultureInfo.GetCultureInfo("nl-NL");
-        private readonly Dictionary<string, (string Callsign, int Metres, FlightRoute? Route, string Type, string Text)> _labels = new();
+        private readonly Dictionary<string, (string Callsign, int Metres, int Trend, FlightRoute? Route, string Type, string Text)> _labels = new();
 
         /// <summary>"KLM1234 · AMS→JFK · 10.700 m" (the type when the route is unknown); made again only when
         /// something in it changed.</summary>
@@ -637,14 +676,15 @@ namespace OLED_Sleeper.Features.Flights
         {
             int metres = plane.AltitudeFeet is { } ft ? (int)(Math.Round(ft * 0.3048 / 100) * 100) : -1;
             var route = RouteLookup.For(plane.Callsign);
-            if (_labels.TryGetValue(plane.Hex, out var c) && c.Callsign == plane.Callsign && c.Metres == metres && c.Route == route && c.Type == plane.TypeCode)
+            if (_labels.TryGetValue(plane.Hex, out var c) && c.Callsign == plane.Callsign && c.Metres == metres && c.Trend == plane.Trend
+                && c.Route == route && c.Type == plane.TypeCode)
                 return c.Text;
-            string altitude = metres >= 0 ? metres.ToString("#,0", Dutch) + " m" : "";
-            // Where it flies from and to (when known), else the type of aircraft.
+            string altitude = metres >= 0 ? metres.ToString("#,0", Dutch) + " m" + TrendArrow(plane) : "";
+            // Where it flies from and to (when known), else the type of aircraft; a rare one also by name.
             string middle = route?.ToString() ?? plane.TypeCode;
-            string text = string.Join(" · ", new[] { plane.Callsign, middle, altitude }.Where(x => x.Length > 0));
+            string text = string.Join(" · ", new[] { plane.Callsign, plane.SpecialName ?? "", middle, altitude }.Where(x => x.Length > 0));
             if (_labels.Count > 2000) _labels.Clear();
-            _labels[plane.Hex] = (plane.Callsign, metres, route, plane.TypeCode, text);
+            _labels[plane.Hex] = (plane.Callsign, metres, plane.Trend, route, plane.TypeCode, text);
             return text;
         }
 
@@ -657,7 +697,7 @@ namespace OLED_Sleeper.Features.Flights
                 ? (Math.Round(ft * 0.3048 / 100) * 100).ToString("#,0", CultureInfo.GetCultureInfo("nl-NL")) + " m"
                 : "";
             string speed = _tracker.SpeedKmh(plane.Hex) is { } kmh ? $"{Math.Round(kmh / 10) * 10:0} km/u" : "";
-            string details = string.Join(" · ", new[] { plane.TypeCode, altitude, speed }.Where(x => x.Length > 0));
+            string details = string.Join(" · ", new[] { plane.SpecialName ?? plane.TypeCode, altitude + TrendArrow(plane), speed }.Where(x => x.Length > 0));
             var t1 = Text(title, CityFace, 17 * ui, Color.FromRgb(0x8A, 0x92, 0xA0));
             var at = p + new Vector(size + 12 * ui, -t1.Height * 0.8);
             dc.DrawText(t1, at);

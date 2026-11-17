@@ -7,7 +7,8 @@ using System.Text;
 namespace OLED_Sleeper.Features.Flights
 {
     /// <summary>An airport the tour can visit.</summary>
-    public sealed record TourAirport(string Code, string Country, double Lat, double Lon, double Weight, string Name);
+    public sealed record TourAirport(string Code, string Country, double Lat, double Lon, double Weight, string Name,
+                                     int Runways = 0, int LongestRunwayM = 0, int? ElevationM = null);
 
     /// <summary>
     /// The airports with scheduled flights, built into the app (from OurAirports, public domain). Big airports
@@ -35,6 +36,24 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Lazy<Dictionary<string, string>> CountryByCode =
             new(() => All.GroupBy(a => a.Code).ToDictionary(g => g.Key, g => g.First().Country));
 
+        private static readonly Lazy<Dictionary<string, TourAirport>> ByCode =
+            new(() => All.GroupBy(a => a.Code).ToDictionary(g => g.Key, g => g.First()));
+
+        /// <summary>A short fact line: "6 banen · langste 3,8 km · 3 m onder zeeniveau" (null when unknown).</summary>
+        public static string? Facts(string code) => ByCode.Value.TryGetValue(code, out var a) ? Facts(a) : null;
+
+        public static string? Facts(TourAirport a)
+        {
+            var nl = CultureInfo.GetCultureInfo("nl-NL");
+            var parts = new List<string>();
+            if (a.Runways > 0) parts.Add(a.Runways == 1 ? "1 baan" : $"{a.Runways} banen");
+            if (a.LongestRunwayM > 0)
+                parts.Add((a.Runways > 1 ? "langste " : "") + (a.LongestRunwayM / 1000.0).ToString("0.0", nl) + " km");
+            if (a.ElevationM is { } h && Math.Abs(h) >= 1)
+                parts.Add(h < 0 ? $"{-h} m onder zeeniveau" : $"{h.ToString("#,0", nl)} m hoog");
+            return parts.Count > 0 ? string.Join(" · ", parts) : null;
+        }
+
         /// <summary>The country of an airport in Dutch ("Spanje"), by its IATA code; null when unknown.</summary>
         public static string? CountryName(string code)
         {
@@ -57,7 +76,10 @@ namespace OLED_Sleeper.Features.Flights
                     !double.TryParse(f[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon) ||
                     !double.TryParse(f[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var weight)) continue;
                 if (Hubs.Contains(f[0])) weight = HubWeight;
-                list.Add(new TourAirport(f[0], f[1], lat, lon, weight, f[5]));
+                int runways = f.Length > 6 && int.TryParse(f[6], out var n) ? n : 0;
+                int longest = f.Length > 7 && int.TryParse(f[7], out var m) ? m : 0;
+                int? elevation = f.Length > 8 && int.TryParse(f[8], out var e) ? e : null;
+                list.Add(new TourAirport(f[0], f[1], lat, lon, weight, f[5], runways, longest, elevation));
             }
             return list;
         }
@@ -357,7 +379,7 @@ namespace OLED_Sleeper.Features.Flights
         public AircraftReport? PickFlight(IEnumerable<AircraftReport> reports, double lat, double lon, double maxKm, Func<string, bool> hasRoute)
         {
             var projection = new LocalProjection(lat, lon);
-            var candidates = reports.Where(r => !r.OnGround && r.GroundSpeedKnots >= 150 && (r.AltitudeFeet ?? 0) >= 3000
+            var candidates = reports.Where(r => !r.OnGround && r.GroundSpeedKnots >= 100 && (r.AltitudeFeet ?? 0) >= 500
                                                 && RouteParser.IsAirlineCallsign(r.Callsign))
                                     .Where(r =>
                                     {
@@ -366,10 +388,17 @@ namespace OLED_Sleeper.Features.Flights
                                     })
                                     .ToList();
             if (candidates.Count == 0) return null;
-            var withRoute = candidates.Where(r => hasRoute(r.Callsign)).ToList();
-            var pool = withRoute.Count > 0 ? withRoute : candidates;
+            // Best: one that is landing or taking off (you see it go down to, or up from, the runway); then one
+            // whose route is known; then any.
+            int Score(AircraftReport r) => (IsLandingOrDeparting(r) ? 2 : 0) + (hasRoute(r.Callsign) ? 1 : 0);
+            int best = candidates.Max(Score);
+            var pool = candidates.Where(r => Score(r) == best).ToList();
             return pool[_random.Next(pool.Count)];
         }
+
+        /// <summary>Low and clearly climbing or descending: just taken off, or coming in to land.</summary>
+        public static bool IsLandingOrDeparting(AircraftReport r) =>
+            !r.OnGround && (r.AltitudeFeet ?? 99999) < 8000 && r.VerticalRateFpm is { } rate && Math.Abs(rate) >= 400;
     }
 
     /// <summary>
