@@ -235,13 +235,24 @@ namespace OLED_Sleeper.Features.Flights
             // Planes from a moment ago (fetched during the fade, or while the previous scene was on): at once.
             if (AircraftFeed.RecentFor(scene.Lat, scene.Lon) is { } recent) _tracker.Update(recent, DateTime.UtcNow);
 
+            LoadMap();
+        }
+
+        private DateTime _mapAskedUtc;
+
+        /// <summary>Ask for the map of this scene; when it comes, show it (unless the scene moved on).</summary>
+        private void LoadMap()
+        {
+            var scene = _scene;
+            string key = _locationKey;
+            _mapAskedUtc = DateTime.UtcNow;
             MapLoader.GetAsync(scene.Lat, scene.Lon, scene.RadiusKm, _settings.CacheDirectory)
                 .ContinueWith(t =>
                 {
                     if (t.Status != TaskStatus.RanToCompletion || t.Result == null) return;
                     Dispatcher.BeginInvoke(() =>
                     {
-                        if (_locationKey == key) { _map = t.Result; _mapDirty = true; }
+                        if (_locationKey == key && !ReferenceEquals(_map, t.Result)) { _map = t.Result; _mapDirty = true; }
                     });
                 });
         }
@@ -262,6 +273,8 @@ namespace OLED_Sleeper.Features.Flights
             var now = DateTime.UtcNow;
             var scene = FlightTour.SceneAt(now, _settings);
             if (scene.Key != _locationKey) Connect(scene);
+            // No map yet, or one with gaps (the internet was away): try again now and then.
+            else if ((_map == null || !_map.Complete) && now - _mapAskedUtc > MapLoader.RetryAfter) LoadMap();
             _focus = FocusAt(now);
             // Small (the preview in the settings window): the map moves under a pixel per second, 5 redraws are plenty.
             // Following a plane the map slides along quickly: then it is redrawn every frame.

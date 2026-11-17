@@ -9,6 +9,27 @@ namespace OLED_Sleeper.Tests.Features.Flights
             "EIN|NL|51.4501|5.3745|1|Eindhoven Airport\nBRU|BE|50.9014|4.4844|3|Brussels Airport\nbroken|line\n");
 
         [Fact]
+        public void TileCache_OldestFilesGoWhenTooBig()
+        {
+            var dir = System.IO.Path.Combine(AppContext.BaseDirectory, "prune-test");
+            if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true);
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "10", "5"));
+            for (int i = 0; i < 4; i++)
+            {
+                var f = System.IO.Path.Combine(dir, "10", "5", $"{i}.pbf");
+                System.IO.File.WriteAllBytes(f, new byte[1000]);
+                System.IO.File.SetLastWriteTimeUtc(f, new DateTime(2026, 1, 1 + i, 0, 0, 0, DateTimeKind.Utc));
+            }
+            try
+            {
+                MapLoader.PruneCache(dir, 2500);
+                var left = System.IO.Directory.GetFiles(System.IO.Path.Combine(dir, "10", "5")).Select(System.IO.Path.GetFileName).Order().ToList();
+                Assert.Equal(new[] { "2.pbf", "3.pbf" }, left); // the two oldest are gone
+            }
+            finally { System.IO.Directory.Delete(dir, true); }
+        }
+
+        [Fact]
         public void Catalog_ParsesLinesAndWeighsHubsMost()
         {
             Assert.Equal(4, Sample.Count);

@@ -396,6 +396,7 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly TimeSpan ScoutAhead = TimeSpan.FromSeconds(13);
         private static int _scoutFor = -1;
         private static int _scoutGeneration;
+        private static IReadOnlyList<TourAirport>? _scoutGroup;
         private static readonly List<(TourAirport Airport, int Activity)> Scouted = new();
         private static bool _nextChecked;
         private static int _swaps;
@@ -450,6 +451,7 @@ namespace OLED_Sleeper.Features.Flights
         {
             _current = _next = null;
             _scoutFor = -1;
+            _scoutGroup = null;
             _scoutGeneration++;
             Scouted.Clear();
             _nextChecked = false;
@@ -572,6 +574,9 @@ namespace OLED_Sleeper.Features.Flights
                 Planner.Remember(best);
                 return AirportSceneAt(number, start, s, best);
             }
+            // Looking around gave nothing (no answer in time): still the turn of that country or place.
+            if (_scoutFor == number && _scoutGroup != null)
+                return AirportSceneAt(number, start, s, Planner.PickAirport(_scoutGroup));
             return AirportScene(number, start, s);
         }
 
@@ -583,7 +588,9 @@ namespace OLED_Sleeper.Features.Flights
             _scoutFor = number;
             Scouted.Clear();
             int generation = ++_scoutGeneration;
-            var candidates = Planner.Candidates(Planner.PickGroup(Groups(s)), ScoutCount);
+            var group = Planner.PickGroup(Groups(s));
+            _scoutGroup = group;
+            var candidates = Planner.Candidates(group, ScoutCount);
             _ = Task.Run(async () =>
             {
                 foreach (var airport in candidates)

@@ -310,6 +310,9 @@ namespace OLED_Sleeper.Features.Flights
         public IReadOnlyList<MapAirport> Airports { get; init; } = Array.Empty<MapAirport>();
         public int PointCount { get; init; }
 
+        /// <summary>False when some tiles could not be fetched: the map has gaps and is fetched again later.</summary>
+        public bool Complete { get; init; } = true;
+
         /// <param name="toleranceKm">Detail that may be dropped (about half a pixel at the normal zoom).</param>
         public static MapGeometry From(MapContent content, LocalProjection projection, double radiusKm, double toleranceKm)
         {
@@ -368,18 +371,51 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly HttpClient Http = AircraftFeed.CreateClient();
         private static readonly SemaphoreSlim Downloads = new(4);
         private static readonly object Gate = new();
-        private static (string Key, Task<MapGeometry?> Task)? _current;
 
-        /// <summary>The map around a place (cached in memory for the last place asked for).</summary>
+        /// <summary>The last few maps asked for (the scene on screen, the next one being prepared, the pin).</summary>
+        private static readonly List<(string Key, Task<MapGeometry?> Task, DateTime Started)> Recent = new();
+        private const int KeepMaps = 3;
+
+        /// <summary>A map with gaps (or none at all) is fetched again after this long.</summary>
+        public static readonly TimeSpan RetryAfter = TimeSpan.FromSeconds(45);
+
+        private static int _pruned;
+
+        /// <summary>The map around a place (the last few are kept in memory).</summary>
         public static Task<MapGeometry?> GetAsync(double lat, double lon, double radiusKm, string? cacheDirectory)
         {
             string key = FormattableString.Invariant($"{lat:0.#####},{lon:0.#####},{radiusKm:0.#}");
+            if (cacheDirectory != null && Interlocked.Exchange(ref _pruned, 1) == 0) _ = Task.Run(() => PruneCache(cacheDirectory));
             lock (Gate)
             {
-                if (_current is { } c && c.Key == key && !(c.Task.IsCompleted && c.Task.Result == null)) return c.Task;
-                var task = Task.Run(() => LoadAsync(lat, lon, radiusKm, cacheDirectory));
-                _current = (key, task);
+                int i = Recent.FindIndex(x => x.Key == key);
+                if (i >= 0)
+                {
+                    var c = Recent[i];
+                    bool usable = !c.Task.IsCompleted
+                                  || (c.Task.IsCompletedSuccessfully && c.Task.Result is { Complete: true })
+                                  || DateTime.UtcNow - c.Started < RetryAfter;
+                    if (usable) return c.Task;
+                    Recent.RemoveAt(i);
+                }
+                var task = Task.Run(() => LoadSafelyAsync(lat, lon, radiusKm, cacheDirectory));
+                Recent.Add((key, task, DateTime.UtcNow));
+                while (Recent.Count > KeepMaps) Recent.RemoveAt(0);
                 return task;
+            }
+        }
+
+        /// <summary>Never throws: a map that cannot be made is simply not there (and is tried again later).</summary>
+        private static async Task<MapGeometry?> LoadSafelyAsync(double lat, double lon, double radiusKm, string? cacheDirectory)
+        {
+            try
+            {
+                return await LoadAsync(lat, lon, radiusKm, cacheDirectory);
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning("Flight map could not be made: {Message}", ex.Message);
+                return null;
             }
         }
 
@@ -408,6 +444,16 @@ namespace OLED_Sleeper.Features.Flights
             if (loaded == 0) return null;
             // About one pixel at the normal zoom on two 2560-pixel-wide screens; finer detail cannot be seen anyway.
             var map = MapGeometry.From(content, projection, radiusKm, radiusKm / 2560);
+            map = new MapGeometry
+            {
+                Projection = map.Projection,
+                RadiusKm = map.RadiusKm,
+                Chunks = map.Chunks,
+                Places = map.Places,
+                Airports = map.Airports,
+                PointCount = map.PointCount,
+                Complete = loaded == tiles.Count
+            };
             Serilog.Log.Information("Flight map: {Loaded}/{Total} tiles, {Shapes} shapes ({Points} points after simplifying, {Chunks} chunks), {Places} places, airports: {Airports}.",
                 loaded, tiles.Count, content.ShapeCount, map.PointCount, map.Chunks.Count, content.Places.Count, string.Join(" ", content.Airports.Select(a => a.Code)));
             return map;
@@ -456,8 +502,15 @@ namespace OLED_Sleeper.Features.Flights
             catch (Exception ex)
             {
                 Serilog.Log.Debug("Map tile {Z}/{X}/{Y} not available: {Message}", zoom, x, y, ex.Message);
-                // An old cached copy is better than nothing.
-                return file != null && File.Exists(file) ? await File.ReadAllBytesAsync(file) : null;
+                // The map build named in the tile address may be gone: ask for the current one next time.
+                if (ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound }) _template = null;
+                // An old cached copy is better than nothing (if it can be read at all).
+                try
+                {
+                    return file != null && File.Exists(file) ? await File.ReadAllBytesAsync(file) : null;
+                }
+                catch (IOException) { return null; }
+                catch (UnauthorizedAccessException) { return null; }
             }
         }
 
@@ -466,18 +519,59 @@ namespace OLED_Sleeper.Features.Flights
             using var input = new MemoryStream(data);
             using var gzip = new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress);
             using var output = new MemoryStream();
-            gzip.CopyTo(output);
+            // A tile is at most a few hundred kB; a much bigger result is broken (or hostile) data.
+            var buffer = new byte[81920];
+            int read;
+            while ((read = gzip.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                output.Write(buffer, 0, read);
+                if (output.Length > MaxTileBytes) throw new InvalidDataException("Map tile too large.");
+            }
             return output.ToArray();
         }
 
         private static string? _template;
+
+        /// <summary>Largest unpacked tile accepted.</summary>
+        private const int MaxTileBytes = 16 * 1024 * 1024;
+
+        /// <summary>Tiles may only come from OpenFreeMap itself, over https.</summary>
+        private const string TileHost = "https://tiles.openfreemap.org/";
+
+        /// <summary>The kept tiles may use at most this much disk space; the oldest go first.</summary>
+        private const long MaxCacheBytes = 300L * 1024 * 1024;
+
+        /// <summary>Keep the tile cache under <see cref="MaxCacheBytes"/>: the files not used longest are removed.</summary>
+        public static void PruneCache(string cacheDirectory, long maxBytes = MaxCacheBytes)
+        {
+            try
+            {
+                if (!Directory.Exists(cacheDirectory)) return;
+                var files = new DirectoryInfo(cacheDirectory).EnumerateFiles("*.pbf", SearchOption.AllDirectories)
+                                                              .OrderBy(f => f.LastWriteTimeUtc).ToList();
+                long total = files.Sum(f => f.Length);
+                foreach (var f in files)
+                {
+                    if (total <= maxBytes) break;
+                    total -= f.Length;
+                    try { f.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Serilog.Log.Debug("Map cache could not be tidied: {Message}", ex.Message);
+            }
+        }
 
         private static async Task<string> TileTemplateAsync()
         {
             if (_template != null) return _template;
             // The tile address contains the date of the map build; the TileJSON says which one is current.
             using var doc = JsonDocument.Parse(await Http.GetStringAsync(TileJsonUrl));
-            _template = doc.RootElement.GetProperty("tiles")[0].GetString()!;
+            string template = doc.RootElement.GetProperty("tiles")[0].GetString() ?? "";
+            if (!template.StartsWith(TileHost, StringComparison.OrdinalIgnoreCase) || !template.Contains("{z}") || !template.Contains("{x}") || !template.Contains("{y}"))
+                throw new InvalidDataException("Unexpected map tile address.");
+            _template = template;
             return _template;
         }
     }

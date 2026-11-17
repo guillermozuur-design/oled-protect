@@ -238,15 +238,21 @@ namespace OLED_Sleeper.Features.Flights
         public FeedSources(IEnumerable<Source> sources) => _sources = sources.Select(x => (x, DateTime.MinValue)).ToList();
 
         /// <summary>The sources that may be asked now, best first.</summary>
-        public IEnumerable<Source> Available(DateTime nowUtc) => _sources.Where(x => x.RestUntil <= nowUtc).Select(x => x.Source).ToList();
+        public IEnumerable<Source> Available(DateTime nowUtc)
+        {
+            lock (_sources) return _sources.Where(x => x.RestUntil <= nowUtc).Select(x => x.Source).ToList();
+        }
 
         /// <summary>The source refused: let it rest. Too many requests → longer (or what it asked for).</summary>
         public void Refused(Source source, DateTime nowUtc, bool tooManyRequests, TimeSpan? retryAfter = null)
         {
             var rest = retryAfter ?? (tooManyRequests ? TimeSpan.FromSeconds(60) : TimeSpan.FromSeconds(20));
             rest = TimeSpan.FromSeconds(Math.Clamp(rest.TotalSeconds, 5, 600));
-            int i = _sources.FindIndex(x => x.Source == source);
-            if (i >= 0) _sources[i] = (source, nowUtc + rest);
+            lock (_sources)
+            {
+                int i = _sources.FindIndex(x => x.Source == source);
+                if (i >= 0) _sources[i] = (source, nowUtc + rest);
+            }
         }
 
         public static string Url(Source source, double lat, double lon, double radiusNm) =>
@@ -359,7 +365,7 @@ namespace OLED_Sleeper.Features.Flights
                     try
                     {
                         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                        using var response = await Http.GetAsync(FeedSources.Url(source, s.Lat, s.Lon, s.RadiusNm), cts.Token);
+                        using var response = await SendPacedAsync(FeedSources.Url(source, s.Lat, s.Lon, s.RadiusNm), cts.Token);
                         if (!response.IsSuccessStatusCode)
                         {
                             bool tooMany = (int)response.StatusCode == 429;
@@ -394,7 +400,36 @@ namespace OLED_Sleeper.Features.Flights
             }
             finally
             {
-                lock (Gate) _busy = false;
+                lock (Gate)
+                {
+                    _busy = false;
+                    // Meanwhile someone asked for another place (the tour moved on): ask for it now, not in 8 s.
+                    if (Subscribers.Count > 0 && PlaceKey(Subscribers[^1].Lat, Subscribers[^1].Lon) != PlaceKey(s.Lat, s.Lon))
+                        _timer?.Change(TimeSpan.FromSeconds(0.2), Interval);
+                }
+            }
+        }
+
+        private static readonly SemaphoreSlim RequestSlot = new(1);
+        private static DateTime _lastRequestUtc = DateTime.MinValue;
+
+        /// <summary>The free services ask for at most about one question a second: every question (feed, tour
+        /// scouting) waits its turn.</summary>
+        private static readonly TimeSpan MinRequestGap = TimeSpan.FromSeconds(1.1);
+
+        private static async Task<HttpResponseMessage> SendPacedAsync(string url, CancellationToken token)
+        {
+            await RequestSlot.WaitAsync(token);
+            try
+            {
+                var wait = _lastRequestUtc + MinRequestGap - DateTime.UtcNow;
+                if (wait > TimeSpan.Zero && wait <= MinRequestGap) await Task.Delay(wait, token);
+                _lastRequestUtc = DateTime.UtcNow;
+                return await Http.GetAsync(url, token);
+            }
+            finally
+            {
+                RequestSlot.Release();
             }
         }
 
@@ -410,7 +445,7 @@ namespace OLED_Sleeper.Features.Flights
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                    using var response = await Http.GetAsync(FeedSources.Url(source, lat, lon, nm), cts.Token);
+                    using var response = await SendPacedAsync(FeedSources.Url(source, lat, lon, nm), cts.Token);
                     if (!response.IsSuccessStatusCode)
                     {
                         Sources.Refused(source, DateTime.UtcNow, (int)response.StatusCode == 429, response.Headers.RetryAfter?.Delta);
@@ -428,7 +463,8 @@ namespace OLED_Sleeper.Features.Flights
 
         internal static HttpClient CreateClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            // Answers (map tiles, plane lists, routes) are small; a much bigger one is broken and is refused.
+            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30), MaxResponseContentBufferSize = 8 * 1024 * 1024 };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("OLED-Space-Sleeper (+https://github.com/guillermozuur-design/oled-space-sleeper)");
             return client;
         }

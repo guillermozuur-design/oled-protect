@@ -57,7 +57,11 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly HttpClient Http = AircraftFeed.CreateClient();
         private static readonly ConcurrentDictionary<string, (FlightRoute? Route, DateTime Until)> Cache = new();
         private static readonly ConcurrentDictionary<string, byte> Asking = new();
-        private static readonly SemaphoreSlim Slots = new(2);
+        /// <summary>One question at a time, about one a second, and not more than this many waiting.</summary>
+        private static readonly SemaphoreSlim Slots = new(1);
+        private static readonly TimeSpan Pause = TimeSpan.FromSeconds(1);
+        private const int MaxWaiting = 20;
+        private const int MaxCached = 5000;
         private static DateTime _restUntil = DateTime.MinValue;
 
         /// <summary>The route when it is known; otherwise null, and it is looked up in the background.</summary>
@@ -66,7 +70,7 @@ namespace OLED_Sleeper.Features.Flights
             if (!RouteParser.IsAirlineCallsign(callsign)) return null;
             var now = DateTime.UtcNow;
             if (Cache.TryGetValue(callsign, out var hit) && hit.Until > now) return hit.Route;
-            if (now >= _restUntil && Asking.TryAdd(callsign, 0)) _ = AskAsync(callsign);
+            if (now >= _restUntil && Asking.Count < MaxWaiting && Asking.TryAdd(callsign, 0)) _ = AskAsync(callsign);
             return hit.Route; // an old answer is still better than nothing while a new one comes
         }
 
@@ -98,9 +102,19 @@ namespace OLED_Sleeper.Features.Flights
             }
             finally
             {
+                if (Cache.Count > MaxCached) Tidy();
+                await Task.Delay(Pause);
                 Slots.Release();
                 Asking.TryRemove(callsign, out _);
             }
+        }
+
+        /// <summary>Forget answers that are out of date (the list would otherwise only grow).</summary>
+        private static void Tidy()
+        {
+            var now = DateTime.UtcNow;
+            foreach (var old in Cache.Where(kv => kv.Value.Until <= now).Select(kv => kv.Key).ToList())
+                Cache.TryRemove(old, out _);
         }
     }
 }
