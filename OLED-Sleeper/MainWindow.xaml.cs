@@ -328,12 +328,11 @@ namespace OLED_Sleeper
 
         private void ShowCountriesStatus(string text)
         {
-            var (known, unknown) = Countries.Read(text);
-            int airports = TourPlanner.AirportsIn(AirportCatalog.All, known.Select(k => k.Code)).Count;
-            string status = known.Count == 0
-                ? "Geen land herkend: dan Nederland."
-                : $"{string.Join(", ", known.Select(k => k.Name))}: {airports} vliegvelden.";
-            if (unknown.Count > 0) status += $" Niet herkend: {string.Join(", ", unknown)}.";
+            var selection = TourSelection.From(text);
+            string status = selection.Airports.Count == 0
+                ? "Niets herkend: dan Nederland."
+                : $"{string.Join(", ", selection.Recognised)}: {selection.Airports.Count} vliegvelden.";
+            if (selection.Unknown.Count > 0) status += $" Niet herkend: {string.Join(", ", selection.Unknown)}.";
             CountriesStatus.Text = status;
         }
 

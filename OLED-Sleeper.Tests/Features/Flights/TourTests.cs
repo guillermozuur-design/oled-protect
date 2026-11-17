@@ -35,6 +35,40 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
 
         [Fact]
+        public void Selection_TakesCountriesPlacesAndCodes()
+        {
+            var all = Sample.Concat(AirportCatalog.Parse(
+                "TFS|ES|28.04|-16.57|3|Tenerife Sur Airport\nTFN|ES|28.48|-16.34|3|Tenerife Norte-Ciudad de La Laguna Airport\n" +
+                "PMI|ES|39.55|2.74|3|Palma de Mallorca Airport\nMCZ|BR|-9.5|-35.8|3|Zumbi dos Palmares International Airport\n")).ToList();
+            var lookup = Countries.Parse("NL|Nederland|Netherlands\nBE|België|Belgium\n").Lookup;
+
+            var s = TourSelection.From("Nederland, Tenerife, palma, jfk, BRU, Atlantis", all, lookup);
+
+            Assert.Equal(new[] { "AMS", "RTM", "EIN", "TFS", "TFN", "PMI", "BRU" }, s.Airports.Select(a => a.Code));
+            Assert.Equal(new[] { "Nederland", "Tenerife (TFS, TFN)", "palma (PMI)", "BRU (BRU)" }, s.Recognised);
+            Assert.Equal(new[] { "jfk", "Atlantis" }, s.Unknown); // not in this small list; "palma" is not "Palmares"
+        }
+
+        [Fact]
+        public void PickAirport_EachTypedEntryGetsAnEqualTurn()
+        {
+            var big = Enumerable.Range(0, 50).Select(i => new TourAirport($"U{i:00}", "US", 40, -100, 8, "x")).ToList();
+            var small = new List<TourAirport> { new("TFS", "ES", 28, -16, 3, "Tenerife Sur") };
+            var planner = new TourPlanner(new Random(9));
+            int tenerife = Enumerable.Range(0, 300).Count(_ => planner.PickAirport(new IReadOnlyList<TourAirport>[] { big, small }).Code == "TFS");
+            Assert.InRange(tenerife, 90, 210); // about half, not 1 in 51
+        }
+
+        [Fact]
+        public void Selection_BuiltInList_FindsTenerife()
+        {
+            var s = TourSelection.From("Nederland, Amerika, Tenerife");
+            Assert.Empty(s.Unknown);
+            Assert.Contains(s.Airports, a => a.Code == "TFS");
+            Assert.Contains(s.Airports, a => a.Code == "JFK");
+        }
+
+        [Fact]
         public void AirportsIn_OnlyThoseCountries_OrAllWhenNone()
         {
             Assert.Equal(new[] { "BRU" }, TourPlanner.AirportsIn(Sample, new[] { "BE" }).Select(a => a.Code));

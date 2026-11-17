@@ -284,9 +284,9 @@
                                         <StackPanel x:Name="TourOptions" Margin="0,14,0,0">
                                             <DockPanel>
                                                 <TextBox x:Name="CountriesBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="330" VerticalAlignment="Center"
-                                                         TextChanged="CountriesBox_TextChanged" ToolTip="Bijvoorbeeld: Nederland, België, Spanje, Verenigd Koninkrijk" />
+                                                         TextChanged="CountriesBox_TextChanged" ToolTip="Landen, eilanden, plaatsen of vliegveldcodes, bijvoorbeeld: Nederland, Spanje, Tenerife, Mallorca, JFK" />
                                                 <StackPanel>
-                                                    <TextBlock Text="Landen" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock Text="Landen of plekken" Style="{StaticResource CardTitle}" />
                                                     <TextBlock x:Name="CountriesStatus" Style="{StaticResource CardText}" />
                                                 </StackPanel>
                                             </DockPanel>

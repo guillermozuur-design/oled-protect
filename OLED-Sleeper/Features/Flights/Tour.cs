@@ -70,6 +70,8 @@ namespace OLED_Sleeper.Features.Flights
 
         public static IReadOnlyList<Country> All => Embedded.Value.List;
 
+        public static IReadOnlyDictionary<string, Country> Lookup => Embedded.Value.Lookup;
+
         /// <summary>Lines "ISO|Dutch name|other names, comma separated".</summary>
         public static (List<Country> List, Dictionary<string, Country> Lookup) Parse(string text)
         {
@@ -117,6 +119,51 @@ namespace OLED_Sleeper.Features.Flights
             foreach (var ch in s.Normalize(NormalizationForm.FormD))
                 if (char.IsLetter(ch)) sb.Append(char.ToLowerInvariant(ch));
             return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// What the tour visits, from the text in the settings: countries ("Nederland, UK"), and also places, islands
+    /// or airport codes ("Tenerife", "Mallorca", "TFS"), found in the names of the airports.
+    /// </summary>
+    public sealed record TourSelection(List<List<TourAirport>> Groups, List<string> Recognised, List<string> Unknown)
+    {
+        /// <summary>All airports of the selection (each once).</summary>
+        public List<TourAirport> Airports => Groups.SelectMany(g => g).Distinct().ToList();
+
+        public static TourSelection From(string? text) => From(text, AirportCatalog.All, Countries.Lookup);
+
+        public static TourSelection From(string? text, IReadOnlyList<TourAirport> all, IReadOnlyDictionary<string, Country> lookup)
+        {
+            var (known, words) = Countries.Read(text, lookup);
+            // One group per country or place typed, so "Nederland, Amerika, Tenerife" gets a third each.
+            var groups = known.Select(c => TourPlanner.AirportsIn(all, new[] { c.Code })).ToList();
+            var recognised = known.Select(c => c.Name).ToList();
+            var unknown = new List<string>();
+            foreach (var word in words)
+            {
+                string key = Words(word);
+                var found = key.Length < 3 ? new List<TourAirport>()
+                    : all.Where(a => string.Equals(a.Code, word, StringComparison.OrdinalIgnoreCase)
+                                     || (key.Length >= 4 && $" {Words(a.Name)} ".Contains($" {key} ", StringComparison.Ordinal)))
+                         .ToList();
+                if (found.Count == 0) { unknown.Add(word); continue; }
+                recognised.Add($"{word} ({string.Join(", ", found.Take(4).Select(a => a.Code))}{(found.Count > 4 ? ", …" : "")})");
+                groups.Add(found);
+            }
+            return new TourSelection(groups, recognised, unknown);
+        }
+
+        /// <summary>Lower case words without accents: "Palma de Mallorca Airport" becomes "palma de mallorca airport".</summary>
+        private static string Words(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (var ch in s.Normalize(NormalizationForm.FormD))
+            {
+                if (char.IsLetterOrDigit(ch)) sb.Append(char.ToLowerInvariant(ch));
+                else if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark && (sb.Length == 0 || sb[^1] != ' ')) sb.Append(' ');
+            }
+            return sb.ToString().Trim();
         }
     }
 
@@ -169,10 +216,28 @@ namespace OLED_Sleeper.Features.Flights
         /// <summary>Weight of a big airport in the catalog (medium ones weigh 1).</summary>
         public const double BigWeight = 3;
 
+        /// <summary>
+        /// A random group first (each country or place typed gets an equal turn, but not twice in a row), then an
+        /// airport in it.
+        /// </summary>
+        public TourAirport PickAirport(IReadOnlyList<IReadOnlyList<TourAirport>> groups)
+        {
+            var usable = groups.Where(g => g.Count > 0).ToList();
+            var other = usable.Where(g => g[0].Code != _lastGroup).ToList();
+            var pool = other.Count > 0 ? other : usable;
+            var group = pool[_random.Next(pool.Count)];
+            _lastGroup = group[0].Code;
+            return PickAirport(group);
+        }
+
+        private string? _lastGroup;
+
         /// <summary>A random airport, busy ones more often, not one of the last few.</summary>
         public TourAirport PickAirport(IReadOnlyList<TourAirport> airports)
         {
             var choice = airports.Where(a => !_recent.Contains(a.Code)).ToList();
+            // All shown just now: anything but the very last one (when there is a choice at all).
+            if (choice.Count == 0) choice = airports.Where(a => a.Code != _recent.LastOrDefault()).ToList();
             if (choice.Count == 0) choice = airports.ToList();
             double total = choice.Sum(a => a.Weight), roll = _random.NextDouble() * total;
             var pick = choice[^1];
@@ -182,7 +247,7 @@ namespace OLED_Sleeper.Features.Flights
                 if (roll < 0) { pick = a; break; }
             }
             _recent.Enqueue(pick.Code);
-            while (_recent.Count > Math.Min(RememberAirports, airports.Count - 1)) _recent.Dequeue();
+            while (_recent.Count > RememberAirports) _recent.Dequeue();
             return pick;
         }
 
@@ -338,8 +403,9 @@ namespace OLED_Sleeper.Features.Flights
 
         private static TourScene AirportScene(int number, DateTime start, FlightsSettings s)
         {
-            var countries = Countries.Read(s.TourCountries).Known.Select(c => c.Code).DefaultIfEmpty("NL");
-            var airport = Planner.PickAirport(TourPlanner.AirportsIn(AirportCatalog.All, countries));
+            var groups = TourSelection.From(s.TourCountries).Groups.Where(g => g.Count > 0).ToList<IReadOnlyList<TourAirport>>();
+            if (groups.Count == 0) groups.Add(TourPlanner.AirportsIn(AirportCatalog.All, new[] { "NL" }));
+            var airport = Planner.PickAirport(groups);
             return new TourScene(number, SceneKind.Airport, airport.Lat, airport.Lon, AirportRadiusKm, start, start + Duration(s),
                                  number, airport.Name, Airport: airport);
         }
