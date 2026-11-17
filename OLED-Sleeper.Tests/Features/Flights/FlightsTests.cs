@@ -565,3 +565,39 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
     }
 }
+
+namespace OLED_Sleeper.Tests.Features.Flights
+{
+    public class RouteParserTests
+    {
+        [Theory]
+        [InlineData("KLM1234", true)]
+        [InlineData("EZY29YK", true)]
+        [InlineData("TRA6512", true)]
+        [InlineData("PHABC", false)]
+        [InlineData("N123AB", false)]
+        [InlineData("", false)]
+        public void IsAirlineCallsign(string callsign, bool expected) =>
+            Assert.Equal(expected, RouteParser.IsAirlineCallsign(callsign));
+
+        [Fact]
+        public void Parse_ReadsOriginAndDestination()
+        {
+            const string json = """
+                {"response":{"flightroute":{"callsign":"TRA6512",
+                  "origin":{"iata_code":"RTM","icao_code":"EHRD"},
+                  "destination":{"iata_code":"","icao_code":"GCTS"}}}}
+                """;
+            var route = RouteParser.Parse(json);
+            Assert.Equal(new FlightRoute("RTM", "GCTS"), route);
+            Assert.Equal("RTM→GCTS", route!.ToString());
+        }
+
+        [Fact]
+        public void Parse_UnknownCallsign_IsNull()
+        {
+            Assert.Null(RouteParser.Parse("""{"response":"unknown callsign"}"""));
+            Assert.Null(RouteParser.Parse("""{"response":{"flightroute":null}}"""));
+        }
+    }
+}

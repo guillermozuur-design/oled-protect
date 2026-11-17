@@ -312,7 +312,7 @@
                                 </Border>
 
                                 <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
-                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data). Zoeken: Nominatim (OpenStreetMap). De coördinaten van de pin worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
+                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com. Zoeken: Nominatim (OpenStreetMap). De coördinaten van de pin worden naar deze diensten gestuurd om de gegevens rond die plek op te halen; ze blijven verder alleen op deze pc." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

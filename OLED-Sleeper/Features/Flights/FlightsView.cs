@@ -34,8 +34,10 @@ namespace OLED_Sleeper.Features.Flights
         private static readonly Color MinorColor = Color.FromRgb(0x23, 0x25, 0x29);
         private static readonly Color MajorColor = Color.FromRgb(0x27, 0x26, 0x24);
         private static readonly Color MotorwayColor = Color.FromRgb(0x40, 0x33, 0x1F);
-        private static readonly Brush PinDot = Frozen(new SolidColorBrush(Color.FromRgb(0x5A, 0x7C, 0xC8)));
-        private static readonly Pen PinRing = Frozen(new Pen(new SolidColorBrush(Color.FromRgb(0x2A, 0x3A, 0x5E)), 1.0));
+        private static readonly Brush PinHead = Frozen(new SolidColorBrush(Color.FromRgb(0xB8, 0x2A, 0x2A)));
+        private static readonly Brush PinShine = Frozen(new SolidColorBrush(Color.FromArgb(0x90, 0xF0, 0x9A, 0x8A)));
+        private static readonly Brush PinNeedle = Frozen(new SolidColorBrush(Color.FromRgb(0x78, 0x7C, 0x84)));
+        private static readonly Brush PinShadow = Frozen(new SolidColorBrush(Color.FromArgb(0x70, 0x30, 0x34, 0x3C)));
 
         private static readonly Typeface LabelFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         private static readonly Typeface CityFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -408,9 +410,13 @@ namespace OLED_Sleeper.Features.Flights
 
         private static void DrawPin(DrawingContext dc, Point p, double ui, DateTime now)
         {
-            // Your spot: a small, calm dot with a thin ring (it drifts along with the map).
-            dc.DrawEllipse(null, PinRing, p, 5.5 * ui, 5.5 * ui);
-            dc.DrawEllipse(PinDot, null, p, 2.2 * ui, 2.2 * ui);
+            // Your spot: a pin stuck in the map, its point exactly on the spot (it drifts along with the map).
+            double needle = 15 * ui, head = 4.6 * ui;
+            var top = p - new Vector(0, needle);
+            dc.DrawEllipse(PinShadow, null, p, 2.4 * ui, 1.1 * ui);
+            dc.DrawLine(new Pen(PinNeedle, 1.4 * ui) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, p, top);
+            dc.DrawEllipse(PinHead, null, top, head, head);
+            dc.DrawEllipse(PinShine, null, top + new Vector(-head * 0.35, -head * 0.35), head * 0.3, head * 0.3);
         }
 
         private void DrawPlanes(DrawingContext dc, Matrix m, double rotation, double ui, Rect bounds, DateTime now)
@@ -444,7 +450,9 @@ namespace OLED_Sleeper.Features.Flights
                     string altitude = plane.AltitudeFeet is { } ft
                         ? (Math.Round(ft * 0.3048 / 100) * 100).ToString("#,0", CultureInfo.GetCultureInfo("nl-NL")) + " m"
                         : "";
-                    string label = string.Join(" · ", new[] { plane.Callsign, plane.TypeCode, altitude }.Where(x => x.Length > 0));
+                    // Where it flies from and to (when known), else the type of aircraft.
+                    string middle = RouteLookup.For(plane.Callsign)?.ToString() ?? plane.TypeCode;
+                    string label = string.Join(" · ", new[] { plane.Callsign, middle, altitude }.Where(x => x.Length > 0));
                     var t = Text(label, LabelFace, 10.5 * ui, Color.FromRgb(0x56, 0x61, 0x72));
                     dc.DrawText(t, p + new Vector(size + 5 * ui, size * 0.2));
                 }
