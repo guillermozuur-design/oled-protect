@@ -1,11 +1,11 @@
 namespace OLED_Sleeper.Features.MonitorInformation.Models
 {
     /// <summary>
-    /// What a single DDC/CI probe of a monitor reported.
+    /// Outcome of probing one monitor over DDC/CI.
     /// </summary>
-    /// <param name="IsSupported">Whether the monitor answered a DDC/CI capabilities request.</param>
-    /// <param name="MaxBrightness">
-    /// The highest value the monitor accepts for the brightness VCP code. Zero when the monitor did not report a range.
-    /// </param>
-    public readonly record struct DdcCiCapabilities(bool IsSupported, uint MaxBrightness);
+    /// <param name="IsSupported">True when the panel answered a brightness read or handed out a capabilities string.</param>
+    /// <param name="MaxBrightness">Top of the panel's brightness range; 0 when the panel never reported one.</param>
+    public readonly record struct DdcCiCapabilities(
+        bool IsSupported,
+        uint MaxBrightness);
 }

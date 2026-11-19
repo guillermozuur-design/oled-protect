@@ -3,34 +3,30 @@ using OLED_Sleeper.Features.MonitorInformation.Models;
 namespace OLED_Sleeper.Features.MonitorInformation.Services.Interfaces
 {
     /// <summary>
-    /// Defines the contract for managing and refreshing monitor information from the system.
+    /// The app's view of the attached monitors: a cached, DDC/CI-probed list plus quick unprobed readings.
     /// </summary>
     public interface IMonitorInfoManager
     {
         /// <summary>
-        /// Gets the enriched monitor list, scanning the system on first use and serving a cached
-        /// result thereafter. Concurrent callers share a single scan.
+        /// The probed monitor list. The first call scans; later calls get the cached scan. Callers that arrive
+        /// while the scan runs await the same one.
         /// </summary>
-        /// <returns>The enriched list of <see cref="MonitorInfo"/> objects.</returns>
         Task<IReadOnlyList<MonitorInfo>> GetCurrentMonitorsAsync();
 
         /// <summary>
-        /// Forces a re-scan of the monitor list from the system and replaces the cache with the result.
+        /// Scans again and makes the result the new cached list.
         /// </summary>
-        /// <returns>The freshly enriched list of <see cref="MonitorInfo"/> objects.</returns>
         Task<IReadOnlyList<MonitorInfo>> RefreshMonitorsAsync();
 
         /// <summary>
-        /// Gets the latest, up-to-date list of monitors from the system (basic info only, no DDC/CI probing).
+        /// A fresh, unprobed reading straight from Windows. Monitors without a resolved hardware ID are included.
         /// </summary>
-        /// <returns>A list of <see cref="MonitorInfo"/> objects representing the latest monitors, including
-        /// any whose hardware ID did not resolve.</returns>
         List<MonitorInfo> GetLatestMonitorsBasicInfo();
 
         /// <summary>
-        /// Enriches a list of MonitorInfo objects with their DDC/CI capabilities.
+        /// Probes each monitor in <paramref name="readings"/> over DDC/CI, in place. Monitors without a hardware ID
+        /// cannot be managed and are taken out of the list.
         /// </summary>
-        /// <param name="monitors">The list of monitors to enrich.</param>
-        void EnrichMonitorInfoList(List<MonitorInfo> monitors);
+        void EnrichMonitorInfoList(List<MonitorInfo> readings);
     }
 }

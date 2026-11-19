@@ -4,79 +4,74 @@ using Serilog;
 namespace OLED_Sleeper.Features.MonitorDimming.Services
 {
     /// <summary>
-    /// Keeps each dimmed monitor's pre-dim brightness in memory and mirrors every change to the state file.
-    /// Every member is safe to call from any thread.
+    /// In-memory map of pre-dim brightness levels, written through to the state file on every change.
+    /// Thread-safe.
     /// </summary>
-    public class OriginalBrightnessStore : IOriginalBrightnessStore
+    public sealed class OriginalBrightnessStore : IOriginalBrightnessStore
     {
-        private readonly IMonitorBrightnessStateService _brightnessStateService;
+        private readonly IMonitorBrightnessStateService _persistence;
+        private readonly Dictionary<string, uint> _originals;
 
-        /// <summary>Guards <see cref="_originalBrightnessLevels"/> and the state file write that follows each change to it.</summary>
-        private readonly object _stateLock = new();
+        // Covers the map and the save that follows each change, so an older snapshot can never overwrite a newer one.
+        private readonly object _sync = new();
 
-        private readonly Dictionary<string, uint> _originalBrightnessLevels;
-
-        /// <summary>
-        /// Loads the recorded original brightness levels from disk.
-        /// </summary>
-        public OriginalBrightnessStore(IMonitorBrightnessStateService brightnessStateService)
+        public OriginalBrightnessStore(IMonitorBrightnessStateService persistence)
         {
-            _brightnessStateService = brightnessStateService;
-            _originalBrightnessLevels = _brightnessStateService.LoadState();
+            _persistence = persistence;
+            _originals = persistence.LoadState();
         }
 
-        /// <inheritdoc />
-        public bool TryGetOriginal(string hardwareId, out uint brightness)
+        public bool TryGetOriginal(string hardwareId, out uint rawValue)
         {
-            lock (_stateLock)
+            lock (_sync)
             {
-                return _originalBrightnessLevels.TryGetValue(hardwareId, out brightness);
+                return _originals.TryGetValue(hardwareId, out rawValue);
             }
         }
 
-        /// <inheritdoc />
-        public void RecordOriginal(string hardwareId, uint brightness)
+        public void RecordOriginal(string hardwareId, uint rawValue)
         {
-            lock (_stateLock)
+            lock (_sync)
             {
-                if (_originalBrightnessLevels.TryGetValue(hardwareId, out var recorded))
+                if (!_originals.TryAdd(hardwareId, rawValue))
                 {
-                    Log.Debug("Monitor {HardwareId} already has a recorded original brightness of {Brightness}.", hardwareId, recorded);
+                    Log.Debug("Monitor {HardwareId} keeps its earlier recorded brightness {Brightness}.", hardwareId, _originals[hardwareId]);
                     return;
                 }
 
-                _originalBrightnessLevels[hardwareId] = brightness;
-                _brightnessStateService.SaveState(new Dictionary<string, uint>(_originalBrightnessLevels));
+                Persist();
             }
         }
 
-        /// <inheritdoc />
-        public void ReplaceOriginal(string hardwareId, uint brightness)
+        public void ReplaceOriginal(string hardwareId, uint rawValue)
         {
-            lock (_stateLock)
+            lock (_sync)
             {
-                _originalBrightnessLevels[hardwareId] = brightness;
-                _brightnessStateService.SaveState(new Dictionary<string, uint>(_originalBrightnessLevels));
+                _originals[hardwareId] = rawValue;
+                Persist();
             }
         }
 
         public void RemoveOriginal(string hardwareId)
         {
-            lock (_stateLock)
+            lock (_sync)
             {
-                if (!_originalBrightnessLevels.Remove(hardwareId)) return;
-
-                _brightnessStateService.SaveState(new Dictionary<string, uint>(_originalBrightnessLevels));
+                if (_originals.Remove(hardwareId))
+                {
+                    Persist();
+                }
             }
         }
 
-        /// <inheritdoc />
         public Dictionary<string, uint> GetAll()
         {
-            lock (_stateLock)
+            lock (_sync)
             {
-                return new Dictionary<string, uint>(_originalBrightnessLevels);
+                return new(_originals);
             }
         }
+
+        // Hands the persistence layer a copy, so it never sees the map change underneath it.
+        private void Persist() => _persistence.SaveState(new Dictionary<string, uint>(_originals));
     }
 }

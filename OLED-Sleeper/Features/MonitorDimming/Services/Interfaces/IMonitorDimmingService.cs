@@ -1,35 +1,30 @@
 namespace OLED_Sleeper.Features.MonitorDimming.Services.Interfaces
 {
     /// <summary>
-    /// Defines the contract for monitor dimming and brightness management services, supporting asynchronous operations.
+    /// Changes monitors' hardware brightness over DDC/CI: dimming, undimming and the brightness schedule.
     /// </summary>
     public interface IMonitorDimmingService
     {
         /// <summary>
-        /// Dims the specified monitor to the given brightness level asynchronously.
+        /// Remembers the monitor's current brightness and lowers it to <paramref name="percent"/> (0-100, mapped
+        /// onto the panel's own range).
         /// </summary>
-        /// <param name="hardwareId">The unique hardware ID of the monitor.</param>
-        /// <param name="dimLevel">The dim level as a percentage (0-100), scaled into the monitor's own brightness range.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        Task DimMonitorAsync(string? hardwareId, int dimLevel);
+        Task DimMonitorAsync(string? hardwareId, int percent);
 
         /// <summary>
-        /// Restores the specified monitor to its original brightness asynchronously.
+        /// Puts the monitor back on the brightness remembered when it was dimmed. Does nothing when it is not dimmed.
         /// </summary>
-        /// <param name="hardwareId">The unique hardware ID of the monitor.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
         Task UndimMonitorAsync(string hardwareId);
 
         /// <summary>
-        /// Applies a brightness chosen by the brightness schedule (percent, 0-100).
+        /// Applies a brightness (percent, 0-100) chosen by the brightness schedule.
         /// </summary>
         /// <returns>False when the monitor did not answer, so the caller can try again later.</returns>
         Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent);
 
         /// <summary>
-        /// Gets a dictionary of all currently dimmed monitors and their original brightness values.
+        /// The monitors that are dimmed right now, with the raw brightness each will be restored to.
         /// </summary>
-        /// <returns>A dictionary mapping hardware IDs to original brightness values.</returns>
         Dictionary<string, uint> GetDimmedMonitors();
     }
 }

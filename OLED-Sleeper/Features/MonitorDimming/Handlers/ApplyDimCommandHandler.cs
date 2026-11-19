@@ -6,34 +6,21 @@ using Serilog;
 namespace OLED_Sleeper.Features.MonitorDimming.Handlers
 {
     /// <summary>
-    /// Handles the execution of the <see cref="ApplyDimCommand"/>.
-    /// This class contains the business logic for dimming a monitor to a specified brightness level.
+    /// Hands a dim request to the dimming service. A failure is logged, not thrown: the idle loop that sends
+    /// this request must keep running when one panel misbehaves.
     /// </summary>
-    public class ApplyDimCommandHandler : ICommandHandler<ApplyDimCommand>
+    public sealed class ApplyDimCommandHandler(IMonitorDimmingService dimming) : ICommandHandler<ApplyDimCommand>
     {
-        private readonly IMonitorDimmingService _monitorDimmingService;
-
-        public ApplyDimCommandHandler(
-            IMonitorDimmingService monitorDimmingService)
+        public async Task HandleAsync(ApplyDimCommand request)
         {
-            _monitorDimmingService = monitorDimmingService;
-        }
-
-        /// <summary>
-        /// Executes the dimming logic asynchronously based on the command's data.
-        /// Exceptions are caught and logged to avoid silent failures.
-        /// </summary>
-        /// <param name="command">The command containing the details of the monitor to dim and the target brightness level.</param>
-        public async Task HandleAsync(ApplyDimCommand command)
-        {
+            Log.Information("Dimming monitor {HardwareId} to {DimLevel}%.", request.HardwareId, request.DimLevel);
             try
             {
-                Log.Information("Executing ApplyDimCommand for monitor {HardwareId} to level {DimLevel}.", command.HardwareId, command.DimLevel);
-                await _monitorDimmingService.DimMonitorAsync(command.HardwareId, command.DimLevel);
+                await dimming.DimMonitorAsync(request.HardwareId, request.DimLevel);
             }
-            catch (Exception ex)
+            catch (Exception error)
             {
-                Log.Error(ex, "Failed to dim monitor {HardwareId} to level {DimLevel}.", command.HardwareId, command.DimLevel);
+                Log.Error(error, "Dimming monitor {HardwareId} to {DimLevel}% failed.", request.HardwareId, request.DimLevel);
             }
         }
     }

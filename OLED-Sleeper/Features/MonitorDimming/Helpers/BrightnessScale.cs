@@ -1,29 +1,28 @@
 namespace OLED_Sleeper.Features.MonitorDimming.Helpers
 {
     /// <summary>
-    /// Maps dim levels expressed as percentages onto a monitor's own brightness range.
-    /// This is a static helper class and does not hold any state.
+    /// Converts the percentages the settings work in to the raw values a panel's brightness VCP code expects.
     /// </summary>
     public static class BrightnessScale
     {
-        /// <summary>Upper bound of the percentage scale that the settings and the UI express the dim level on.</summary>
-        private const uint DimLevelPercentageMax = 100;
+        private const int FullScale = 100;
 
         /// <summary>
-        /// Maps a percentage onto a monitor's brightness range.
+        /// Maps <paramref name="percent"/> (clamped to 0-100) onto the range 0-<paramref name="maxBrightness"/>,
+        /// rounding halves up. A panel that reported no range (0) or that already counts in percent (100) gets the
+        /// percentage unchanged.
         /// </summary>
-        /// <param name="dimLevelPercentage">The dim level as a percentage. Values outside 0-100 are clamped.</param>
-        /// <param name="maxBrightness">The monitor's highest accepted brightness value.</param>
-        /// <returns>
-        /// The percentage itself when the monitor reported no range or already runs on a 0-100 scale;
-        /// otherwise the percentage of <paramref name="maxBrightness"/>.
-        /// </returns>
-        public static uint ToRawBrightness(int dimLevelPercentage, uint maxBrightness)
+        public static uint ToRawBrightness(int percent, uint maxBrightness)
         {
-            var percentage = (uint)Math.Clamp(dimLevelPercentage, 0, (int)DimLevelPercentageMax);
-            if (maxBrightness == 0 || maxBrightness == DimLevelPercentageMax) return percentage;
+            uint clamped = (uint)Math.Clamp(percent, 0, FullScale);
+            if (maxBrightness is 0 or FullScale)
+            {
+                return clamped;
+            }
 
-            return (uint)Math.Round(percentage * maxBrightness / (double)DimLevelPercentageMax, MidpointRounding.AwayFromZero);
+            // Integer form of round(percent * max / 100): add half the divisor before dividing.
+            ulong scaledTwice = 2UL * clamped * maxBrightness;
+            return (uint)((scaledTwice + FullScale) / (2 * FullScale));
         }
     }
 }

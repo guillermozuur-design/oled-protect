@@ -6,23 +6,22 @@ using Serilog;
 namespace OLED_Sleeper.Features.MonitorDimming.Handlers
 {
     /// <summary>
-    /// Handles the RestoreBrightnessOnAllMonitorsCommand to restore brightness for all monitors left dimmed.
+    /// Undims every monitor that a previous run left dimmed. Exceptions propagate to the startup code that sent it.
     /// </summary>
-    public class RestoreBrightnessOnAllMonitorsCommandHandler(IMonitorDimmingService monitorDimmingService)
-        : ICommandHandler<RestoreBrightnessOnAllMonitorsCommand>
+    public sealed class RestoreBrightnessOnAllMonitorsCommandHandler(IMonitorDimmingService dimming) : ICommandHandler<RestoreBrightnessOnAllMonitorsCommand>
     {
-        public async Task HandleAsync(RestoreBrightnessOnAllMonitorsCommand command)
+        public async Task HandleAsync(RestoreBrightnessOnAllMonitorsCommand request)
         {
-            Log.Information("Checking for monitors with unrestored brightness...");
+            Log.Information("Looking for monitors a previous run left dimmed.");
 
-            // The dimming service owns the dimmed-monitor list and writes the state file.
-            var dimmedMonitors = monitorDimmingService.GetDimmedMonitors();
-            if (dimmedMonitors.Count == 0) return;
+            // The dimming service owns the recordings (and the state file behind them), so ask it, not the file.
+            var leftDimmed = dimming.GetDimmedMonitors().Keys.ToList();
+            if (leftDimmed.Count == 0) return;
 
-            Log.Warning("Found {Count} monitors that were left dimmed. Attempting to restore.", dimmedMonitors.Count);
-            foreach (var hardwareId in dimmedMonitors.Keys)
+            Log.Warning("{Count} monitor(s) were left dimmed; restoring their brightness.", leftDimmed.Count);
+            foreach (string hardwareId in leftDimmed)
             {
-                await monitorDimmingService.UndimMonitorAsync(hardwareId);
+                await dimming.UndimMonitorAsync(hardwareId);
             }
         }
     }

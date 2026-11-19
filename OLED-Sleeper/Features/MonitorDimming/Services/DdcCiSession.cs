@@ -5,50 +5,35 @@ using System.Diagnostics.CodeAnalysis;
 namespace OLED_Sleeper.Features.MonitorDimming.Services
 {
     /// <summary>
-    /// A DDC/CI channel backed by a physical monitor handle from dxva2.
+    /// A DDC/CI channel over one dxva2 physical monitor handle.
     /// </summary>
     [ExcludeFromCodeCoverage]
     internal sealed class DdcCiSession : IDdcCiSession
     {
-        private readonly NativeMethods.PHYSICAL_MONITOR[] _physicalMonitors;
-        private readonly nint _hPhysicalMonitor;
-        private bool _disposed;
+        // dxva2 hands out and takes back the physical monitors of one HMONITOR as a set, so the whole set is kept
+        // even though only one of them is used.
+        private NativeMethods.PHYSICAL_MONITOR[]? _ownedPanels;
+        private readonly nint _panel;
 
-        /// <param name="physicalMonitors">Every physical monitor behind one display monitor handle. All are released together.</param>
-        /// <param name="index">The monitor within that set this channel talks to.</param>
-        internal DdcCiSession(NativeMethods.PHYSICAL_MONITOR[] physicalMonitors, int index)
+        internal DdcCiSession(NativeMethods.PHYSICAL_MONITOR[] ownedPanels, int panelIndex)
         {
-            _physicalMonitors = physicalMonitors;
-            _hPhysicalMonitor = physicalMonitors[index].hPhysicalMonitor;
+            _ownedPanels = ownedPanels;
+            _panel = ownedPanels[panelIndex].hPhysicalMonitor;
         }
 
-        /// <inheritdoc />
-        public uint? GetBrightness()
-        {
-            if (!NativeMethods.GetVCPFeatureAndVCPFeatureReply(
-                    _hPhysicalMonitor, NativeMethods.VCP_CODE_BRIGHTNESS, nint.Zero, out var currentBrightness, out _))
-            {
-                return null;
-            }
+        public uint? GetBrightness() =>
+            DisplayMonitors.TryReadBrightness(_panel, out uint current, out _) ? current : null;
 
-            return currentBrightness;
-        }
+        public bool SetBrightness(uint rawValue) => DisplayMonitors.TryWriteBrightness(_panel, rawValue);
 
-        /// <inheritdoc />
-        public bool SetBrightness(uint brightness)
-        {
-            return NativeMethods.SetVCPFeature(_hPhysicalMonitor, NativeMethods.VCP_CODE_BRIGHTNESS, brightness);
-        }
-
-        /// <summary>
-        /// Releases the physical monitor handle. Calls after the first do nothing.
-        /// </summary>
+        // Safe to call more than once: only the first call releases the handles.
         public void Dispose()
         {
-            if (_disposed) return;
-
-            _disposed = true;
-            NativeMethods.DestroyPhysicalMonitors((uint)_physicalMonitors.Length, _physicalMonitors);
+            var panels = Interlocked.Exchange(ref _ownedPanels, null);
+            if (panels is not null)
+            {
+                DisplayMonitors.Release(panels);
+            }
         }
     }
 }

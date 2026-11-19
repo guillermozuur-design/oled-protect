@@ -5,70 +5,44 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Handlers
 {
-    public class RestoreBrightnessOnAllMonitorsCommandHandlerTests
+    public sealed class RestoreBrightnessOnAllMonitorsCommandHandlerTests
     {
-        private const string HardwareId = "MON-123";
-        private const string SecondHardwareId = "MON-456";
+        private readonly Mock<IMonitorDimmingService> _dimming = new();
 
-        private readonly Mock<IMonitorDimmingService> _monitorDimmingServiceMock;
-        private readonly RestoreBrightnessOnAllMonitorsCommandHandler _handler;
+        private Task Run() =>
+            new RestoreBrightnessOnAllMonitorsCommandHandler(_dimming.Object).HandleAsync(new RestoreBrightnessOnAllMonitorsCommand());
 
-        public RestoreBrightnessOnAllMonitorsCommandHandlerTests()
+        private void LeftDimmed(params string[] hardwareIds) =>
+            _dimming.Setup(d => d.GetDimmedMonitors()).Returns(hardwareIds.ToDictionary(id => id, _ => 80u));
+
+        [Fact]
+        public async Task NothingLeftDimmed_RestoresNothing()
         {
-            _monitorDimmingServiceMock = new Mock<IMonitorDimmingService>();
-            _handler = new RestoreBrightnessOnAllMonitorsCommandHandler(_monitorDimmingServiceMock.Object);
+            LeftDimmed();
+
+            await Run();
+
+            _dimming.Verify(d => d.UndimMonitorAsync(It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenNoMonitorIsDimmed_UndimsNothing()
+        public async Task EveryMonitorLeftDimmed_IsRestoredOnce()
         {
-            // Arrange
-            SetupDimmedMonitors(new Dictionary<string, uint>());
+            LeftDimmed("PNP-LEFT", "PNP-RIGHT");
 
-            // Act
-            await _handler.HandleAsync(new RestoreBrightnessOnAllMonitorsCommand());
+            await Run();
 
-            // Assert
-            _monitorDimmingServiceMock.Verify(x => x.UndimMonitorAsync(It.IsAny<string>()), Times.Never);
+            _dimming.Verify(d => d.UndimMonitorAsync("PNP-LEFT"), Times.Once);
+            _dimming.Verify(d => d.UndimMonitorAsync("PNP-RIGHT"), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenMonitorsAreDimmed_UndimsEveryOne()
+        public async Task FailureInTheDimmingService_ReachesTheCaller()
         {
-            // Arrange
-            SetupDimmedMonitors(new Dictionary<string, uint> { [HardwareId] = 80, [SecondHardwareId] = 60 });
+            LeftDimmed("PNP-LEFT");
+            _dimming.Setup(d => d.UndimMonitorAsync("PNP-LEFT")).ThrowsAsync(new InvalidOperationException("bus error"));
 
-            // Act
-            await _handler.HandleAsync(new RestoreBrightnessOnAllMonitorsCommand());
-
-            // Assert
-            _monitorDimmingServiceMock.Verify(x => x.UndimMonitorAsync(HardwareId), Times.Once);
-            _monitorDimmingServiceMock.Verify(x => x.UndimMonitorAsync(SecondHardwareId), Times.Once);
-        }
-
-        [Fact]
-        public async Task HandleAsync_WhenTheServiceThrows_PropagatesTheException()
-        {
-            // Arrange
-            SetupDimmedMonitors(new Dictionary<string, uint> { [HardwareId] = 80 });
-            _monitorDimmingServiceMock
-                .Setup(x => x.UndimMonitorAsync(HardwareId))
-                .ThrowsAsync(new Exception("Simulated failure"));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(new RestoreBrightnessOnAllMonitorsCommand()));
-
-            // Assert
-            Assert.NotNull(exception);
-        }
-
-        /// <summary>
-        /// Makes GetDimmedMonitors() return the supplied recordings.
-        /// </summary>
-        /// <param name="recordings">The map from hardware ID to raw pre-dim brightness.</param>
-        private void SetupDimmedMonitors(Dictionary<string, uint> recordings)
-        {
-            _monitorDimmingServiceMock.Setup(x => x.GetDimmedMonitors()).Returns(recordings);
+            await Assert.ThrowsAsync<InvalidOperationException>(Run);
         }
     }
 }

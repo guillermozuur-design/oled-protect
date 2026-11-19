@@ -3,67 +3,39 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 namespace OLED_Sleeper.Tests.TestDoubles
 {
     /// <summary>
-    /// An <see cref="IDdcCiSession"/> that stands in for a panel, holding a brightness value instead of
-    /// talking to hardware. A write is reflected by the next read, so a restore confirms by default.
+    /// A pretend panel behind a DDC/CI channel. It holds one brightness value; by default a write is what the
+    /// next read returns, which is how a panel that applied the write behaves.
     /// </summary>
-    public class FakeDdcCiSession : IDdcCiSession
+    public sealed class FakeDdcCiSession(uint initialBrightness) : IDdcCiSession
     {
-        private uint _brightness;
+        private uint _level = initialBrightness;
 
-        /// <param name="brightness">The brightness the panel reports before anything is written.</param>
-        public FakeDdcCiSession(uint brightness)
+        /// <summary>Reads report "no answer".</summary>
+        public bool IgnoresReads { get; set; }
+
+        /// <summary>Writes are logged but refused, and the level stays as it was.</summary>
+        public bool RefusesWrites { get; set; }
+
+        /// <summary>When set, the panel reads back this value after any accepted write instead of the written one.</summary>
+        public uint? SettlesAt { get; set; }
+
+        /// <summary>Every value handed to <see cref="SetBrightness"/>, refused ones included, oldest first.</summary>
+        public List<uint> WrittenBrightnessLevels { get; } = [];
+
+        /// <summary>How often the channel was disposed; equal to the number of opens when nothing leaked.</summary>
+        public int Disposals { get; private set; }
+
+        public uint? GetBrightness() => IgnoresReads ? null : _level;
+
+        public bool SetBrightness(uint rawValue)
         {
-            _brightness = brightness;
-        }
+            WrittenBrightnessLevels.Add(rawValue);
+            if (RefusesWrites) return false;
 
-        /// <summary>
-        /// When true, <see cref="GetBrightness"/> reports that the monitor did not answer.
-        /// </summary>
-        public bool ReadsFail { get; set; }
-
-        /// <summary>
-        /// When true, <see cref="SetBrightness"/> records the attempt and reports that the monitor
-        /// rejected it, leaving the held brightness untouched.
-        /// </summary>
-        public bool WritesAreRejected { get; set; }
-
-        /// <summary>
-        /// The value the panel reports after a write, whatever was written. Null reflects the written
-        /// value back, which is what a monitor that applied it does.
-        /// </summary>
-        public uint? ReadBackOverride { get; set; }
-
-        /// <summary>
-        /// Every value passed to <see cref="SetBrightness"/>, in order, including rejected writes.
-        /// </summary>
-        public List<uint> WrittenBrightnessLevels { get; } = new();
-
-        /// <summary>
-        /// How many times <see cref="Dispose"/> has run. One per channel the service opened means
-        /// no handle was leaked.
-        /// </summary>
-        public int DisposeCount { get; private set; }
-
-        /// <inheritdoc />
-        public uint? GetBrightness()
-        {
-            return ReadsFail ? null : _brightness;
-        }
-
-        /// <inheritdoc />
-        public bool SetBrightness(uint brightness)
-        {
-            WrittenBrightnessLevels.Add(brightness);
-            if (WritesAreRejected) return false;
-
-            _brightness = ReadBackOverride ?? brightness;
+            _level = SettlesAt ?? rawValue;
             return true;
         }
 
-        /// <inheritdoc />
-        public void Dispose()
-        {
-            DisposeCount++;
-        }
+        public void Dispose() => Disposals++;
     }
 }

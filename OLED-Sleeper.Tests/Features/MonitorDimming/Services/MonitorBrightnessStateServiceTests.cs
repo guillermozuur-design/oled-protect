@@ -4,58 +4,43 @@ using OLED_Sleeper.Storage.Interfaces;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Services
 {
-    public class MonitorBrightnessStateServiceTests
+    public sealed class MonitorBrightnessStateServiceTests
     {
-        private const string StateFileName = "brightness_state.json";
-        private const string HardwareId = "MON-PRIMARY";
+        // Existing installs have their state under this name; the test pins it so a rename cannot slip through.
+        private const string ExpectedFile = "brightness_state.json";
 
-        private readonly Mock<IAppDataFileStore> _fileStore;
-        private readonly MonitorBrightnessStateService _service;
+        private readonly Mock<IAppDataFileStore> _store = new();
 
-        public MonitorBrightnessStateServiceTests()
+        [Fact]
+        public void LoadState_ReturnsWhatTheFileHolds()
         {
-            _fileStore = new Mock<IAppDataFileStore>();
-            _service = new MonitorBrightnessStateService(_fileStore.Object);
+            _store.Setup(s => s.Read<Dictionary<string, uint>>(ExpectedFile))
+                .Returns(new Dictionary<string, uint> { ["PNP-OLED"] = 80 });
+
+            var loaded = new MonitorBrightnessStateService(_store.Object).LoadState();
+
+            Assert.Equal(80u, Assert.Single(loaded).Value);
         }
 
         [Fact]
-        public void LoadState_WhenTheStoreHasAState_ReturnsIt()
+        public void LoadState_UnreadableOrMissingFile_GivesAnEmptyMap()
         {
-            // Arrange
-            _fileStore.Setup(s => s.Read<Dictionary<string, uint>>(StateFileName))
-                .Returns(new Dictionary<string, uint> { [HardwareId] = 80 });
+            _store.Setup(s => s.Read<Dictionary<string, uint>>(ExpectedFile)).Returns(default(Dictionary<string, uint>));
 
-            // Act
-            var state = _service.LoadState();
+            var loaded = new MonitorBrightnessStateService(_store.Object).LoadState();
 
-            // Assert
-            Assert.Equal(80u, state[HardwareId]);
+            Assert.NotNull(loaded);
+            Assert.Empty(loaded);
         }
 
         [Fact]
-        public void LoadState_WhenNothingCouldBeRead_ReturnsAnEmptyDictionary()
+        public void SaveState_WritesTheMapToTheStateFile()
         {
-            // Arrange
-            _fileStore.Setup(s => s.Read<Dictionary<string, uint>>(StateFileName)).Returns((Dictionary<string, uint>?)null);
+            var snapshot = new Dictionary<string, uint> { ["PNP-OLED"] = 80 };
 
-            // Act
-            var state = _service.LoadState();
+            new MonitorBrightnessStateService(_store.Object).SaveState(snapshot);
 
-            // Assert
-            Assert.Empty(state);
-        }
-
-        [Fact]
-        public void SaveState_WhenCalled_WritesTheStateUnderTheStateFileName()
-        {
-            // Arrange
-            var state = new Dictionary<string, uint> { [HardwareId] = 80 };
-
-            // Act
-            _service.SaveState(state);
-
-            // Assert
-            _fileStore.Verify(s => s.TryWrite(StateFileName, state), Times.Once);
+            _store.Verify(s => s.TryWrite(ExpectedFile, snapshot), Times.Once);
         }
     }
 }

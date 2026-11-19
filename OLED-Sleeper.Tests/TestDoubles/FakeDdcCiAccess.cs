@@ -3,46 +3,32 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 namespace OLED_Sleeper.Tests.TestDoubles
 {
     /// <summary>
-    /// An <see cref="IDdcCiAccess"/> over a set of fake panels, keyed by device name. A device with no
-    /// panel behind it reports as unreachable. Each device keeps one session across every open, so its
-    /// brightness survives and its disposals can be counted.
+    /// Hands out <see cref="FakeDdcCiSession"/> panels by device name. A name without a panel is unreachable.
+    /// Each name always gets the same panel object back, so its level carries over between opens and its
+    /// disposals add up.
     /// </summary>
-    public class FakeDdcCiAccess : IDdcCiAccess
+    public sealed class FakeDdcCiAccess : IDdcCiAccess
     {
-        private readonly Dictionary<string, FakeDdcCiSession> _panels = new();
+        private readonly Dictionary<string, FakeDdcCiSession> _panelsByDevice = [];
+
+        /// <summary>Every device name an open was asked for, reachable or not, oldest first.</summary>
+        public List<string> OpenRequests { get; } = [];
 
         /// <summary>
-        /// Every device name <see cref="OpenSession"/> was called with, in order, including ones that
-        /// had no panel behind them.
+        /// Called at the start of each open with the device name. Blocking in here keeps the caller inside the
+        /// monitor's lock, which is how the tests hold an operation in flight.
         /// </summary>
-        public List<string> OpenAttempts { get; } = new();
+        public Action<string>? WhileOpening { get; set; }
 
-        /// <summary>
-        /// Runs at the start of every <see cref="OpenSession"/> call, before the panel is looked up.
-        /// A test can block here to hold an operation open inside the monitor's gate.
-        /// </summary>
-        public Action<string>? OnOpen { get; set; }
+        /// <summary>Makes <paramref name="deviceName"/> reachable through a new panel at <paramref name="brightness"/>.</summary>
+        public FakeDdcCiSession AddPanel(string deviceName, uint brightness) =>
+            _panelsByDevice[deviceName] = new FakeDdcCiSession(brightness);
 
-        /// <summary>
-        /// Adds a reachable panel for the given device name.
-        /// </summary>
-        /// <param name="deviceName">The display device name.</param>
-        /// <param name="brightness">The brightness the panel reports before anything is written.</param>
-        /// <returns>The panel, so a test can script its failures and read what was written to it.</returns>
-        public FakeDdcCiSession AddPanel(string deviceName, uint brightness)
+        public IDdcCiSession? OpenSession(string gdiDeviceName)
         {
-            var panel = new FakeDdcCiSession(brightness);
-            _panels[deviceName] = panel;
-            return panel;
-        }
-
-        /// <inheritdoc />
-        public IDdcCiSession? OpenSession(string deviceName)
-        {
-            OpenAttempts.Add(deviceName);
-            OnOpen?.Invoke(deviceName);
-
-            return _panels.TryGetValue(deviceName, out var panel) ? panel : null;
+            OpenRequests.Add(gdiDeviceName);
+            WhileOpening?.Invoke(gdiDeviceName);
+            return _panelsByDevice.GetValueOrDefault(gdiDeviceName);
         }
     }
 }

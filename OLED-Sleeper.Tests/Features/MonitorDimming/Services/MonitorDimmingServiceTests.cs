@@ -7,374 +7,319 @@ using OLED_Sleeper.Tests.TestDoubles;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Services
 {
-    public class MonitorDimmingServiceTests
+    // Two attached 0-255 panels, both at 80, behind fake DDC/CI channels; the original-brightness store is a mock.
+    public sealed class MonitorDimmingServiceTests
     {
-        private const string HardwareId = "MON-PRIMARY";
-        private const string DeviceName = @"\\.\DISPLAY1";
-        private const string SecondHardwareId = "MON-SECOND";
-        private const string SecondDeviceName = @"\\.\DISPLAY2";
+        private const string Left = "PNP-LEFT";
+        private const string LeftDevice = @"\\.\DISPLAY1";
+        private const string Right = "PNP-RIGHT";
+        private const string RightDevice = @"\\.\DISPLAY2";
+        private const uint PanelRange = 255;
 
-        private readonly Mock<IMonitorInfoManager> _monitorManager;
-        private readonly Mock<IOriginalBrightnessStore> _store;
-        private readonly FakeDdcCiAccess _ddcCiAccess;
-        private readonly FakeDdcCiSession _panel;
-        private readonly FakeDdcCiSession _secondPanel;
-        private readonly MonitorDimmingService _service;
+        private readonly Mock<IMonitorInfoManager> _attached = new();
+        private readonly Mock<IOriginalBrightnessStore> _originals = new();
+        private readonly FakeDdcCiAccess _bus = new();
+        private readonly FakeDdcCiSession _leftPanel;
+        private readonly FakeDdcCiSession _rightPanel;
+        private readonly MonitorDimmingService _sut;
 
         public MonitorDimmingServiceTests()
         {
-            _monitorManager = new Mock<IMonitorInfoManager>();
-            _store = new Mock<IOriginalBrightnessStore>();
-            _ddcCiAccess = new FakeDdcCiAccess();
+            Attach(Monitor(Left, LeftDevice, PanelRange), Monitor(Right, RightDevice, PanelRange));
+            _leftPanel = _bus.AddPanel(LeftDevice, 80);
+            _rightPanel = _bus.AddPanel(RightDevice, 80);
+            _sut = new MonitorDimmingService(_attached.Object, _bus, _originals.Object);
+        }
 
-            SetupMonitors(
-                CreateMonitor(HardwareId, DeviceName, 255),
-                CreateMonitor(SecondHardwareId, SecondDeviceName, 255));
+        // ----- Dimming -----
 
-            _panel = _ddcCiAccess.AddPanel(DeviceName, 80);
-            _secondPanel = _ddcCiAccess.AddPanel(SecondDeviceName, 80);
+        [Fact]
+        public async Task Dim_RemembersTheLevelBeforeTheFirstWrite_ThenWritesThePercentOfTheRange()
+        {
+            int writesWhenRecorded = -1;
+            _originals.Setup(o => o.RecordOriginal(Left, 80u))
+                .Callback(() => writesWhenRecorded = _leftPanel.WrittenBrightnessLevels.Count);
 
-            _service = new MonitorDimmingService(_monitorManager.Object, _ddcCiAccess, _store.Object);
+            await _sut.DimMonitorAsync(Left, 15);
+
+            _originals.Verify(o => o.RecordOriginal(Left, 80u), Times.Once);
+            Assert.Equal(0, writesWhenRecorded);
+            Assert.Equal(new[] { 38u }, _leftPanel.WrittenBrightnessLevels); // 15% of 255, rounded
         }
 
         [Fact]
-        public async Task DimMonitorAsync_WhenMonitorIsReachable_RecordsTheCurrentBrightnessBeforeWritingTheScaledValue()
+        public async Task Dim_PanelDoesNotAnswerTheRead_NeitherRecordsNorWrites()
         {
-            // Arrange
-            var recordedBeforeAnyWrite = false;
-            _store.Setup(s => s.RecordOriginal(HardwareId, 80u))
-                .Callback(() => recordedBeforeAnyWrite = _panel.WrittenBrightnessLevels.Count == 0);
+            _leftPanel.IgnoresReads = true;
 
-            // Act
-            await _service.DimMonitorAsync(HardwareId, 15);
+            await _sut.DimMonitorAsync(Left, 15);
 
-            // Assert
-            _store.Verify(s => s.RecordOriginal(HardwareId, 80u), Times.Once);
-            Assert.True(recordedBeforeAnyWrite);
-            Assert.Equal(new[] { 38u }, _panel.WrittenBrightnessLevels);
+            _originals.Verify(o => o.RecordOriginal(It.IsAny<string>(), It.IsAny<uint>()), Times.Never);
+            Assert.Empty(_leftPanel.WrittenBrightnessLevels);
         }
 
         [Fact]
-        public async Task DimMonitorAsync_WhenTheBrightnessReadFails_RecordsNothingAndWritesNothing()
+        public async Task Dim_PanelWithoutAReportedRange_GetsThePercentAsIs()
         {
-            // Arrange
-            _panel.ReadsFail = true;
+            Attach(Monitor(Left, LeftDevice, 0));
 
-            // Act
-            await _service.DimMonitorAsync(HardwareId, 15);
+            await _sut.DimMonitorAsync(Left, 15);
 
-            // Assert
-            _store.Verify(s => s.RecordOriginal(It.IsAny<string>(), It.IsAny<uint>()), Times.Never);
-            Assert.Empty(_panel.WrittenBrightnessLevels);
+            Assert.Equal(new[] { 15u }, _leftPanel.WrittenBrightnessLevels);
         }
 
         [Fact]
-        public async Task DimMonitorAsync_WhenMonitorReportedNoRange_WritesThePercentageUnscaled()
+        public async Task Dim_RefusedWrite_KeepsTheRecordingAndDoesNotTryAgain()
         {
-            // Arrange
-            SetupMonitors(CreateMonitor(HardwareId, DeviceName, 0));
+            _leftPanel.RefusesWrites = true;
 
-            // Act
-            await _service.DimMonitorAsync(HardwareId, 15);
+            await _sut.DimMonitorAsync(Left, 15);
 
-            // Assert
-            Assert.Equal(new[] { 15u }, _panel.WrittenBrightnessLevels);
+            _originals.Verify(o => o.RecordOriginal(Left, 80u), Times.Once);
+            Assert.Equal(new[] { 38u }, _leftPanel.WrittenBrightnessLevels);
+            Assert.Single(_bus.OpenRequests);
         }
 
         [Theory]
-        [InlineData(null)]
+        [InlineData((string?)null)]
         [InlineData("")]
-        public async Task DimMonitorAsync_WhenHardwareIdIsMissing_OpensNoChannel(string? hardwareId)
+        public async Task Dim_WithoutHardwareId_LeavesTheBusAlone(string? hardwareId)
         {
-            // Act
-            await _service.DimMonitorAsync(hardwareId, 15);
+            await _sut.DimMonitorAsync(hardwareId, 15);
 
-            // Assert
-            Assert.Empty(_ddcCiAccess.OpenAttempts);
+            Assert.Empty(_bus.OpenRequests);
         }
 
         [Fact]
-        public async Task DimMonitorAsync_WhenTheWriteIsRejected_KeepsTheRecordingWithoutRetrying()
+        public async Task Dim_MonitorThatIsNotAttached_LeavesTheBusAlone()
         {
-            // Arrange
-            _panel.WritesAreRejected = true;
+            await _sut.DimMonitorAsync("PNP-GONE", 15);
 
-            // Act
-            await _service.DimMonitorAsync(HardwareId, 15);
+            Assert.Empty(_bus.OpenRequests);
+        }
 
-            // Assert
-            _store.Verify(s => s.RecordOriginal(HardwareId, 80u), Times.Once);
-            Assert.Equal(new[] { 38u }, _panel.WrittenBrightnessLevels);
-            Assert.Single(_ddcCiAccess.OpenAttempts);
+        // ----- Undimming -----
+
+        [Fact]
+        public async Task Undim_ConfirmedRestore_WritesTheRecordedRawLevelAndForgetsIt()
+        {
+            Remember(Left, 80);
+
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Equal(new[] { 80u }, _leftPanel.WrittenBrightnessLevels);
+            _originals.Verify(o => o.RemoveOriginal(Left), Times.Once);
         }
 
         [Fact]
-        public async Task DimMonitorAsync_WhenMonitorIsNotAttached_OpensNoChannel()
+        public async Task Undim_ReadBackTwoOff_StillCountsAsRestored()
         {
-            // Act
-            await _service.DimMonitorAsync("MON-UNKNOWN", 15);
+            Remember(Left, 80);
+            _leftPanel.SettlesAt = 82;
 
-            // Assert
-            Assert.Empty(_ddcCiAccess.OpenAttempts);
+            await _sut.UndimMonitorAsync(Left);
+
+            _originals.Verify(o => o.RemoveOriginal(Left), Times.Once);
+        }
+
+        [Fact]
+        public async Task Undim_ReadBackThreeOff_TriesThreeTimesAndKeepsTheRecording()
+        {
+            Remember(Left, 80);
+            _leftPanel.SettlesAt = 83;
+
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Equal(3, _leftPanel.WrittenBrightnessLevels.Count);
+            AssertRecordingKept();
+        }
+
+        [Fact]
+        public async Task Undim_ReadBackUnanswered_TriesThreeTimesAndKeepsTheRecording()
+        {
+            Remember(Left, 80);
+            _leftPanel.IgnoresReads = true;
+
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Equal(new[] { 80u, 80u, 80u }, _leftPanel.WrittenBrightnessLevels);
+            AssertRecordingKept();
+        }
+
+        [Fact]
+        public async Task Undim_RefusedWrites_TriesThreeTimesAndKeepsTheRecording()
+        {
+            Remember(Left, 80);
+            _leftPanel.RefusesWrites = true;
+
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Equal(3, _leftPanel.WrittenBrightnessLevels.Count);
+            AssertRecordingKept();
+        }
+
+        [Fact]
+        public async Task Undim_EveryTryFails_DisposesEachChannelItOpened()
+        {
+            Remember(Left, 80);
+            _leftPanel.RefusesWrites = true;
+
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Equal(3, _bus.OpenRequests.Count);
+            Assert.Equal(3, _leftPanel.Disposals);
+        }
+
+        [Fact]
+        public async Task Undim_UnreachablePanel_GivesUpAfterOneTryAndKeepsTheRecording()
+        {
+            const string offline = "PNP-OFFLINE";
+            Attach(Monitor(offline, @"\\.\DISPLAY7", PanelRange));
+            Remember(offline, 80);
+
+            await _sut.UndimMonitorAsync(offline);
+
+            Assert.Single(_bus.OpenRequests);
+            AssertRecordingKept();
+        }
+
+        [Fact]
+        public async Task Undim_MonitorThatWasNeverDimmed_LeavesTheBusAlone()
+        {
+            await _sut.UndimMonitorAsync(Left);
+
+            Assert.Empty(_bus.OpenRequests);
         }
 
         [Theory]
-        [InlineData(null)]
+        [InlineData((string?)null)]
         [InlineData("")]
-        public async Task UndimMonitorAsync_WhenHardwareIdIsMissing_OpensNoChannel(string? hardwareId)
+        public async Task Undim_WithoutHardwareId_LeavesTheBusAlone(string? hardwareId)
         {
-            // Act
-            await _service.UndimMonitorAsync(hardwareId!);
+            await _sut.UndimMonitorAsync(hardwareId!);
 
-            // Assert
-            Assert.Empty(_ddcCiAccess.OpenAttempts);
+            Assert.Empty(_bus.OpenRequests);
+        }
+
+        // ----- Schedule and bookkeeping -----
+
+        [Theory]
+        [InlineData((string?)null)]
+        [InlineData("")]
+        public async Task Schedule_WithoutHardwareId_ReportsFailureWithoutTouchingTheBus(string? hardwareId)
+        {
+            bool applied = await _sut.SetScheduledBrightnessAsync(hardwareId!, 40);
+
+            Assert.False(applied);
+            Assert.Empty(_bus.OpenRequests);
         }
 
         [Fact]
-        public async Task UndimMonitorAsync_WhenTheReadBackIsUnanswered_RetriesAndKeepsTheRecording()
+        public async Task Schedule_UnreachablePanel_ReportsFailure()
         {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            _panel.ReadsFail = true;
+            Attach(Monitor("PNP-OFFLINE", @"\\.\DISPLAY7", PanelRange));
 
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
-
-            // Assert
-            Assert.Equal(new[] { 80u, 80u, 80u }, _panel.WrittenBrightnessLevels);
-            _store.Verify(s => s.RemoveOriginal(It.IsAny<string>()), Times.Never);
+            Assert.False(await _sut.SetScheduledBrightnessAsync("PNP-OFFLINE", 40));
         }
 
         [Fact]
-        public async Task UndimMonitorAsync_WhenMonitorHasNoRecording_OpensNoChannel()
+        public void GetDimmedMonitors_PassesOnWhatTheStoreHolds()
         {
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
+            var held = new Dictionary<string, uint> { [Left] = 80 };
+            _originals.Setup(o => o.GetAll()).Returns(held);
 
-            // Assert
-            Assert.Empty(_ddcCiAccess.OpenAttempts);
+            Assert.Equal(held, _sut.GetDimmedMonitors());
+        }
+
+        // ----- One operation per monitor at a time -----
+
+        [Fact]
+        public async Task SecondDimOfTheSameMonitor_WaitsUntilTheFirstIsDone()
+        {
+            using var unpark = new ManualResetEventSlim();
+            var firstInside = BlockInsideLeftChannel(unpark);
+            var first = Task.Run(() => _sut.DimMonitorAsync(Left, 15));
+            await firstInside;
+
+            var second = Task.Run(() => _sut.DimMonitorAsync(Left, 15));
+
+            Assert.True(await StillWaiting(second));
+            Assert.Single(_bus.OpenRequests);
+
+            unpark.Set();
+            await Task.WhenAll(first, second);
         }
 
         [Fact]
-        public async Task UndimMonitorAsync_WhenTheRestoreIsConfirmed_WritesTheRawOriginalAndClearsTheRecording()
+        public async Task UndimOfTheSameMonitor_WaitsForTheRunningDim()
         {
-            // Arrange
-            SetupRecording(HardwareId, 80);
+            Remember(Left, 80);
+            using var unpark = new ManualResetEventSlim();
+            var dimInside = BlockInsideLeftChannel(unpark);
+            var dim = Task.Run(() => _sut.DimMonitorAsync(Left, 15));
+            await dimInside;
 
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
+            var undim = Task.Run(() => _sut.UndimMonitorAsync(Left));
 
-            // Assert
-            Assert.Equal(new[] { 80u }, _panel.WrittenBrightnessLevels);
-            _store.Verify(s => s.RemoveOriginal(HardwareId), Times.Once);
+            Assert.True(await StillWaiting(undim));
+            Assert.Single(_bus.OpenRequests);
+
+            unpark.Set();
+            await Task.WhenAll(dim, undim);
+            Assert.Equal(new[] { 38u, 80u }, _leftPanel.WrittenBrightnessLevels);
         }
 
         [Fact]
-        public async Task UndimMonitorAsync_WhenTheReadBackIsWithinTolerance_ConfirmsTheRestore()
+        public async Task DimOfAnotherMonitor_DoesNotWaitForTheBusyOne()
         {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            _panel.ReadBackOverride = 82;
+            using var unpark = new ManualResetEventSlim();
+            var leftInside = BlockInsideLeftChannel(unpark);
+            var left = Task.Run(() => _sut.DimMonitorAsync(Left, 15));
+            await leftInside;
 
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
+            await _sut.DimMonitorAsync(Right, 15);
 
-            // Assert
-            _store.Verify(s => s.RemoveOriginal(HardwareId), Times.Once);
+            Assert.Equal(new[] { 38u }, _rightPanel.WrittenBrightnessLevels);
+            unpark.Set();
+            await left;
         }
 
-        [Fact]
-        public async Task UndimMonitorAsync_WhenTheReadBackIsOutsideTolerance_RetriesAndKeepsTheRecording()
+        // ----- Helpers -----
+
+        private static MonitorInfo Monitor(string id, string device, uint range) => new()
         {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            _panel.ReadBackOverride = 83;
+            HardwareId = id,
+            DeviceName = device,
+            Capabilities = new DdcCiCapabilities(true, range),
+        };
 
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
+        private void Attach(params MonitorInfo[] monitors) =>
+            _attached.Setup(m => m.GetCurrentMonitorsAsync()).ReturnsAsync(monitors);
 
-            // Assert
-            Assert.Equal(3, _panel.WrittenBrightnessLevels.Count);
-            _store.Verify(s => s.RemoveOriginal(It.IsAny<string>()), Times.Never);
-        }
+        private void Remember(string hardwareId, uint level) =>
+            _originals.Setup(o => o.TryGetOriginal(hardwareId, out level)).Returns(true);
 
-        [Fact]
-        public async Task UndimMonitorAsync_WhenTheWriteIsRejected_RetriesThreeTimesAndKeepsTheRecording()
+        // True when the task has not finished after a short grace period, i.e. it is queued behind something.
+        private static async Task<bool> StillWaiting(Task operation) =>
+            await Task.WhenAny(operation, Task.Delay(TimeSpan.FromMilliseconds(100))) != operation;
+
+        private void AssertRecordingKept() =>
+            _originals.Verify(o => o.RemoveOriginal(It.IsAny<string>()), Times.Never);
+
+        // Parks the first open of the left panel until unpark is set, holding that monitor's lock meanwhile.
+        // The returned task completes once the operation is parked.
+        private Task BlockInsideLeftChannel(ManualResetEventSlim unpark)
         {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            _panel.WritesAreRejected = true;
-
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
-
-            // Assert
-            Assert.Equal(3, _panel.WrittenBrightnessLevels.Count);
-            _store.Verify(s => s.RemoveOriginal(It.IsAny<string>()), Times.Never);
-        }
-
-        [Fact]
-        public async Task UndimMonitorAsync_WhenMonitorIsUnreachable_KeepsTheRecordingWithoutRetrying()
-        {
-            // Arrange
-            const string unreachableHardwareId = "MON-OFF";
-            SetupMonitors(CreateMonitor(unreachableHardwareId, @"\\.\DISPLAY9", 255));
-            SetupRecording(unreachableHardwareId, 80);
-
-            // Act
-            await _service.UndimMonitorAsync(unreachableHardwareId);
-
-            // Assert
-            Assert.Single(_ddcCiAccess.OpenAttempts);
-            _store.Verify(s => s.RemoveOriginal(It.IsAny<string>()), Times.Never);
-        }
-
-        [Fact]
-        public async Task UndimMonitorAsync_WhenEveryAttemptFails_DisposesEveryChannelItOpened()
-        {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            _panel.WritesAreRejected = true;
-
-            // Act
-            await _service.UndimMonitorAsync(HardwareId);
-
-            // Assert
-            Assert.Equal(3, _ddcCiAccess.OpenAttempts.Count);
-            Assert.Equal(3, _panel.DisposeCount);
-        }
-
-        [Fact]
-        public void GetDimmedMonitors_WhenCalled_ReturnsWhatTheStoreHolds()
-        {
-            // Arrange
-            var recordings = new Dictionary<string, uint> { [HardwareId] = 80 };
-            _store.Setup(s => s.GetAll()).Returns(recordings);
-
-            // Act
-            var dimmed = _service.GetDimmedMonitors();
-
-            // Assert
-            Assert.Equal(recordings, dimmed);
-        }
-
-        [Fact]
-        public async Task DimMonitorAsync_WhenTheSameMonitorIsBusy_WaitsForTheGate()
-        {
-            // Arrange
-            using var release = new ManualResetEventSlim();
-            var reachedPanel = HoldTheFirstChannelOpen(release);
-            var first = Task.Run(() => _service.DimMonitorAsync(HardwareId, 15));
-            await reachedPanel.Task;
-
-            // Act
-            var second = Task.Run(() => _service.DimMonitorAsync(HardwareId, 15));
-            await Task.Delay(100);
-
-            // Assert
-            Assert.Single(_ddcCiAccess.OpenAttempts);
-            Assert.False(second.IsCompleted);
-            release.Set();
-            await first;
-            await second;
-        }
-
-        [Fact]
-        public async Task UndimMonitorAsync_WhenADimIsInFlightOnTheSameMonitor_WaitsForTheGate()
-        {
-            // Arrange
-            SetupRecording(HardwareId, 80);
-            using var release = new ManualResetEventSlim();
-            var reachedPanel = HoldTheFirstChannelOpen(release);
-            var dim = Task.Run(() => _service.DimMonitorAsync(HardwareId, 15));
-            await reachedPanel.Task;
-
-            // Act
-            var undim = Task.Run(() => _service.UndimMonitorAsync(HardwareId));
-            await Task.Delay(100);
-
-            // Assert
-            Assert.Single(_ddcCiAccess.OpenAttempts);
-            Assert.False(undim.IsCompleted);
-            release.Set();
-            await dim;
-            await undim;
-            Assert.Equal(new[] { 38u, 80u }, _panel.WrittenBrightnessLevels);
-        }
-
-        [Fact]
-        public async Task DimMonitorAsync_WhenADifferentMonitorIsBusy_RunsWithoutWaiting()
-        {
-            // Arrange
-            using var release = new ManualResetEventSlim();
-            var reachedPanel = HoldTheFirstChannelOpen(release);
-            var first = Task.Run(() => _service.DimMonitorAsync(HardwareId, 15));
-            await reachedPanel.Task;
-
-            // Act
-            await _service.DimMonitorAsync(SecondHardwareId, 15);
-
-            // Assert
-            Assert.Equal(new[] { 38u }, _secondPanel.WrittenBrightnessLevels);
-            release.Set();
-            await first;
-        }
-
-        /// <summary>
-        /// Builds an attached, DDC/CI-capable monitor.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID the service keys everything on.</param>
-        /// <param name="deviceName">The device name the channel is opened against.</param>
-        /// <param name="maxBrightness">The monitor's highest accepted brightness value.</param>
-        /// <returns>The monitor.</returns>
-        private static MonitorInfo CreateMonitor(string hardwareId, string deviceName, uint maxBrightness)
-        {
-            return new MonitorInfo
+            var parked = new TaskCompletionSource();
+            _bus.WhileOpening = device =>
             {
-                HardwareId = hardwareId,
-                DeviceName = deviceName,
-                Capabilities = new DdcCiCapabilities(true, maxBrightness)
-            };
-        }
+                if (device != LeftDevice) return;
 
-        /// <summary>
-        /// Makes GetCurrentMonitorsAsync() return the supplied monitors, replacing any earlier list.
-        /// </summary>
-        /// <param name="monitors">The monitors to report as attached.</param>
-        private void SetupMonitors(params MonitorInfo[] monitors)
-        {
-            _monitorManager.Setup(m => m.GetCurrentMonitorsAsync()).ReturnsAsync(monitors);
-        }
-
-        /// <summary>
-        /// Makes the store report a recorded pre-dim brightness for the given monitor.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="brightness">The raw brightness value to report as recorded.</param>
-        private void SetupRecording(string hardwareId, uint brightness)
-        {
-            var recorded = brightness;
-            _store.Setup(s => s.TryGetOriginal(hardwareId, out recorded)).Returns(true);
-        }
-
-        /// <summary>
-        /// Blocks inside the primary monitor's channel until the event is set, so its gate stays held
-        /// while the test starts a second operation.
-        /// </summary>
-        /// <param name="release">The event that lets the held operation finish.</param>
-        /// <returns>A task that completes once the operation is inside the channel.</returns>
-        private TaskCompletionSource HoldTheFirstChannelOpen(ManualResetEventSlim release)
-        {
-            var reachedPanel = new TaskCompletionSource();
-            _ddcCiAccess.OnOpen = deviceName =>
-            {
-                if (deviceName != DeviceName) return;
-
-                reachedPanel.TrySetResult();
-                release.Wait();
+                parked.TrySetResult();
+                unpark.Wait();
             };
 
-            return reachedPanel;
+            return parked.Task;
         }
     }
 }

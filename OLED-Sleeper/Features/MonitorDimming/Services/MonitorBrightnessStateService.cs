@@ -4,25 +4,15 @@ using OLED_Sleeper.Storage.Interfaces;
 namespace OLED_Sleeper.Features.MonitorDimming.Services
 {
     /// <summary>
-    /// Keeps the brightness state in <c>brightness_state.json</c> under the application's data directory.
+    /// Stores the pre-dim brightness map as JSON in the app's data folder.
     /// </summary>
-    public class MonitorBrightnessStateService : IMonitorBrightnessStateService
+    public sealed class MonitorBrightnessStateService(IAppDataFileStore fileStore) : IMonitorBrightnessStateService
     {
-        /// <summary>The name of the file the state is kept in.</summary>
-        private const string StateFileName = "brightness_state.json";
+        // Existing installations already have this file; renaming it would lose their recordings.
+        private const string FileName = "brightness_state.json";
 
-        private readonly IAppDataFileStore _fileStore;
+        public Dictionary<string, uint> LoadState() => fileStore.Read<Dictionary<string, uint>>(FileName) ?? [];
 
-        public MonitorBrightnessStateService(IAppDataFileStore fileStore)
-        {
-            _fileStore = fileStore;
-        }
-
-        /// <inheritdoc />
-        public Dictionary<string, uint> LoadState()
-            => _fileStore.Read<Dictionary<string, uint>>(StateFileName) ?? new Dictionary<string, uint>();
-
-        /// <inheritdoc />
-        public void SaveState(Dictionary<string, uint> state) => _fileStore.TryWrite(StateFileName, state);
+        public void SaveState(Dictionary<string, uint> snapshot) => fileStore.TryWrite(FileName, snapshot);
     }
 }

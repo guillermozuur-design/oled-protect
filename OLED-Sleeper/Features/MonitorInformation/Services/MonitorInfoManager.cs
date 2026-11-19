@@ -5,125 +5,96 @@ using Serilog;
 namespace OLED_Sleeper.Features.MonitorInformation.Services
 {
     /// <summary>
-    /// Manages monitor information, including caching and enrichment with DDC/CI capabilities.
+    /// Caches the probed monitor list and makes sure concurrent callers share one scan instead of each
+    /// hammering the DDC/CI bus. Thread-safe.
     /// </summary>
-    public class MonitorInfoManager : IMonitorInfoManager
+    public sealed class MonitorInfoManager : IMonitorInfoManager
     {
-        #region Fields
+        private readonly IMonitorInfoProvider _provider;
+        private readonly object _gate = new();
 
-        private readonly IMonitorInfoProvider _monitorInfoProvider;
-        private readonly object _lock = new();
-        private Task<IReadOnlyList<MonitorInfo>>? _cachedScan;
-        private Task<IReadOnlyList<MonitorInfo>>? _inFlightRefresh;
+        // The scan GetCurrentMonitorsAsync hands out. Null before the first scan and after a failed one.
+        private Task<IReadOnlyList<MonitorInfo>>? _latestScan;
 
-        #endregion Fields
+        // The scan a refresh started; a second refresh joins it while it is still running.
+        private Task<IReadOnlyList<MonitorInfo>>? _pendingRefresh;
 
-        #region Constructor
+        public MonitorInfoManager(IMonitorInfoProvider monitorInfoProvider) => _provider = monitorInfoProvider;
 
-        public MonitorInfoManager(IMonitorInfoProvider monitorInfoProvider)
-        {
-            _monitorInfoProvider = monitorInfoProvider;
-        }
-
-        #endregion Constructor
-
-        #region Public Methods
-
-        /// <inheritdoc />
         public Task<IReadOnlyList<MonitorInfo>> GetCurrentMonitorsAsync()
         {
-            lock (_lock)
+            lock (_gate)
             {
-                return _cachedScan ??= StartScan();
+                _latestScan ??= BeginScan();
+                return _latestScan;
             }
         }
 
-        /// <inheritdoc />
-        /// <remarks>
-        /// Callers arriving while a scan is running share that scan rather than starting another.
-        /// </remarks>
         public Task<IReadOnlyList<MonitorInfo>> RefreshMonitorsAsync()
         {
-            lock (_lock)
+            lock (_gate)
             {
-                if (_inFlightRefresh is { IsCompleted: false })
+                if (_pendingRefresh is { IsCompleted: false } running)
                 {
-                    Log.Debug("Refresh requested while a scan is already running. Reusing the in-flight scan.");
-                    return _inFlightRefresh;
+                    Log.Debug("A monitor rescan is already under way; this refresh request joins it.");
+                    return running;
                 }
 
-                Log.Information("Refresh requested. Re-scanning monitors.");
-                return _cachedScan = _inFlightRefresh = StartScan();
+                Log.Information("Rescanning the attached monitors on request.");
+                _pendingRefresh = BeginScan();
+                _latestScan = _pendingRefresh;
+                return _pendingRefresh;
             }
         }
 
-        /// <inheritdoc />
-        public List<MonitorInfo> GetLatestMonitorsBasicInfo()
-        {
-            return _monitorInfoProvider.GetAllMonitorsBasicInfo();
-        }
+        public List<MonitorInfo> GetLatestMonitorsBasicInfo() => _provider.GetAllMonitorsBasicInfo();
 
-        /// <inheritdoc />
-        /// <remarks>
-        /// A monitor whose hardware ID was not resolved is removed from the list.
-        /// </remarks>
-        public void EnrichMonitorInfoList(List<MonitorInfo>? monitors)
+        public void EnrichMonitorInfoList(List<MonitorInfo>? readings)
         {
-            if (monitors == null) return;
-            for (int index = monitors.Count - 1; index >= 0; index--)
+            if (readings is null) return;
+
+            // Everything downstream is keyed on the hardware ID, so a monitor without one cannot be managed.
+            readings.RemoveAll(IsUnidentified);
+
+            foreach (var monitor in readings)
             {
-                var monitor = monitors[index];
-
-                if (string.IsNullOrEmpty(monitor.HardwareId))
-                {
-                    Log.Warning("No hardware ID resolved for {DeviceName}. The monitor is dropped and will not be managed.",
-                        monitor.DeviceName);
-                    monitors.RemoveAt(index);
-                    continue;
-                }
-
-                monitor.Capabilities = _monitorInfoProvider.GetDdcCiCapabilities(monitor);
+                monitor.Capabilities = _provider.GetDdcCiCapabilities(monitor);
             }
         }
 
-        #endregion Public Methods
-
-        #region Private Methods
-
-        /// <summary>
-        /// Starts a background scan of the system's monitors. Must be called while holding <see cref="_lock"/>.
-        /// A faulted scan is dropped from the cache so the next caller retries.
-        /// </summary>
-        private Task<IReadOnlyList<MonitorInfo>> StartScan()
+        private static bool IsUnidentified(MonitorInfo monitor)
         {
-            var scan = Task.Run<IReadOnlyList<MonitorInfo>>(() =>
-            {
-                var monitors = _monitorInfoProvider.GetAllMonitorsBasicInfo();
-                EnrichMonitorInfoList(monitors);
-                return monitors;
-            });
+            if (!string.IsNullOrEmpty(monitor.HardwareId)) return false;
 
-            _ = scan.ContinueWith(
-                faulted =>
-                {
-                    Log.Error(faulted.Exception?.GetBaseException(),
-                        "Monitor enumeration failed. Dropping the cached scan so the next request retries.");
+            Log.Warning("Monitor {DeviceName} has no hardware ID and is left out; it will not be managed.", monitor.DeviceName);
+            return true;
+        }
 
-                    lock (_lock)
-                    {
-                        if (ReferenceEquals(_cachedScan, faulted))
-                        {
-                            _cachedScan = null;
-                        }
-                    }
-                },
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted,
-                TaskScheduler.Default);
-
+        // Must run under _gate, so the caller has stored the task before a failure handler can look for it.
+        private Task<IReadOnlyList<MonitorInfo>> BeginScan()
+        {
+            Task<IReadOnlyList<MonitorInfo>> scan = Task.Run(ScanAndProbe);
+            _ = scan.ContinueWith(ForgetFailedScan, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             return scan;
         }
 
-        #endregion Private Methods
+        private IReadOnlyList<MonitorInfo> ScanAndProbe()
+        {
+            var readings = _provider.GetAllMonitorsBasicInfo();
+            EnrichMonitorInfoList(readings);
+            return readings;
+        }
+
+        // A failed scan must not stay cached, or every later caller would get the same exception.
+        private void ForgetFailedScan(Task<IReadOnlyList<MonitorInfo>> failed)
+        {
+            Log.Error(failed.Exception?.GetBaseException(), "Scanning the monitors failed; the next request will scan again.");
+
+            lock (_gate)
+            {
+                if (ReferenceEquals(_latestScan, failed)) _latestScan = null;
+            }
+        }
     }
 }

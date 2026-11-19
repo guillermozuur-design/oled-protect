@@ -1,15 +1,14 @@
 namespace OLED_Sleeper.Features.MonitorDimming.Services.Interfaces
 {
     /// <summary>
-    /// Opens DDC/CI channels to attached monitors.
+    /// Entry point to the DDC/CI bus; the seam that lets the dimming logic run against fakes in tests.
     /// </summary>
     public interface IDdcCiAccess
     {
         /// <summary>
-        /// Opens a channel to the monitor with the given device name.
+        /// Opens a channel to the panel shown as <paramref name="gdiDeviceName"/> (<c>\\.\DISPLAYn</c>).
+        /// Null when that panel cannot be reached; otherwise the caller owns and disposes the channel.
         /// </summary>
-        /// <param name="deviceName">The display device name, such as <c>\\.\DISPLAY1</c>.</param>
-        /// <returns>The channel, or null when the monitor could not be reached. The caller disposes it.</returns>
-        IDdcCiSession? OpenSession(string deviceName);
+        IDdcCiSession? OpenSession(string gdiDeviceName);
     }
 }
