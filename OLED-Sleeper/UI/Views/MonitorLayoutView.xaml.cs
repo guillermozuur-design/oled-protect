@@ -5,29 +5,19 @@ using System.Windows.Controls;
 namespace OLED_Sleeper.UI.Views
 {
     /// <summary>
-    /// Interaction logic for MonitorLayoutView.
-    /// This UserControl displays the layout of all monitors and handles resizing events
-    /// to keep the monitor layout in sync with the available space.
+    /// The screen overview. The tile positions depend on the space available, so every resize
+    /// asks the view model for a fresh layout.
     /// </summary>
     public partial class MonitorLayoutView : UserControl
     {
-        public MonitorLayoutView()
-        {
-            InitializeComponent();
-        }
+        public MonitorLayoutView() => InitializeComponent();
 
-        /// <summary>
-        /// Handles the SizeChanged event for the UserControl.
-        /// Notifies the MainViewModel to recalculate the monitor layout when the control is resized.
-        /// </summary>
-        /// <param name="sender">The event sender.</param>
-        /// <param name="e">The size changed event arguments.</param>
-        private void UserControl_SizeChanged(object sender, SizeChangedEventArgs e)
+        private void OnPanelResized(object sender, SizeChangedEventArgs e)
         {
-            if (DataContext is MainViewModel viewModel && e.NewSize.Height > 0)
-            {
-                viewModel.RecalculateLayout(e.NewSize.Width, e.NewSize.Height);
-            }
+            // A collapsed panel reports zero height; there is nothing to lay out then.
+            if (e.NewSize.Height <= 0 || DataContext is not MainViewModel main) return;
+
+            main.RecalculateLayout(e.NewSize.Width, e.NewSize.Height);
         }
     }
 }

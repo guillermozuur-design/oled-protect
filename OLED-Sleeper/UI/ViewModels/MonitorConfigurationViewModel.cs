@@ -2,622 +2,371 @@ using OLED_Sleeper.Features.BrightnessSchedule.Services;
 using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.UserSettings.Models;
-using OLED_Sleeper.UI.Commands;
 using OLED_Sleeper.UI.Helpers;
 using OLED_Sleeper.UI.Models;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Windows.Input;
+using System.Runtime.CompilerServices;
 
 namespace OLED_Sleeper.UI.ViewModels
 {
     /// <summary>
-    /// ViewModel for configuring an individual monitor's behavior and settings.
-    /// Handles state management, validation, and dirty tracking for the monitor configuration UI.
+    /// The editable settings of one screen, as shown in the per-screen panel. Remembers the last
+    /// saved values so it can report unsaved edits and roll them back.
     /// </summary>
     public class MonitorConfigurationViewModel : ViewModelBase, IDataErrorInfo
     {
-        /// <summary>
-        /// The underlying monitor information model.
-        /// </summary>
-        private readonly MonitorInfo _monitorInfo;
+        private const string NoDimmingPrefix = "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n";
 
-        #region Properties
+        // Slider values come back as doubles with float noise; smaller differences are not edits.
+        private const double DimTolerance = 0.0001;
 
-        /// <summary>
-        /// The display title for the monitor, including primary indicator if applicable. A duplicated surface
-        /// is titled the way Windows titles it, such as <c>Monitor 1|2</c>.
-        /// </summary>
-        public string MonitorTitle => MonitorTitleFormatter.Format(_monitorInfo);
+        private static readonly string[] ManagedDependents =
+            [nameof(IdleValueError), nameof(ActiveConditionsError), nameof(BehaviorError), nameof(MouseStillError)];
 
-        public string IdleValueError => this["IdleValue"];
+        private static readonly string[] BehaviorDependents =
+            [nameof(IsDimSliderEnabled), nameof(IsLowerBrightnessOptionEnabled), nameof(LowerBrightnessTooltip), nameof(BehaviorError)];
 
-        public string ActiveConditionsError => this["IsActiveOnInput"];
+        private static readonly string[] IdleDependents = [nameof(IdleValueError)];
 
-        // --- IsManaged ---
-        private bool _isManaged;
+        private static readonly string[] InputDependents = [nameof(ActiveConditionsError)];
 
-        private bool _initialIsManaged;
+        private static readonly string[] LocalWakeDependents =
+            [nameof(MouseStillError), nameof(IsStillLimitApplicable), nameof(ActiveConditionsError)];
 
-        /// <summary>
-        /// Gets or sets whether this monitor is managed by the application.
-        /// </summary>
+        private static readonly string[] StillLimitDependents = [nameof(MouseStillError)];
+
+        private static readonly string[] NoDependents = [];
+
+        private static readonly IReadOnlyList<BrightnessScheduleEntry> NoEntries = Array.Empty<BrightnessScheduleEntry>();
+
+        private readonly MonitorInfo _monitor;
+
+        private bool _managed;
+        private MonitorBehaviorType _mode;
+        private double _dim;
+        private bool _blackoutLowersBrightness;
+        private int? _idleAmount;
+        private TimeUnit _idleUnit;
+        private bool _wakeOnInput;
+        private bool _wakeOnMouse;
+        private bool _wakeOnFocusedWindow;
+        private bool _useStillLimit;
+        private int? _stillMinutes;
+
+        // The per-screen brightness schedule is no longer edited here (one shared schedule lives in the
+        // Algemeen tab), but older settings files still carry it, so it is passed through untouched.
+        private bool _useSchedule;
+        private IReadOnlyList<BrightnessScheduleEntry> _schedule = NoEntries;
+
+        private State _saved;
+        private bool _isDirty;
+
+        public MonitorConfigurationViewModel(MonitorInfo monitorInfo)
+        {
+            _monitor = monitorInfo;
+            _saved = StateFrom(new MonitorSettings());
+            Load(_saved);
+            RecomputeDirty();
+        }
+
+        public string MonitorTitle => MonitorTitleFormatter.Format(_monitor);
+
+        /// <summary>Dimming needs DDC/CI; without it only the overlay-based behaviours make sense.</summary>
+        public bool IsDimBehaviorEnabled => _monitor.Capabilities?.IsSupported == true;
+
+        public IReadOnlyList<TimeUnit> TimeUnits { get; } = Enum.GetValues<TimeUnit>();
+
         public bool IsManaged
         {
-            get => _isManaged;
-            set
-            {
-                _isManaged = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IdleValueError));
-                OnPropertyChanged(nameof(ActiveConditionsError));
-                OnPropertyChanged(nameof(BehaviorError)); // Ensure all errors update
-                UpdateDirtyState();
-            }
+            get => _managed;
+            set => Change(ref _managed, value, ManagedDependents);
         }
 
-        /// <summary>
-        /// Gets a value indicating whether the "Dim" behavior option should be enabled.
-        /// </summary>
-        public bool IsDimBehaviorEnabled => _monitorInfo.Capabilities?.IsSupported == true;
-
-        /// <summary>
-        /// Gets the tooltip for the entire Behavior section, changing based on DDC/CI support.
-        /// </summary>
-        public string BehaviorSectionTooltip
-        {
-            get
-            {
-                string baseTooltip = "Wat dit scherm doet als de wachttijd voorbij is.\n\n" +
-                                     "• Zwart: het scherm wordt helemaal zwart (OLED-pixels uit).\n" +
-                                     "• Dimmen: de helderheid van het scherm zelf gaat omlaag (DDC/CI).\n" +
-                                     "• Sterren: de echte sterrenhemel als screensaver.\n" +
-                                     "• Vliegtuigen: een donkere kaart met de echte vliegtuigen erboven.";
-
-                if (_monitorInfo.Capabilities?.IsSupported != true)
-                {
-                    baseTooltip = "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n" + baseTooltip;
-                }
-
-                return baseTooltip;
-            }
-        }
-
-        // --- Behavior ---
-        private MonitorBehaviorType _behavior;
-
-        private MonitorBehaviorType _initialBehavior;
-
-        /// <summary>
-        /// Gets or sets the behavior for this monitor (e.g., Dim, Blackout).
-        /// </summary>
         public MonitorBehaviorType Behavior
         {
-            get => _behavior;
+            get => _mode;
             set
             {
-                _behavior = value;
-                if (_behavior == MonitorBehaviorType.Blackout) { DimLevel = 0; }
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IsDimSliderEnabled));
-                OnPropertyChanged(nameof(IsLowerBrightnessOptionEnabled));
-                OnPropertyChanged(nameof(LowerBrightnessTooltip));
-                OnPropertyChanged(nameof(BehaviorError));
-                UpdateDirtyState();
+                var previous = _mode;
+                Change(ref _mode, value, BehaviorDependents);
+                // A black screen has no brightness to speak of; reset the slider so it does not suggest one.
+                if (value == MonitorBehaviorType.Blackout && previous != value) DimLevel = 0;
             }
         }
 
-        /// <summary>
-        /// Returns an error message if the behavior is invalid.
-        /// </summary>
-        public string BehaviorError => this["Behavior"];
-
-        // --- DimLevel ---
-        private double _dimLevel;
-
-        private double _initialDimLevel;
-
-        /// <summary>
-        /// Gets or sets the dimming level for the monitor (0-100).
-        /// </summary>
         public double DimLevel
         {
-            get => _dimLevel;
-            set { _dimLevel = value; OnPropertyChanged(); UpdateDirtyState(); }
+            get => _dim;
+            set => Change(ref _dim, value, NoDependents);
         }
 
-        /// <summary>
-        /// Returns true if the dim slider should be enabled (only for Dim behavior).
-        /// </summary>
-        public bool IsDimSliderEnabled => Behavior == MonitorBehaviorType.Dim;
-
-        // --- LowerBrightnessOnBlackout ---
-        private bool _lowerBrightnessOnBlackout;
-
-        private bool _initialLowerBrightnessOnBlackout;
-
-        /// <summary>
-        /// Gets or sets whether a blackout also sets this monitor's hardware brightness to zero.
-        /// Always false on a monitor without DDC/CI support.
-        /// </summary>
+        /// <summary>Also drives the screen's own brightness to zero on blackout (DDC/CI screens only).</summary>
         public bool LowerBrightnessOnBlackout
         {
-            get => _lowerBrightnessOnBlackout;
-            set
-            {
-                _lowerBrightnessOnBlackout = value;
-                OnPropertyChanged();
-                UpdateDirtyState();
-            }
+            get => _blackoutLowersBrightness;
+            set => Change(ref _blackoutLowersBrightness, value, NoDependents);
         }
 
-        /// <summary>
-        /// Returns true if the lower-brightness option should be enabled (only for Blackout behavior on a monitor that supports DDC/CI).
-        /// </summary>
-        public bool IsLowerBrightnessOptionEnabled => Behavior == MonitorBehaviorType.Blackout && IsDimBehaviorEnabled;
-
-        /// <summary>
-        /// Gets the tooltip for the lower-brightness option, prefixed with the reason when the option is disabled.
-        /// </summary>
-        public string LowerBrightnessTooltip
-        {
-            get
-            {
-                string baseTooltip = "Zet ook de helderheid van het scherm zelf op 0,\n" +
-                                     "naast het zwarte beeld.\n\n" +
-                                     "Vooral nuttig bij niet-OLED-schermen, waar de\n" +
-                                     "achtergrondverlichting anders blijft branden.";
-
-                if (!IsDimBehaviorEnabled)
-                    return "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n" + baseTooltip;
-
-                if (Behavior != MonitorBehaviorType.Blackout)
-                    return "ALLEEN BIJ 'ZWART'.\n\n" + baseTooltip;
-
-                return baseTooltip;
-            }
-        }
-
-        // --- Idle Timer ---
-        /// <summary>
-        /// List of available time units for idle timer.
-        /// </summary>
-        public List<TimeUnit> TimeUnits { get; } = Enum.GetValues(typeof(TimeUnit)).Cast<TimeUnit>().ToList();
-
-        private int? _idleValue;
-        private int? _initialIdleValue;
-
-        /// <summary>
-        /// Gets or sets the idle time value before the monitor behavior triggers.
-        /// </summary>
         public int? IdleValue
         {
-            get => _idleValue;
-            set
-            {
-                _idleValue = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(IdleValueError));
-                UpdateDirtyState();
-            }
+            get => _idleAmount;
+            set => Change(ref _idleAmount, value, IdleDependents);
         }
 
-        private TimeUnit _selectedTimeUnit;
-        private TimeUnit _initialSelectedTimeUnit;
-
-        /// <summary>
-        /// Gets or sets the selected time unit for the idle timer.
-        /// </summary>
         public TimeUnit SelectedTimeUnit
         {
-            get => _selectedTimeUnit;
-            set { _selectedTimeUnit = value; OnPropertyChanged(); UpdateDirtyState(); }
+            get => _idleUnit;
+            set => Change(ref _idleUnit, value, NoDependents);
         }
 
-        // --- Active Conditions ---
-        private bool _isActiveOnInput;
-
-        private bool _initialIsActiveOnInput;
-
-        /// <summary>
-        /// Gets or sets whether keyboard/mouse input keeps the monitor active.
-        /// </summary>
         public bool IsActiveOnInput
         {
-            get => _isActiveOnInput;
-            set
-            {
-                _isActiveOnInput = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(ActiveConditionsError));
-                UpdateDirtyState();
-            }
+            get => _wakeOnInput;
+            set => Change(ref _wakeOnInput, value, InputDependents);
         }
 
-        private bool _isActiveOnMousePosition;
-        private bool _initialIsActiveOnMousePosition;
-
-        /// <summary>
-        /// Gets or sets whether mouse position keeps the monitor active.
-        /// </summary>
         public bool IsActiveOnMousePosition
         {
-            get => _isActiveOnMousePosition;
-            set
-            {
-                _isActiveOnMousePosition = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(MouseStillError));
-                OnPropertyChanged(nameof(IsStillLimitApplicable));
-                OnPropertyChanged(nameof(ActiveConditionsError));
-                UpdateDirtyState();
-            }
+            get => _wakeOnMouse;
+            set => Change(ref _wakeOnMouse, value, LocalWakeDependents);
         }
 
-        private bool _isActiveOnActiveWindow;
-        private bool _initialIsActiveOnActiveWindow;
-
-        /// <summary>
-        /// Gets or sets whether the active window keeps the monitor active.
-        /// </summary>
         public bool IsActiveOnActiveWindow
         {
-            get => _isActiveOnActiveWindow;
-            set
-            {
-                _isActiveOnActiveWindow = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(MouseStillError));
-                OnPropertyChanged(nameof(IsStillLimitApplicable));
-                OnPropertyChanged(nameof(ActiveConditionsError));
-                UpdateDirtyState();
-            }
+            get => _wakeOnFocusedWindow;
+            set => Change(ref _wakeOnFocusedWindow, value, LocalWakeDependents);
         }
-
-        // --- Mouse still limit ---
-        private bool _useMouseStillLimit;
-        private bool _initialUseMouseStillLimit;
-        private int? _mouseStillMinutes;
-        private int? _initialMouseStillMinutes;
 
         public bool UseMouseStillLimit
         {
-            get => _useMouseStillLimit;
-            set { _useMouseStillLimit = value; OnPropertyChanged(); OnPropertyChanged(nameof(MouseStillError)); UpdateDirtyState(); }
+            get => _useStillLimit;
+            set => Change(ref _useStillLimit, value, StillLimitDependents);
         }
 
         public int? MouseStillMinutes
         {
-            get => _mouseStillMinutes;
-            set { _mouseStillMinutes = value; OnPropertyChanged(); OnPropertyChanged(nameof(MouseStillError)); UpdateDirtyState(); }
+            get => _stillMinutes;
+            set => Change(ref _stillMinutes, value, StillLimitDependents);
         }
 
-        public string MouseStillError => ValidateMouseStill() ?? string.Empty;
+        public bool IsDimSliderEnabled => _mode is MonitorBehaviorType.Dim;
 
-        /// <summary>The limit only means something when the mouse or focused-window condition is on.</summary>
+        public bool IsLowerBrightnessOptionEnabled => IsDimBehaviorEnabled && Behavior == MonitorBehaviorType.Blackout;
+
+        /// <summary>The "still" limit only refines the mouse and focused-window conditions.</summary>
         public bool IsStillLimitApplicable => IsActiveOnMousePosition || IsActiveOnActiveWindow;
 
-        private string? ValidateMouseStill()
+        public string BehaviorSectionTooltip
         {
-            if (!IsManaged || !IsStillLimitApplicable || !UseMouseStillLimit) return null;
-            if (MouseStillMinutes is null or < 1 or > 600) return "Kies 1 tot 600 minuten.";
-            return null;
-        }
-
-        // --- Brightness schedule ---
-        // No longer shown per screen (one schedule for all screens lives in the Algemeen tab, see
-        // GlobalBrightnessSchedule); the stored per-screen values are only carried along unchanged.
-        private bool _useBrightnessSchedule;
-        private bool _initialUseBrightnessSchedule;
-        private string _initialScheduleSignature = string.Empty;
-        private bool _suppressScheduleChanges;
-
-        public bool UseBrightnessSchedule
-        {
-            get => _useBrightnessSchedule;
-            set
+            get
             {
-                _useBrightnessSchedule = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(ScheduleError));
-                UpdateDirtyState();
+                const string explanation =
+                    "Wat dit scherm doet als de wachttijd voorbij is.\n\n" +
+                    "• Zwart: het scherm wordt helemaal zwart (OLED-pixels uit).\n" +
+                    "• Dimmen: de helderheid van het scherm zelf gaat omlaag (DDC/CI).\n" +
+                    "• Sterren: de echte sterrenhemel als screensaver.\n" +
+                    "• Vliegtuigen: een donkere kaart met de echte vliegtuigen erboven.";
+                return IsDimBehaviorEnabled ? explanation : NoDimmingPrefix + explanation;
             }
         }
 
-        public ObservableCollection<ScheduleEntryViewModel> ScheduleEntries { get; } = new();
-
-        public ICommand AddScheduleEntryCommand { get; }
-
-        public ICommand RemoveScheduleEntryCommand { get; }
-
-        public string ScheduleError => ValidateSchedule() ?? string.Empty;
-
-        public string ScheduleTooltip =>
-            (IsDimBehaviorEnabled ? "" : "DIT SCHERM ONDERSTEUNT GEEN DDC/CI-HELDERHEID.\n\n") +
-            "Stel per tijdstip de helderheid van dit scherm in.\n" +
-            "Vanaf elke tijd geldt die helderheid, tot de volgende tijd.\n" +
-            "Na de laatste tijd van de dag loopt hij door tot de eerste van de volgende dag.\n\n" +
-            "Een helderheid die je zelf op het scherm verandert, blijft staan\n" +
-            "tot het volgende tijdstip in het schema.";
-
-        #endregion Properties
-
-        /// <param name="monitorInfo">The monitor information model.</param>
-        public MonitorConfigurationViewModel(MonitorInfo monitorInfo)
+        public string LowerBrightnessTooltip
         {
-            _monitorInfo = monitorInfo;
-
-            AddScheduleEntryCommand = new RelayCommand(AddScheduleEntry);
-            RemoveScheduleEntryCommand = new RelayCommand(p =>
+            get
             {
-                if (p is ScheduleEntryViewModel entry && ScheduleEntries.Remove(entry)) OnScheduleChanged();
-            });
+                const string explanation =
+                    "Zet ook de helderheid van het scherm zelf op 0,\n" +
+                    "naast het zwarte beeld.\n\n" +
+                    "Vooral nuttig bij niet-OLED-schermen, waar de\n" +
+                    "achtergrondverlichting anders blijft branden.";
 
-            ApplySettings(new MonitorSettings());
-            MarkAsSaved();
-        }
-
-        #region State Management (Dirty Tracking, Saving, Loading)
-
-        /// <summary>
-        /// Gets whether the configuration has unsaved changes.
-        /// </summary>
-        public bool IsDirty { get; private set; }
-
-        /// <summary>
-        /// Updates the IsDirty property based on whether any tracked property has changed from its initial value.
-        /// Uses a tolerance for floating point comparison.
-        /// </summary>
-        private void UpdateDirtyState()
-        {
-            const double epsilon = 0.0001;
-            IsDirty = IsManaged != _initialIsManaged ||
-                       Behavior != _initialBehavior ||
-                       Math.Abs(DimLevel - _initialDimLevel) > epsilon ||
-                       LowerBrightnessOnBlackout != _initialLowerBrightnessOnBlackout ||
-                       IdleValue != _initialIdleValue ||
-                       SelectedTimeUnit != _initialSelectedTimeUnit ||
-                       IsActiveOnInput != _initialIsActiveOnInput ||
-                       IsActiveOnMousePosition != _initialIsActiveOnMousePosition ||
-                       IsActiveOnActiveWindow != _initialIsActiveOnActiveWindow ||
-                       UseMouseStillLimit != _initialUseMouseStillLimit ||
-                       MouseStillMinutes != _initialMouseStillMinutes ||
-                       UseBrightnessSchedule != _initialUseBrightnessSchedule ||
-                       ScheduleSignature() != _initialScheduleSignature;
-
-            OnPropertyChanged(nameof(IsDirty));
-        }
-
-        /// <summary>
-        /// Marks the current state as saved, updating the initial values for dirty tracking.
-        /// </summary>
-        public void MarkAsSaved()
-        {
-            _initialIsManaged = IsManaged;
-            _initialBehavior = Behavior;
-            _initialDimLevel = DimLevel;
-            _initialLowerBrightnessOnBlackout = LowerBrightnessOnBlackout;
-            _initialIdleValue = IdleValue;
-            _initialSelectedTimeUnit = SelectedTimeUnit;
-            _initialIsActiveOnInput = IsActiveOnInput;
-            _initialIsActiveOnMousePosition = IsActiveOnMousePosition;
-            _initialIsActiveOnActiveWindow = IsActiveOnActiveWindow;
-            _initialUseMouseStillLimit = UseMouseStillLimit;
-            _initialMouseStillMinutes = MouseStillMinutes;
-            _initialUseBrightnessSchedule = UseBrightnessSchedule;
-            _initialScheduleSignature = ScheduleSignature();
-            UpdateDirtyState();
-        }
-
-        /// <summary>
-        /// Returns every tracked property to the value it had when the configuration was last saved.
-        /// </summary>
-        public void Revert()
-        {
-            IsManaged = _initialIsManaged;
-            Behavior = _initialBehavior;
-            DimLevel = _initialDimLevel;
-            LowerBrightnessOnBlackout = _initialLowerBrightnessOnBlackout;
-            IdleValue = _initialIdleValue;
-            SelectedTimeUnit = _initialSelectedTimeUnit;
-            IsActiveOnInput = _initialIsActiveOnInput;
-            IsActiveOnMousePosition = _initialIsActiveOnMousePosition;
-            IsActiveOnActiveWindow = _initialIsActiveOnActiveWindow;
-            UseMouseStillLimit = _initialUseMouseStillLimit;
-            MouseStillMinutes = _initialMouseStillMinutes;
-            UseBrightnessSchedule = _initialUseBrightnessSchedule;
-            LoadSchedule(ParseSignature(_initialScheduleSignature));
-            UpdateDirtyState();
-        }
-
-        /// <summary>
-        /// Applies settings from a MonitorSettings model to this ViewModel.
-        /// </summary>
-        /// <param name="settings">The settings to apply.</param>
-        public void ApplySettings(MonitorSettings settings)
-        {
-            IsManaged = settings.IsManaged;
-            Behavior = settings.Behavior;
-            DimLevel = settings.DimLevel;
-            LowerBrightnessOnBlackout = settings.LowerBrightnessOnBlackout && IsDimBehaviorEnabled;
-            IdleValue = settings.IdleValue;
-            SelectedTimeUnit = settings.IdleUnit;
-            IsActiveOnInput = settings.IsActiveOnInput;
-            IsActiveOnMousePosition = settings.IsActiveOnMousePosition;
-            IsActiveOnActiveWindow = settings.IsActiveOnActiveWindow;
-            UseMouseStillLimit = settings.UseMouseStillLimit;
-            MouseStillMinutes = settings.MouseStillMinutes;
-            // Keep the stored choice even if the DDC/CI probe failed this time; the section is just disabled then.
-            UseBrightnessSchedule = settings.UseBrightnessSchedule;
-            LoadSchedule(settings.BrightnessSchedule);
-        }
-
-        private void LoadSchedule(IEnumerable<BrightnessScheduleEntry>? entries)
-        {
-            _suppressScheduleChanges = true;
-            ScheduleEntries.Clear();
-            foreach (var entry in entries ?? Enumerable.Empty<BrightnessScheduleEntry>())
-            {
-                ScheduleEntries.Add(new ScheduleEntryViewModel(entry, OnScheduleChanged));
+                // Say first why the box is greyed out, if it is.
+                var reason = !IsDimBehaviorEnabled ? NoDimmingPrefix
+                    : Behavior != MonitorBehaviorType.Blackout ? "ALLEEN BIJ 'ZWART'.\n\n"
+                    : string.Empty;
+                return reason + explanation;
             }
-            _suppressScheduleChanges = false;
-            OnScheduleChanged();
         }
 
-        private void AddScheduleEntry()
+        public bool IsDirty
         {
-            var last = ScheduleEntries.LastOrDefault();
-            var lastTime = last == null ? null : BrightnessScheduleCalculator.ParseTime(last.Start);
-            var start = lastTime?.AddHours(2) ?? new TimeOnly(8, 0);
-            ScheduleEntries.Add(new ScheduleEntryViewModel(
-                new BrightnessScheduleEntry { Start = start.ToString("HH:mm"), Brightness = last?.Brightness ?? 70 },
-                OnScheduleChanged));
-            OnScheduleChanged();
+            get => _isDirty;
+            private set => SetField(ref _isDirty, value);
         }
 
-        private void OnScheduleChanged()
-        {
-            if (_suppressScheduleChanges) return;
-            OnPropertyChanged(nameof(ScheduleError));
-            UpdateDirtyState();
-        }
+        // ---- Validation ----
 
-        private string ScheduleSignature() =>
-            string.Join(";", ScheduleEntries.Select(e => $"{e.Start}={e.Brightness}"));
+        public string IdleValueError => this[nameof(IdleValue)];
 
-        private static List<BrightnessScheduleEntry> ParseSignature(string signature) =>
-            signature.Split(';', StringSplitOptions.RemoveEmptyEntries)
-                .Select(part => part.Split('='))
-                .Where(kv => kv.Length == 2)
-                .Select(kv => new BrightnessScheduleEntry { Start = kv[0], Brightness = int.TryParse(kv[1], out var b) ? b : 70 })
-                .ToList();
+        public string ActiveConditionsError => this[nameof(IsActiveOnInput)];
 
-        private string? ValidateSchedule()
-        {
-            if (!UseBrightnessSchedule) return null;
-            if (ScheduleEntries.Count == 0) return "Voeg minstens één tijd toe.";
-            if (ScheduleEntries.Any(e => !e.IsStartValid)) return "Gebruik tijden als 08:00 of 19:30.";
-            var times = ScheduleEntries.Select(e => BrightnessScheduleCalculator.ParseTime(e.Start)).ToList();
-            if (times.Distinct().Count() != times.Count) return "Elke tijd mag maar één keer voorkomen.";
-            return null;
-        }
+        public string BehaviorError => this[nameof(Behavior)];
 
-        /// <summary>
-        /// Converts the current ViewModel state to a MonitorSettings model.
-        /// </summary>
-        /// <returns>A MonitorSettings object representing the current configuration.</returns>
-        public MonitorSettings ToSettings()
-        {
-            return new MonitorSettings
-            {
-                HardwareId = _monitorInfo.HardwareId,
-                IsManaged = IsManaged,
-                Behavior = Behavior,
-                DimLevel = DimLevel,
-                LowerBrightnessOnBlackout = LowerBrightnessOnBlackout,
-                IdleValue = IdleValue,
-                IdleUnit = SelectedTimeUnit,
-                IsActiveOnInput = IsActiveOnInput,
-                IsActiveOnMousePosition = IsActiveOnMousePosition,
-                IsActiveOnActiveWindow = IsActiveOnActiveWindow,
-                UseMouseStillLimit = UseMouseStillLimit,
-                MouseStillMinutes = MouseStillMinutes ?? 10,
-                UseBrightnessSchedule = UseBrightnessSchedule,
-                BrightnessSchedule = ScheduleEntries.Select(e => e.ToEntry()).ToList()
-            };
-        }
+        public string MouseStillError => StillLimitProblem() ?? string.Empty;
 
-        #endregion State Management (Dirty Tracking, Saving, Loading)
-
-        #region Validation
-
-        /// <summary>
-        /// Gets whether the current configuration is valid according to all validation rules.
-        /// </summary>
         public bool IsValid
         {
             get
             {
-                if (ValidateSchedule() != null) return false;
-                if (ValidateMouseStill() != null) return false;
-                if (!IsManaged) return true; // Unmanaged monitors are always "valid"
-
-                return ValidateIdleValue() == null && ValidateActiveConditions() == null && ValidateBehavior() == null;
+                if (ScheduleProblem() is not null || StillLimitProblem() is not null) return false;
+                if (!IsManaged) return true;
+                return IdleProblem() is null && WakeConditionProblem() is null && BehaviorProblem() is null;
             }
         }
 
-        /// <summary>
-        /// Gets the error message for the entire object. Not used in this implementation.
-        /// </summary>
+        // IDataErrorInfo: only per-property messages are used.
         public string Error => string.Empty;
 
-        /// <summary>
-        /// Gets the error message for the property with the given name, if any.
-        /// </summary>
-        /// <param name="columnName">The name of the property to validate.</param>
-        /// <returns>An error message if invalid, otherwise an empty string.</returns>
-        public string this[string columnName]
+        public string this[string columnName] => IsManaged ? ProblemWith(columnName) ?? string.Empty : string.Empty;
+
+        private string? ProblemWith(string propertyName) => propertyName switch
         {
-            get
+            nameof(IdleValue) => IdleProblem(),
+            nameof(Behavior) => BehaviorProblem(),
+            nameof(IsActiveOnInput) or nameof(IsActiveOnMousePosition) or nameof(IsActiveOnActiveWindow) => WakeConditionProblem(),
+            _ => null,
+        };
+
+        private string? IdleProblem() =>
+            IdleValue is > 0 ? null : "Vul een wachttijd groter dan 0 in.";
+
+        private string? BehaviorProblem() =>
+            Behavior == MonitorBehaviorType.None ? "Kies wat er met dit scherm moet gebeuren." : null;
+
+        private string? WakeConditionProblem() =>
+            IsActiveOnInput || IsActiveOnMousePosition || IsActiveOnActiveWindow
+                ? null
+                : "Kies minstens één 'Wakker houden als'-optie.";
+
+        private string? StillLimitProblem()
+        {
+            bool inUse = IsManaged && IsStillLimitApplicable && UseMouseStillLimit;
+            return inUse && MouseStillMinutes is not (>= 1 and <= 600) ? "Kies 1 tot 600 minuten." : null;
+        }
+
+        // A stored schedule that is switched on must still make sense, even though it is not shown here.
+        private string? ScheduleProblem()
+        {
+            if (!_useSchedule) return null;
+            if (_schedule.Count == 0) return "Voeg minstens één tijd toe.";
+
+            var times = _schedule.Select(e => BrightnessScheduleCalculator.ParseTime(e.Start)).ToList();
+            if (times.Contains(null)) return "Gebruik tijden als 08:00 of 19:30.";
+            return times.Distinct().Count() < times.Count ? "Elke tijd mag maar één keer voorkomen." : null;
+        }
+
+        // ---- Loading, saving and reverting ----
+
+        /// <summary>Takes over a stored settings record. Does not change what counts as "saved".</summary>
+        public void ApplySettings(MonitorSettings settings) => Load(StateFrom(settings));
+
+        /// <summary>Accepts the current values as the saved baseline.</summary>
+        public void MarkAsSaved()
+        {
+            _saved = Capture();
+            RecomputeDirty();
+        }
+
+        /// <summary>Throws away unsaved edits.</summary>
+        public void Revert()
+        {
+            Load(_saved);
+            RecomputeDirty();
+        }
+
+        public MonitorSettings ToSettings()
+        {
+            var now = Capture();
+            return new MonitorSettings
             {
-                if (!IsManaged) return string.Empty; // Only validate if the monitor is managed
-
-                string? result = null;
-                switch (columnName)
-                {
-                    case nameof(IdleValue):
-                        result = ValidateIdleValue();
-                        break;
-
-                    case nameof(IsActiveOnInput):
-                    case nameof(IsActiveOnMousePosition):
-                    case nameof(IsActiveOnActiveWindow):
-                        result = ValidateActiveConditions();
-                        break;
-
-                    case nameof(Behavior):
-                        result = ValidateBehavior();
-                        break;
-                }
-                return result ?? string.Empty;
-            }
+                HardwareId = _monitor.HardwareId,
+                IsManaged = now.IsManaged,
+                Behavior = now.Behavior,
+                DimLevel = now.DimLevel,
+                LowerBrightnessOnBlackout = now.LowerBrightness,
+                IdleValue = now.IdleValue,
+                IdleUnit = now.IdleUnit,
+                IsActiveOnInput = now.WakeOnInput,
+                IsActiveOnMousePosition = now.WakeOnMouse,
+                IsActiveOnActiveWindow = now.WakeOnFocusedWindow,
+                UseMouseStillLimit = now.UseStillLimit,
+                // An emptied field falls back to the stored default.
+                MouseStillMinutes = now.StillMinutes ?? 10,
+                UseBrightnessSchedule = now.UseSchedule,
+                BrightnessSchedule = now.Schedule
+                    .Select(e => new BrightnessScheduleEntry { Start = e.Start?.Trim() ?? string.Empty, Brightness = e.Brightness })
+                    .ToList(),
+            };
         }
 
-        /// <summary>
-        /// Validates the idle value property.
-        /// </summary>
-        /// <returns>An error message if invalid, otherwise null.</returns>
-        private string? ValidateIdleValue()
+        private void Change<T>(ref T field, T value, string[] dependents, [CallerMemberName] string? name = null)
         {
-            if (IdleValue == null || IdleValue <= 0)
-                return "Vul een wachttijd groter dan 0 in.";
-            return null;
+            if (!SetField(ref field, value, name)) return;
+
+            foreach (var dependent in dependents) OnPropertyChanged(dependent);
+            RecomputeDirty();
         }
 
-        /// <summary>
-        /// Validates that at least one active condition is selected.
-        /// </summary>
-        /// <returns>An error message if invalid, otherwise null.</returns>
-        private string? ValidateActiveConditions()
+        private void RecomputeDirty() => IsDirty = !Capture().SameAs(_saved);
+
+        private State Capture() => new(
+            IsManaged, Behavior, DimLevel, LowerBrightnessOnBlackout, IdleValue, SelectedTimeUnit,
+            IsActiveOnInput, IsActiveOnMousePosition, IsActiveOnActiveWindow,
+            UseMouseStillLimit, MouseStillMinutes, _useSchedule, _schedule);
+
+        private State StateFrom(MonitorSettings s) => new(
+            s.IsManaged, s.Behavior, s.DimLevel,
+            // A stale "lower brightness" flag is meaningless once the screen lost DDC/CI.
+            s.LowerBrightnessOnBlackout && IsDimBehaviorEnabled,
+            s.IdleValue, s.IdleUnit,
+            s.IsActiveOnInput, s.IsActiveOnMousePosition, s.IsActiveOnActiveWindow,
+            s.UseMouseStillLimit, s.MouseStillMinutes,
+            // The schedule flag is kept as stored, even when DDC/CI was not detected this time.
+            s.UseBrightnessSchedule,
+            (s.BrightnessSchedule ?? []).Select(e => new BrightnessScheduleEntry { Start = e.Start, Brightness = e.Brightness }).ToList());
+
+        private void Load(State state)
         {
-            if (!IsActiveOnInput && !IsActiveOnMousePosition && !IsActiveOnActiveWindow)
-                return "Kies minstens één 'Wakker houden als'-optie.";
-            return null;
+            IsManaged = state.IsManaged;
+            // Behaviour first: switching to blackout zeroes the dim level, which the next line then overrides.
+            Behavior = state.Behavior;
+            DimLevel = state.DimLevel;
+            LowerBrightnessOnBlackout = state.LowerBrightness;
+            IdleValue = state.IdleValue;
+            SelectedTimeUnit = state.IdleUnit;
+            IsActiveOnInput = state.WakeOnInput;
+            IsActiveOnMousePosition = state.WakeOnMouse;
+            IsActiveOnActiveWindow = state.WakeOnFocusedWindow;
+            UseMouseStillLimit = state.UseStillLimit;
+            MouseStillMinutes = state.StillMinutes;
+            _useSchedule = state.UseSchedule;
+            _schedule = state.Schedule;
+            RecomputeDirty();
         }
 
-        /// <summary>
-        /// Validates the Behavior property to ensure a monitor behavior is selected when managed.
-        /// </summary>
-        /// <returns>
-        /// An error message if the behavior is not selected (None), otherwise null.
-        /// </returns>
-        private string? ValidateBehavior()
+        /// <summary>One complete set of values, used both as the saved baseline and for comparisons.</summary>
+        private sealed record State(
+            bool IsManaged,
+            MonitorBehaviorType Behavior,
+            double DimLevel,
+            bool LowerBrightness,
+            int? IdleValue,
+            TimeUnit IdleUnit,
+            bool WakeOnInput,
+            bool WakeOnMouse,
+            bool WakeOnFocusedWindow,
+            bool UseStillLimit,
+            int? StillMinutes,
+            bool UseSchedule,
+            IReadOnlyList<BrightnessScheduleEntry> Schedule)
         {
-            if (Behavior == MonitorBehaviorType.None)
-                return "Kies wat er met dit scherm moet gebeuren.";
-            return null;
-        }
+            public bool SameAs(State other) =>
+                // Compare everything except the two fields that need special handling, then those.
+                this with { DimLevel = 0, Schedule = NoEntries } == other with { DimLevel = 0, Schedule = NoEntries }
+                && Math.Abs(DimLevel - other.DimLevel) <= DimTolerance
+                && Schedule.Select(Key).SequenceEqual(other.Schedule.Select(Key));
 
-        #endregion Validation
+            private static string Key(BrightnessScheduleEntry e) => $"{e.Start}={e.Brightness}";
+        }
     }
 }

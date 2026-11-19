@@ -6,126 +6,75 @@ using System.Windows.Media;
 namespace OLED_Sleeper.UI.ViewModels
 {
     /// <summary>
-    /// ViewModel representing a monitor in the layout view.
-    /// Handles scaled layout, selection, and dirty state tracking for a single monitor.
+    /// One screen as a clickable tile in the "Jouw schermen" overview, scaled down to fit the panel,
+    /// together with the settings that belong to it.
     /// </summary>
     public class MonitorLayoutViewModel : ViewModelBase
     {
-        #region Fields
-        /// <summary>
-        /// The underlying monitor information model.
-        /// </summary>
-        private readonly MonitorInfo _monitor;
-        #endregion
+        // Shared and frozen: every tile looks the same, and a frozen brush is safe across threads.
+        private static readonly Brush NightSkyTile = MakeNightSkyBrush();
 
-        #region Properties
-        /// <summary>
-        /// The configuration ViewModel for this monitor.
-        /// </summary>
-        public MonitorConfigurationViewModel Configuration { get; }
+        private readonly MonitorInfo _info;
+        private bool _highlighted;
 
-        private bool _isSelected;
-        /// <summary>
-        /// Gets or sets whether this monitor is currently selected in the UI.
-        /// </summary>
-        public bool IsSelected
+        /// <param name="monitor">The physical screen.</param>
+        /// <param name="scale">Panel pixels per desktop pixel.</param>
+        /// <param name="totalBounds">The desktop rectangle that holds every screen.</param>
+        /// <param name="offsetX">Horizontal padding that centres the scaled desktop in the panel.</param>
+        /// <param name="offsetY">Vertical padding that centres the scaled desktop in the panel.</param>
+        public MonitorLayoutViewModel(MonitorInfo monitor, double scale, Rect totalBounds, double offsetX, double offsetY)
         {
-            get => _isSelected;
-            set { _isSelected = value; OnPropertyChanged(); }
+            _info = monitor;
+
+            var area = monitor.Bounds;
+            ScaledLeft = offsetX + scale * (area.Left - totalBounds.Left);
+            ScaledTop = offsetY + scale * (area.Top - totalBounds.Top);
+            ScaledWidth = scale * area.Width;
+            ScaledHeight = scale * area.Height;
+
+            Configuration = new(monitor);
+            Configuration.PropertyChanged += RelayDirtyFlag;
         }
 
-        /// <summary>
-        /// Whether this monitor has unsaved changes in its configuration.
-        /// </summary>
-        public bool IsDirty => Configuration.IsDirty;
+        public MonitorConfigurationViewModel Configuration { get; }
 
-        /// <summary>
-        /// The display title for the monitor, including primary indicator if applicable. A duplicated surface
-        /// is titled the way Windows titles it, such as <c>Monitor 1|2</c>.
-        /// </summary>
-        public string MonitorTitle => MonitorTitleFormatter.Format(_monitor);
+        public string HardwareId => _info.HardwareId;
 
-        /// <summary>
-        /// The display number for the monitor.
-        /// </summary>
-        public int DisplayNumber => _monitor.DisplayNumber;
+        public int DisplayNumber => _info.DisplayNumber;
 
-        /// <summary>
-        /// The hardware ID for the monitor.
-        /// </summary>
-        public string HardwareId => _monitor.HardwareId;
+        public string MonitorTitle => MonitorTitleFormatter.Format(_info);
 
-        /// <summary>
-        /// The resolution of the monitor as a formatted string (e.g., 1920x1080).
-        /// </summary>
-        public string ResolutionText => $"{(int)_monitor.Bounds.Width}x{(int)_monitor.Bounds.Height}";
+        public string ResolutionText => FormattableString.Invariant($"{(int)_info.Bounds.Width}x{(int)_info.Bounds.Height}");
 
-        /// <summary>
-        /// The background color for the monitor representation in the layout.
-        /// </summary>
-        public Brush BackgroundColor { get; } = CreateTileBrush();
+        public Brush BackgroundColor => NightSkyTile;
 
-        /// <summary>A small night-sky gradient for the monitor tiles, matching the app's theme.</summary>
-        private static Brush CreateTileBrush()
+        public double ScaledLeft { get; }
+
+        public double ScaledTop { get; }
+
+        public double ScaledWidth { get; }
+
+        public double ScaledHeight { get; }
+
+        public bool IsSelected
+        {
+            get => _highlighted;
+            set => SetField(ref _highlighted, value);
+        }
+
+        /// <summary>True while this screen's settings differ from what is stored.</summary>
+        public bool IsDirty => Configuration is { IsDirty: true };
+
+        private void RelayDirtyFlag(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MonitorConfigurationViewModel.IsDirty)) OnPropertyChanged(nameof(IsDirty));
+        }
+
+        private static Brush MakeNightSkyBrush()
         {
             var brush = new LinearGradientBrush(Color.FromRgb(30, 38, 62), Color.FromRgb(14, 17, 28), 90);
             brush.Freeze();
             return brush;
         }
-
-        /// <summary>
-        /// The scaled width of the monitor for layout display.
-        /// </summary>
-        public double ScaledWidth { get; }
-
-        /// <summary>
-        /// The scaled height of the monitor for layout display.
-        /// </summary>
-        public double ScaledHeight { get; }
-
-        /// <summary>
-        /// The scaled left position of the monitor for layout display.
-        /// </summary>
-        public double ScaledLeft { get; }
-
-        /// <summary>
-        /// The scaled top position of the monitor for layout display.
-        /// </summary>
-        public double ScaledTop { get; }
-        #endregion
-
-        #region Constructor
-        /// <param name="monitor">The monitor information model.</param>
-        /// <param name="scale">The scale factor for layout display.</param>
-        /// <param name="totalBounds">The total bounds of all monitors for layout calculations.</param>
-        /// <param name="offsetX">The X offset for layout positioning.</param>
-        /// <param name="offsetY">The Y offset for layout positioning.</param>
-        public MonitorLayoutViewModel(MonitorInfo monitor, double scale, Rect totalBounds, double offsetX, double offsetY)
-        {
-            _monitor = monitor;
-            Configuration = new MonitorConfigurationViewModel(monitor);
-            SubscribeToConfigurationDirtyState();
-            ScaledWidth = _monitor.Bounds.Width * scale;
-            ScaledHeight = _monitor.Bounds.Height * scale;
-            ScaledLeft = (_monitor.Bounds.Left - totalBounds.Left) * scale + offsetX;
-            ScaledTop = (_monitor.Bounds.Top - totalBounds.Top) * scale + offsetY;
-        }
-        #endregion
-
-        #region Private Methods
-        /// <summary>
-        /// Re-raises the configuration's dirty state changes as this ViewModel's own.
-        /// </summary>
-        private void SubscribeToConfigurationDirtyState()
-        {
-            Configuration.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(MonitorConfigurationViewModel.IsDirty))
-                {
-                    OnPropertyChanged(nameof(IsDirty));
-                }
-            };
-        }
-        #endregion
     }
 }
