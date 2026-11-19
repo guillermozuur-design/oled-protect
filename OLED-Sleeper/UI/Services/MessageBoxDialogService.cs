@@ -4,47 +4,25 @@ using System.Windows;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Shows dialogs through <see cref="MessageBox"/>, owned by the main window whenever it is on screen.
-    /// An unowned dialog is positioned against whatever window Windows considers active, which for a dialog
-    /// raised from the tray menu is the menu's own popup, under the pointer.
-    /// </summary>
+    // Plain WPF message boxes. They are parented to the settings window when it is visible; without an
+    // owner Windows centres the box on whatever is active, which after a tray-menu click is the menu
+    // popup under the mouse pointer.
     [ExcludeFromCodeCoverage]
-    public class MessageBoxDialogService(IMainWindowAccessor mainWindowAccessor) : IDialogService
+    public class MessageBoxDialogService(IMainWindowAccessor accessor) : IDialogService
     {
-        /// <inheritdoc />
-        public MessageBoxResult AskYesNoCancel(string message, string caption)
+        public MessageBoxResult AskYesNoCancel(string question, string title) =>
+            Present(question, title, MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+
+        public void ShowError(string text, string title) =>
+            Present(text, title, MessageBoxButton.OK, MessageBoxImage.Error);
+
+        private MessageBoxResult Present(string text, string title, MessageBoxButton buttons, MessageBoxImage image)
         {
-            var owner = Owner();
+            // Hidden (e.g. a storage error at startup, before the window ever showed): no owner.
+            if (accessor.MainWindow is { IsVisible: true } parent)
+                return MessageBox.Show(parent, text, title, buttons, image);
 
-            return owner == null
-                ? MessageBox.Show(message, caption, MessageBoxButton.YesNoCancel, MessageBoxImage.Warning)
-                : MessageBox.Show(owner, message, caption, MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
-        }
-
-        /// <inheritdoc />
-        public void ShowError(string message, string caption)
-        {
-            var owner = Owner();
-
-            if (owner == null)
-            {
-                MessageBox.Show(message, caption, MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            MessageBox.Show(owner, message, caption, MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-
-        /// <summary>
-        /// The window to own the dialog. Null when no main window has been registered or it is off screen,
-        /// as it is for the storage failure reported before the window exists.
-        /// </summary>
-        private Window? Owner()
-        {
-            var window = mainWindowAccessor.MainWindow;
-
-            return window?.IsVisible == true ? window : null;
+            return MessageBox.Show(text, title, buttons, image);
         }
     }
 }

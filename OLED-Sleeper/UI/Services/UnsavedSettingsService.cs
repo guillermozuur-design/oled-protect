@@ -3,39 +3,35 @@ using System.Windows;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Prompts through <see cref="IDialogService"/>, saving the settings on Yes and discarding them on No.
-    /// </summary>
+    // Yes = save (and go on only if the save was accepted), No = throw the edits away and go on,
+    // Cancel = stay. Without pending edits there is nothing to ask.
     public class UnsavedSettingsService(
-        IUnsavedSettings unsavedSettings,
-        IDialogService dialogService) : IUnsavedSettingsService
+        IUnsavedSettings edits,
+        IDialogService dialogs) : IUnsavedSettingsService
     {
-        private const string Caption = "Niet opgeslagen wijzigingen";
+        private const string Title = "Niet opgeslagen wijzigingen";
+        private const string Question = "Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat {0}?";
 
-        /// <inheritdoc />
-        public bool ConfirmHide() =>
-            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat het venster sluit?");
+        public bool ConfirmHide() => Resolve("het venster sluit");
 
-        /// <inheritdoc />
-        public bool ConfirmExit() =>
-            Confirm("Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat OLED Space Sleeper stopt?");
+        public bool ConfirmExit() => Resolve("OLED Space Sleeper stopt");
 
-        /// <summary>
-        /// Prompts only when there is something to lose. Yes answers with whether the save succeeded;
-        /// No discards the changes.
-        /// </summary>
-        private bool Confirm(string question)
+        private bool Resolve(string whatHappensNext)
         {
-            if (!unsavedSettings.IsDirty) return true;
+            if (!edits.IsDirty)
+                return true;
 
-            var result = dialogService.AskYesNoCancel(question, Caption);
-
-            if (result == MessageBoxResult.Cancel) return false;
-
-            if (result == MessageBoxResult.Yes) return unsavedSettings.TrySaveChanges();
-
-            unsavedSettings.DiscardChanges();
-            return true;
+            var answer = dialogs.AskYesNoCancel(string.Format(Question, whatHappensNext), Title);
+            switch (answer)
+            {
+                case MessageBoxResult.Yes:
+                    return edits.TrySaveChanges();
+                case MessageBoxResult.Cancel:
+                    return false;
+                default:
+                    edits.DiscardChanges();
+                    return true;
+            }
         }
     }
 }

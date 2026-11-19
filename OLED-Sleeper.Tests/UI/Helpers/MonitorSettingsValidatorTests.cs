@@ -1,99 +1,77 @@
-using OLED_Sleeper.Features.MonitorBehavior.Models;
-using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.UI.Helpers;
 using OLED_Sleeper.UI.ViewModels;
-using System.Windows;
 
 namespace OLED_Sleeper.Tests.UI.Helpers
 {
     public class MonitorSettingsValidatorTests
     {
         [Fact]
-        public void BuildValidationError_WhenEveryManagedMonitorIsValid_ReturnsNull()
+        public void No_monitors_is_nothing_to_complain_about()
         {
-            // Arrange
-            var monitor = CreateMonitor(1);
-            monitor.Configuration.IsManaged = true;
-            monitor.Configuration.Behavior = MonitorBehaviorType.Blackout;
-
-            // Act
-            var error = MonitorSettingsValidator.BuildValidationError(new[] { monitor });
-
-            // Assert
-            Assert.Null(error);
+            Assert.Null(MonitorSettingsValidator.BuildValidationError(Array.Empty<MonitorLayoutViewModel>()));
         }
 
         [Fact]
-        public void BuildValidationError_WhenAnInvalidMonitorIsUnmanaged_ReturnsNull()
+        public void Valid_managed_monitors_pass()
         {
-            // Arrange
-            var monitor = CreateMonitor(1);
-            monitor.Configuration.IdleValue = 0;
+            var tiles = new[] { TestMonitors.ValidManagedTile(1), TestMonitors.ValidManagedTile(2) };
 
-            // Act
-            var error = MonitorSettingsValidator.BuildValidationError(new[] { monitor });
-
-            // Assert
-            Assert.Null(error);
+            Assert.Null(MonitorSettingsValidator.BuildValidationError(tiles));
         }
 
         [Fact]
-        public void BuildValidationError_WhenMonitorIsManagedAndInvalid_NamesItAndListsEveryProblem()
+        public void Unmanaged_monitors_are_not_checked()
         {
-            // Arrange
-            var monitor = CreateMonitor(2);
-            monitor.Configuration.IsManaged = true;
-            monitor.Configuration.IdleValue = null;
-            monitor.Configuration.IsActiveOnMousePosition = false;
+            var tile = TestMonitors.Tile(1);
+            tile.Configuration.IdleValue = 0;
 
-            // Act
-            var error = MonitorSettingsValidator.BuildValidationError(new[] { monitor });
-
-            // Assert
-            Assert.NotNull(error);
-            Assert.Contains("Scherm 2", error);
-            Assert.Contains("Kies wat er met dit scherm moet gebeuren.", error);
-            Assert.Contains("Vul een wachttijd groter dan 0 in.", error);
-            Assert.Contains("Kies minstens één 'Wakker houden als'-optie.", error);
+            Assert.Null(MonitorSettingsValidator.BuildValidationError(new[] { tile }));
         }
 
         [Fact]
-        public void BuildValidationError_WithSeveralInvalidMonitors_ListsThemAll()
+        public void A_broken_managed_monitor_is_named_with_each_of_its_problems()
         {
-            // Arrange
-            var first = CreateMonitor(1);
-            var second = CreateMonitor(2);
-            var valid = CreateMonitor(3);
-            first.Configuration.IsManaged = true;
-            second.Configuration.IsManaged = true;
-            valid.Configuration.IsManaged = true;
-            valid.Configuration.Behavior = MonitorBehaviorType.Blackout;
+            var tile = TestMonitors.Tile(2);
+            tile.Configuration.IsManaged = true;
+            tile.Configuration.IdleValue = null;
+            tile.Configuration.IsActiveOnMousePosition = false;
 
-            // Act
-            var error = MonitorSettingsValidator.BuildValidationError(new[] { first, second, valid });
+            string? message = MonitorSettingsValidator.BuildValidationError(new[] { tile });
 
-            // Assert
-            Assert.NotNull(error);
-            Assert.Contains("Scherm 1", error);
-            Assert.Contains("Scherm 2", error);
-            Assert.DoesNotContain("Scherm 3", error);
+            Assert.NotNull(message);
+            Assert.Contains("Scherm 2", message);
+            Assert.Contains("Kies wat er met dit scherm moet gebeuren.", message);
+            Assert.Contains("Vul een wachttijd groter dan 0 in.", message);
+            Assert.Contains("Kies minstens één 'Wakker houden als'-optie.", message);
         }
 
-        /// <summary>
-        /// Builds a layout view model over a 1920x1080 monitor with default settings.
-        /// </summary>
-        private static MonitorLayoutViewModel CreateMonitor(int displayNumber)
+        [Fact]
+        public void Only_the_broken_monitors_are_listed()
         {
-            var bounds = new Rect(0, 0, 1920, 1080);
-            var monitorInfo = new MonitorInfo
-            {
-                HardwareId = $"MON-{displayNumber}",
-                DisplayNumber = displayNumber,
-                DeviceName = $@"\\.\DISPLAY{displayNumber}",
-                Bounds = bounds
-            };
+            var brokenA = TestMonitors.Tile(1);
+            var brokenB = TestMonitors.Tile(2);
+            brokenA.Configuration.IsManaged = true;
+            brokenB.Configuration.IsManaged = true;
 
-            return new MonitorLayoutViewModel(monitorInfo, 1.0, bounds, 0, 0);
+            string? message = MonitorSettingsValidator.BuildValidationError(
+                new[] { brokenA, brokenB, TestMonitors.ValidManagedTile(3) });
+
+            Assert.NotNull(message);
+            Assert.Contains("Scherm 1", message);
+            Assert.Contains("Scherm 2", message);
+            Assert.DoesNotContain("Scherm 3", message);
+        }
+
+        [Fact]
+        public void The_message_explains_the_problem_and_how_to_fix_it()
+        {
+            var tile = TestMonitors.Tile(1);
+            tile.Configuration.IsManaged = true;
+
+            string message = MonitorSettingsValidator.BuildValidationError(new[] { tile })!;
+
+            Assert.StartsWith("Een of meer schermen zijn nog niet goed ingesteld", message);
+            Assert.Contains("zet het bewaken van dat scherm uit", message.TrimEnd());
         }
     }
 }

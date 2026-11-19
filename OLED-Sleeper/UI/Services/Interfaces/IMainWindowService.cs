@@ -1,25 +1,15 @@
 namespace OLED_Sleeper.UI.Services.Interfaces
 {
-    /// <summary>
-    /// Provides methods to set up, show, and activate the main application window, and decides what
-    /// closing it does.
-    /// </summary>
+    // Owns the lifetime of the settings window: first appearance, bringing it back, and close-to-tray.
     public interface IMainWindowService
     {
-        /// <summary>
-        /// Sets up the main window as the application's main window, assigns its data context, 
-        /// and determines its initial visibility based on the configured application options.
-        /// </summary>
+        // Registers the window, binds the view model and shows or hides it according to StartHidden.
         void SetupMainWindow();
 
-        /// <summary>
-        /// Brings the main window to the foreground and restores it if minimized.
-        /// </summary>
+        // Shows, un-minimizes and focuses the window.
         void ShowMainWindow();
 
-        /// <summary>
-        /// Stops the window being hidden on close, for the closes WPF performs as the application exits.
-        /// </summary>
+        // From now on a close really closes; used while the app is exiting.
         void PrepareForShutdown();
     }
 }

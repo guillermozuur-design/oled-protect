@@ -1,25 +1,15 @@
 namespace OLED_Sleeper.UI.Services.Interfaces
 {
-    /// <summary>
-    /// The monitor settings currently being edited, and what can be done with the edits.
-    /// Every member must be called on the UI thread.
-    /// </summary>
+    // The pending edits of the monitor settings. UI thread only.
     public interface IUnsavedSettings
     {
-        /// <summary>
-        /// Whether any monitor has changes that have not been written to disk.
-        /// </summary>
+        // True while at least one monitor differs from what is on disk.
         bool IsDirty { get; }
 
-        /// <summary>
-        /// Validates the current settings and writes them.
-        /// </summary>
-        /// <returns>False when validation rejected the settings and nothing was written.</returns>
+        // Validates and writes; false means validation refused and the file is untouched.
         bool TrySaveChanges();
 
-        /// <summary>
-        /// Returns every monitor to the values it last had on disk.
-        /// </summary>
+        // Reverts every monitor to its last saved values.
         void DiscardChanges();
     }
 }

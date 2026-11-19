@@ -1,340 +1,237 @@
 using Hardcodet.Wpf.TaskbarNotification;
-using OLED_Sleeper.Features.MonitorBlackout.Services;
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
+using OLED_Sleeper.Features.Sky;
 using OLED_Sleeper.Features.WorkMode.Services;
 using OLED_Sleeper.Infrastructure.Helpers;
-using OLED_Sleeper.Native;
 using OLED_Sleeper.UI.Services.Interfaces;
+using OLED_Sleeper.UI.Views;
 using Serilog;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Manages the tray icon, its context menu, and related events for the application.
-    /// </summary>
+    // Everything the app shows in the notification area:
+    //  - a single click (or the global hotkey) opens the quick panel on the screen under the mouse,
+    //  - a double click opens the settings window,
+    //  - the right-click menu has work mode, previews, settings, autostart and exit,
+    //  - icon and tooltip follow the work mode (pause badge, "tot HH:mm").
     public class TrayIconService : ITrayIconService
     {
-        private TaskbarIcon? _notifyIcon;
-        private Action? _showMainWindowAction;
-        private Action? _exitApplicationAction;
-        private readonly IWorkModeService _workModeService;
-        private readonly GlobalHotkeyService _hotkeyService;
-        private MenuItem? _workModeMenuItem;
-        private System.Drawing.Icon? _normalIcon;
-        private System.Drawing.Icon? _pausedIcon;
+        private const string AppName = "OLED Space Sleeper";
 
-        private readonly IMonitorInfoManager _monitorInfoManager;
+        private readonly IWorkModeService _workMode;
+        private readonly IMonitorInfoManager _monitors;
+        private readonly GlobalHotkeyService _hotkey;
         private readonly ScreensaverPreview _preview;
-        private Views.QuickPanelWindow? _quickPanel;
+        private readonly ManualBrightnessService? _brightness;
 
-        private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
+        private TaskbarIcon? _tray;
+        private MenuItem? _workModeToggle;
+        private System.Drawing.Icon? _iconNormal;
+        private System.Drawing.Icon? _iconPaused;
+        private QuickPanelWindow? _panel;
+        private Action _openSettings = () => { };
+        private Action _quit = () => { };
 
-        private readonly OLED_Sleeper.Features.BrightnessSchedule.Services.ManualBrightnessService? _brightness;
-
+        // PanoramaSettings is not used here, but stays a dependency so the DI registration is unchanged.
         public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService,
-                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama, ScreensaverPreview preview,
-                               OLED_Sleeper.Features.BrightnessSchedule.Services.ManualBrightnessService? brightness = null)
+                               PanoramaSettings panorama, ScreensaverPreview preview,
+                               ManualBrightnessService? brightness = null)
         {
-            _brightness = brightness;
-            _panorama = panorama;
+            _workMode = workModeService;
+            _monitors = monitorInfoManager;
+            _hotkey = hotkeyService;
             _preview = preview;
-            _workModeService = workModeService;
-            _monitorInfoManager = monitorInfoManager;
-            _hotkeyService = hotkeyService;
+            _brightness = brightness;
         }
 
-        /// <summary>
-        /// Initializes and displays the tray icon and its context menu.
-        /// Also wires up left-click and double-click to show the main window.
-        /// </summary>
-        /// <param name="showMainWindowAction">Action to show the main window.</param>
-        /// <param name="exitApplicationAction">Action to exit the application.</param>
-        public void Initialize(Action showMainWindowAction, Action exitApplicationAction)
+        public void Initialize(Action openSettings, Action quit)
         {
-            _showMainWindowAction = showMainWindowAction ?? throw new ArgumentNullException(nameof(showMainWindowAction));
-            _exitApplicationAction = exitApplicationAction ?? throw new ArgumentNullException(nameof(exitApplicationAction));
+            ArgumentNullException.ThrowIfNull(openSettings);
+            ArgumentNullException.ThrowIfNull(quit);
+            _openSettings = openSettings;
+            _quit = quit;
 
-            _notifyIcon = new TaskbarIcon { ToolTipText = "OLED Space Sleeper" };
-
-            WireTrayIconEvents();
-            SetupContextMenu();
-            SetTrayIcon();
-
-            _hotkeyService.Pressed += OnHotkeyPressed;
-            _hotkeyService.Changed += OnHotkeyChanged;
-            _hotkeyService.Register();
-            _workModeService.Changed += OnWorkModeChanged;
-            UpdateWorkModeVisuals(_workModeService.IsEnabled, showBalloon: false);
-        }
-
-        private void OnHotkeyChanged() => UpdateWorkModeVisuals(_workModeService.IsEnabled, showBalloon: false);
-
-        /// <summary>
-        /// First press opens the quick panel on the monitor under the mouse; further presses while the
-        /// modifier is still held move the highlight, like Alt+Tab.
-        /// </summary>
-        private void OnHotkeyPressed()
-        {
-            if (_quickPanel != null)
+            _tray = new TaskbarIcon { ToolTipText = AppName };
+            _tray.TrayLeftMouseUp += (_, _) => { if (_panel is null) OpenQuickPanel(); };
+            _tray.TrayMouseDoubleClick += (_, _) =>
             {
-                _quickPanel.Next();
-                return;
-            }
-            OpenQuickPanel();
-        }
-
-        /// <summary>The quick panel on the screen under the mouse (the hotkey, or a click on the tray icon).</summary>
-        private void OpenQuickPanel()
-        {
-            NativeMethods.GetCursorPos(out var cursor);
-            var monitors = _monitorInfoManager.GetLatestMonitorsBasicInfo();
-            var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(cursor.X, cursor.Y))) ?? monitors.FirstOrDefault();
-            if (monitor == null) return;
-
-            var hotkey = _hotkeyService.HotkeyText;
-            var modifier = hotkey.Contains('+') ? hotkey[..hotkey.LastIndexOf('+')] : hotkey;
-            var key = hotkey[(hotkey.LastIndexOf('+') + 1)..];
-            _quickPanel = new Views.QuickPanelWindow(_workModeService,
-                () => _showMainWindowAction?.Invoke(),
-                ShowScreensaverPreview,
-                () => _preview.Show(allScreens: true, Features.MonitorBlackout.Models.OverlayScene.Flights),
-                monitor.Bounds,
-                _hotkeyService.HoldKey,
-                $"{modifier} vasthouden + {key} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten",
-                _brightness);
-            _quickPanel.Closed += (_, _) => _quickPanel = null;
-            _quickPanel.Show();
-        }
-
-        private void OnWorkModeChanged(bool enabled)
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher == null) return;
-            dispatcher.BeginInvoke(() => UpdateWorkModeVisuals(enabled, showBalloon: true));
-        }
-
-        private void UpdateWorkModeVisuals(bool enabled, bool showBalloon)
-        {
-            if (_notifyIcon == null) return;
-
-            if (_workModeMenuItem != null) _workModeMenuItem.IsChecked = enabled;
-
-            var hotkeyHint = _hotkeyService.IsRegistered
-                ? _hotkeyService.HotkeyText
-                : "sneltoets niet beschikbaar";
-
-            var until = _workModeService.EnabledUntil;
-            var untilText = until != null ? $" tot {until.Value.ToLocalTime():HH:mm}" : "";
-
-            _notifyIcon.ToolTipText = enabled
-                ? $"OLED Space Sleeper – WERKMODUS{untilText}: alles blijft aan ({hotkeyHint} = snelmenu)"
-                : $"OLED Space Sleeper – bescherming actief ({hotkeyHint} = snelmenu)";
-
-            var icon = enabled ? _pausedIcon : _normalIcon;
-            if (icon != null) _notifyIcon.Icon = icon;
-
-            if (showBalloon)
-            {
-                _notifyIcon.ShowBalloonTip(
-                    enabled ? "Werkmodus aan" + untilText : "Werkmodus uit",
-                    enabled ? "Alle schermen blijven aan." : "Inbrandbescherming is weer actief.",
-                    BalloonIcon.Info);
-            }
-        }
-
-        /// <summary>
-        /// Wires up tray icon mouse events for left-click and double-click actions.
-        /// </summary>
-        private void WireTrayIconEvents()
-        {
-            if (_notifyIcon == null) return;
-
-            // Like other tray apps in Windows 11: a click opens the quick panel, a double click the settings
-            // (the right click keeps its menu).
-            _notifyIcon.TrayLeftMouseUp += (_, _) => { if (_quickPanel == null) OpenQuickPanel(); };
-            _notifyIcon.TrayMouseDoubleClick += (_, _) =>
-            {
-                _quickPanel?.Close();
-                _showMainWindowAction?.Invoke();
+                _panel?.Close();
+                _openSettings();
             };
-        }
+            _tray.ContextMenu = BuildMenu();
 
-        /// <summary>
-        /// Sets up the tray icon's context menu.
-        /// </summary>
-        private void SetupContextMenu()
-        {
-            if (_notifyIcon == null) return;
-
-            var contextMenu = new ContextMenu();
-
-            contextMenu.Items.Add(CreateWorkModeMenuItem());
-            contextMenu.Items.Add(new Separator());
-            contextMenu.Items.Add(CreatePreviewMenuItem());
-            contextMenu.Items.Add(CreateFlightsPreviewMenuItem());
-            contextMenu.Items.Add(CreateShowSettingsMenuItem());
-            var startupItem = CreateStartupMenuItem();
-            contextMenu.Items.Add(startupItem);
-            contextMenu.Items.Add(new Separator());
-            contextMenu.Items.Add(CreateExitMenuItem());
-
-            // It can also be changed in the settings window: show the real state each time the menu opens.
-            contextMenu.Opened += (_, _) => startupItem.IsChecked = StartupHelper.IsRunAtStartupEnabled();
-            _notifyIcon.ContextMenu = contextMenu;
-        }
-
-        /// <summary>
-        /// Creates the menu item used to show the main application settings window.
-        /// </summary>
-        /// <returns>A configured MenuItem for showing settings.</returns>
-        private MenuItem CreateWorkModeMenuItem()
-        {
-            _workModeMenuItem = new MenuItem
+            _iconNormal = TrayIconArt.LoadAppIcon();
+            if (_iconNormal is not null)
             {
-                Header = "Werkmodus (alles aan)",
-                IsCheckable = true,
-                IsChecked = _workModeService.IsEnabled
-            };
-            _workModeMenuItem.Click += (_, _) => _workModeService.SetEnabled(_workModeMenuItem.IsChecked);
-            return _workModeMenuItem;
-        }
-
-        private MenuItem CreatePreviewMenuItem()
-        {
-            var item = new MenuItem { Header = "Sterren bekijken" };
-            item.Click += (_, _) => ShowScreensaverPreview();
-            return item;
-        }
-
-        private MenuItem CreateFlightsPreviewMenuItem()
-        {
-            var item = new MenuItem { Header = "Vliegtuigen bekijken" };
-            item.Click += (_, _) => _preview.Show(allScreens: true, Features.MonitorBlackout.Models.OverlayScene.Flights);
-            return item;
-        }
-
-        /// <summary>
-        /// Shows the starfield on all monitors (one continuous sky), using the real overlay window, until the
-        /// mouse is moved. Handy to see what the screensaver looks like without waiting for the idle timer.
-        /// </summary>
-        private void ShowScreensaverPreview() => _preview.Show(allScreens: true);
-
-        private MenuItem CreateShowSettingsMenuItem()
-        {
-            var item = new MenuItem { Header = "Instellingen openen" };
-            item.Click += (_, _) => _showMainWindowAction?.Invoke();
-            return item;
-        }
-
-        /// <summary>
-        /// Creates the menu item used to toggle the run-at-startup registry setting.
-        /// </summary>
-        /// <returns>A configured MenuItem for the startup toggle.</returns>
-        private MenuItem CreateStartupMenuItem()
-        {
-            var item = new MenuItem
-            {
-                Header = "Starten met Windows",
-                IsCheckable = true,
-                IsChecked = StartupHelper.IsRunAtStartupEnabled()
-            };
-
-            item.Click += HandleStartupMenuItemClick;
-            return item;
-        }
-
-        /// <summary>
-        /// Handles the click event for the startup menu item, updating the registry and reverting UI state on failure.
-        /// </summary>
-        private void HandleStartupMenuItemClick(object sender, RoutedEventArgs e)
-        {
-            if (sender is not MenuItem item) return;
-
-            try
-            {
-                StartupHelper.SetRunAtStartup(item.IsChecked);
+                _iconPaused = TrayIconArt.WithPauseBadge(_iconNormal);
+                _tray.Icon = _iconNormal;
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Failed to toggle startup registry key.");
-                item.IsChecked = !item.IsChecked; // Revert UI state on failure
-            }
-        }
 
-        /// <summary>
-        /// Creates the menu item used to exit the application.
-        /// </summary>
-        /// <returns>A configured MenuItem for exiting.</returns>
-        private MenuItem CreateExitMenuItem()
-        {
-            var item = new MenuItem { Header = "Afsluiten" };
-            item.Click += (_, _) => _exitApplicationAction?.Invoke();
-            return item;
-        }
+            _hotkey.Pressed += HotkeyPressed;
+            _hotkey.Changed += HotkeyChanged;
+            _hotkey.Register();
+            _workMode.Changed += WorkModeChanged;
 
-        /// <summary>
-        /// Loads and sets the tray icon from resources.
-        /// </summary>
-        private void SetTrayIcon()
-        {
-            if (_notifyIcon == null) return;
-
-            try
-            {
-                var iconUri = new Uri("pack://application:,,,/Assets/icon.ico", UriKind.RelativeOrAbsolute);
-                _normalIcon = new System.Drawing.Icon(Application.GetResourceStream(iconUri)!.Stream, 32, 32);
-                _pausedIcon = CreatePausedIcon(_normalIcon);
-                _notifyIcon.Icon = _normalIcon;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Failed to load tray icon from resources.");
-            }
-        }
-
-        /// <summary>
-        /// Disposes the tray icon and releases resources.
-        /// </summary>
-        /// <summary>
-        /// The normal icon with an amber pause badge in the corner, shown while the work mode is on.
-        /// </summary>
-        private static System.Drawing.Icon? CreatePausedIcon(System.Drawing.Icon baseIcon)
-        {
-            try
-            {
-                using var bitmap = new System.Drawing.Bitmap(32, 32);
-                using (var g = System.Drawing.Graphics.FromImage(bitmap))
-                {
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    g.DrawIcon(baseIcon, new System.Drawing.Rectangle(0, 0, 32, 32));
-                    using var badge = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 255, 176, 32));
-                    using var bars = new System.Drawing.SolidBrush(System.Drawing.Color.Black);
-                    g.FillEllipse(badge, 14, 14, 18, 18);
-                    g.FillRectangle(bars, 19, 18, 3, 10);
-                    g.FillRectangle(bars, 24, 18, 3, 10);
-                }
-
-                var handle = bitmap.GetHicon();
-                // Clone so the icon owns its own handle data; the GDI handle itself is small and lives for the app's lifetime.
-                return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(handle).Clone();
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "Kon pauze-icoon niet maken; het normale icoon wordt gebruikt.");
-                return null;
-            }
+            Refresh(_workMode.IsEnabled, announce: false);
         }
 
         public void Dispose()
         {
-            _workModeService.Changed -= OnWorkModeChanged;
-            _hotkeyService.Pressed -= OnHotkeyPressed;
-            _hotkeyService.Changed -= OnHotkeyChanged;
-            _hotkeyService.Dispose();
-            _notifyIcon?.Dispose();
+            _workMode.Changed -= WorkModeChanged;
+            _hotkey.Pressed -= HotkeyPressed;
+            _hotkey.Changed -= HotkeyChanged;
+            _hotkey.Dispose();
+            _tray?.Dispose();
         }
+
+        // ---- menu ----
+
+        private ContextMenu BuildMenu()
+        {
+            _workModeToggle = new MenuItem { Header = "Werkmodus (alles aan)", IsCheckable = true, IsChecked = _workMode.IsEnabled };
+            _workModeToggle.Click += (_, _) => _workMode.SetEnabled(_workModeToggle.IsChecked);
+
+            var autostart = new MenuItem { Header = "Starten met Windows", IsCheckable = true, IsChecked = StartupHelper.IsRunAtStartupEnabled() };
+            autostart.Click += (_, _) => ApplyAutostart(autostart);
+
+            var menu = new ContextMenu();
+            menu.Items.Add(_workModeToggle);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Entry("Sterren bekijken", PreviewStars));
+            menu.Items.Add(Entry("Vliegtuigen bekijken", PreviewFlights));
+            menu.Items.Add(Entry("Instellingen openen", () => _openSettings()));
+            menu.Items.Add(autostart);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Entry("Afsluiten", () => _quit()));
+
+            // The settings window can change autostart too, so re-read it whenever the menu opens.
+            menu.Opened += (_, _) => autostart.IsChecked = StartupHelper.IsRunAtStartupEnabled();
+            return menu;
+        }
+
+        private static MenuItem Entry(string header, Action onClick)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => onClick();
+            return item;
+        }
+
+        // The check mark has already flipped when Click fires; flip it back if the registry write fails.
+        private static void ApplyAutostart(MenuItem toggle)
+        {
+            bool wanted = toggle.IsChecked;
+            try
+            {
+                StartupHelper.SetRunAtStartup(wanted);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Could not change the run-at-startup setting.");
+                toggle.IsChecked = !wanted;
+            }
+        }
+
+        // Real overlay windows on every monitor, as one continuous scene, until the mouse moves.
+        private void PreviewStars() => _preview.Show(allScreens: true);
+
+        private void PreviewFlights() => _preview.Show(allScreens: true, OverlayScene.Flights);
+
+        // ---- quick panel ----
+
+        // Alt+Tab style: the first press opens the panel, further presses while the modifier is
+        // still held step through its entries.
+        private void HotkeyPressed()
+        {
+            if (_panel is null)
+                OpenQuickPanel();
+            else
+                _panel.Next();
+        }
+
+        private void OpenQuickPanel()
+        {
+            var all = _monitors.GetLatestMonitorsBasicInfo();
+            Point mouse = MousePosition();
+            var screen = all.FirstOrDefault(m => m.Bounds.Contains(mouse)) ?? all.FirstOrDefault();
+            if (screen is null)
+                return;
+
+            _panel = new QuickPanelWindow(
+                _workMode,
+                () => _openSettings(),
+                PreviewStars,
+                PreviewFlights,
+                screen.Bounds,
+                _hotkey.HoldKey,
+                QuickPanelHint(_hotkey.HotkeyText),
+                _brightness);
+            _panel.Closed += (_, _) => _panel = null;
+            _panel.Show();
+        }
+
+        // "Ctrl+Alt+Space" -> hold "Ctrl+Alt", tap "Space".
+        private static string QuickPanelHint(string hotkey)
+        {
+            int split = hotkey.LastIndexOf('+');
+            string hold = split < 0 ? hotkey : hotkey[..split];
+            string tap = hotkey[(split + 1)..];
+            return $"{hold} vasthouden + {tap} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten";
+        }
+
+        // ---- work mode feedback ----
+
+        private void HotkeyChanged() => Refresh(_workMode.IsEnabled, announce: false);
+
+        // Raised from whatever thread changed the mode; the tray must be touched on the UI thread.
+        private void WorkModeChanged(bool on) =>
+            Application.Current?.Dispatcher.BeginInvoke(() => Refresh(on, announce: true));
+
+        private void Refresh(bool on, bool announce)
+        {
+            if (_tray is null)
+                return;
+
+            if (_workModeToggle is not null)
+                _workModeToggle.IsChecked = on;
+
+            string shortcut = _hotkey.IsRegistered ? _hotkey.HotkeyText : "sneltoets niet beschikbaar";
+            string until = _workMode.EnabledUntil is { } end ? $" tot {end.ToLocalTime():HH:mm}" : "";
+
+            _tray.ToolTipText = on
+                ? $"{AppName} – WERKMODUS{until}: alles blijft aan ({shortcut} = snelmenu)"
+                : $"{AppName} – bescherming actief ({shortcut} = snelmenu)";
+
+            if ((on ? _iconPaused : _iconNormal) is { } image)
+                _tray.Icon = image;
+
+            if (!announce)
+                return;
+
+            if (on)
+                _tray.ShowBalloonTip("Werkmodus aan" + until, "Alle schermen blijven aan.", BalloonIcon.Info);
+            else
+                _tray.ShowBalloonTip("Werkmodus uit", "Inbrandbescherming is weer actief.", BalloonIcon.Info);
+        }
+
+        // ---- Win32 ----
+
+        private static Point MousePosition() =>
+            GetCursorPos(out var p) ? new Point(p.X, p.Y) : new Point();
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ScreenPoint
+        {
+            public int X;
+            public int Y;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out ScreenPoint point);
     }
 }

@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
 using OLED_Sleeper.UI.Helpers;
 using OLED_Sleeper.UI.Services.Interfaces;
@@ -5,39 +6,30 @@ using OLED_Sleeper.UI.ViewModels;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Saves monitor settings through <see cref="IMonitorSettingsFileService"/>, reporting an invalid
-    /// configuration with a modal dialog rather than writing it.
-    /// </summary>
-    public class MonitorSettingsSaveService : IMonitorSettingsSaveService
+    // Validate first, then write all monitors in one go. A rejected save shows a dialog instead.
+    public class MonitorSettingsSaveService(
+        IMonitorSettingsFileService settingsFile,
+        IDialogService dialogs) : IMonitorSettingsSaveService
     {
-        private readonly IMonitorSettingsFileService _settingsService;
-        private readonly IDialogService _dialogService;
+        private const string RejectedTitle = "Instellingen niet compleet";
 
-        public MonitorSettingsSaveService(
-            IMonitorSettingsFileService settingsService,
-            IDialogService dialogService)
-        {
-            _settingsService = settingsService;
-            _dialogService = dialogService;
-        }
-
-        /// <inheritdoc />
         public bool TrySave(IReadOnlyList<MonitorLayoutViewModel> monitors)
         {
-            var error = MonitorSettingsValidator.BuildValidationError(monitors);
-            if (error != null)
+            if (MonitorSettingsValidator.BuildValidationError(monitors) is { } problem)
             {
-                _dialogService.ShowError(error, "Instellingen niet compleet");
+                dialogs.ShowError(problem, RejectedTitle);
                 return false;
             }
 
-            _settingsService.SaveSettings(monitors.Select(m => m.Configuration.ToSettings()).ToList());
+            var snapshot = new List<MonitorSettings>(monitors.Count);
+            foreach (var tile in monitors)
+                snapshot.Add(tile.Configuration.ToSettings());
 
-            foreach (var monitor in monitors)
-            {
-                monitor.Configuration.MarkAsSaved();
-            }
+            settingsFile.SaveSettings(snapshot);
+
+            // Only after the write succeeded: if it throws, the edits stay marked as unsaved.
+            foreach (var tile in monitors)
+                tile.Configuration.MarkAsSaved();
 
             return true;
         }

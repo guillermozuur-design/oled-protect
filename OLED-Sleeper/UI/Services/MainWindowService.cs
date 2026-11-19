@@ -7,69 +7,49 @@ using System.Windows;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Provides methods to set up, show, and activate the main window, and hides it rather than
-    /// letting it close.
-    /// </summary>
+    // The settings window lives as long as the app: closing it only sends it back to the tray.
+    // A real close happens only once the app is shutting down.
     public class MainWindowService(
-        MainWindow mainWindow,
-        MainViewModel mainViewModel,
-        IOptions<ApplicationOptions> options,
-        IMainWindowAccessor mainWindowAccessor,
-        IUnsavedSettingsService unsavedSettingsService) : IMainWindowService
+        MainWindow window,
+        MainViewModel viewModel,
+        IOptions<ApplicationOptions> appOptions,
+        IMainWindowAccessor windowRegistry,
+        IUnsavedSettingsService pendingEditsGuard) : IMainWindowService
     {
-        private readonly ApplicationOptions _options = options.Value;
+        private bool _exiting;
 
-        /// <summary>
-        /// True once the application has started exiting.
-        /// </summary>
-        private bool _isShuttingDown;
-
-        /// <inheritdoc />
         public void SetupMainWindow()
         {
-            mainWindowAccessor.SetMainWindow(mainWindow);
-            mainWindow.DataContext = mainViewModel;
-            mainWindow.Closing += OnMainWindowClosing;
+            windowRegistry.SetMainWindow(window);
+            window.DataContext = viewModel;
+            window.Closing += InterceptClose;
 
-            if (_options.StartHidden)
-            {
-                mainWindow.Hide();
-            }
-            else
-            {
+            // Started from Windows' autostart the app normally goes straight to the tray.
+            if (!appOptions.Value.StartHidden)
                 ShowMainWindow();
-            }
+            else
+                window.Hide();
         }
 
-        /// <inheritdoc />
         public void ShowMainWindow()
         {
-            mainWindow.Show();
-            if (mainWindow.WindowState == WindowState.Minimized)
-            {
-                mainWindow.WindowState = WindowState.Normal;
-            }
-            mainWindow.Activate();
+            window.Show();
+            if (window.WindowState is WindowState.Minimized)
+                window.WindowState = WindowState.Normal;
+            window.Activate();
         }
 
-        /// <inheritdoc />
-        public void PrepareForShutdown() => _isShuttingDown = true;
+        public void PrepareForShutdown() => _exiting = true;
 
-        /// <summary>
-        /// Hides the window instead of closing it, once the user has answered for any unsaved settings.
-        /// The close is left alone during shutdown.
-        /// </summary>
-        private void OnMainWindowClosing(object? sender, CancelEventArgs e)
+        private void InterceptClose(object? sender, CancelEventArgs args)
         {
-            if (_isShuttingDown) return;
+            if (_exiting)
+                return;
 
-            e.Cancel = true;
-
-            if (unsavedSettingsService.ConfirmHide())
-            {
-                mainWindow.Hide();
-            }
+            // Never close; hide instead, but only after pending edits have been saved or dropped.
+            args.Cancel = true;
+            if (pendingEditsGuard.ConfirmHide())
+                window.Hide();
         }
     }
 }

@@ -3,59 +3,35 @@ using System.Text;
 
 namespace OLED_Sleeper.UI.Helpers
 {
-    /// <summary>
-    /// Provides validation logic for monitor settings.
-    /// This is a static helper class and does not hold any state.
-    /// </summary>
+    // Decides whether the edited monitor settings may be written, and explains to the user why not.
+    // Monitors that are not managed are ignored: their half-filled fields do no harm.
     public static class MonitorSettingsValidator
     {
-        /// <summary>
-        /// Validates the provided monitor settings.
-        /// </summary>
-        /// <param name="monitors">The collection of monitor layout view models to validate.</param>
-        /// <returns>An error message describing every invalid monitor, or null when all are valid.</returns>
+        private const string Intro = "Een of meer schermen zijn nog niet goed ingesteld en kunnen niet worden opgeslagen:";
+        private const string Advice = "Pas de gemarkeerde velden aan, of zet het bewaken van dat scherm uit.";
+
+        // Null when everything can be saved; otherwise a ready-to-show message naming each problem.
         public static string? BuildValidationError(IEnumerable<MonitorLayoutViewModel> monitors)
         {
-            var invalidMonitors = GetInvalidMonitors(monitors);
+            StringBuilder? report = null;
 
-            return invalidMonitors.Count > 0 ? BuildMessage(invalidMonitors) : null;
-        }
-
-        /// <summary>
-        /// Returns a list of monitors that are managed but have invalid configuration.
-        /// </summary>
-        /// <param name="monitors">The collection of monitor layout view models to check.</param>
-        /// <returns>A list of invalid monitor view models.</returns>
-        private static List<MonitorLayoutViewModel> GetInvalidMonitors(IEnumerable<MonitorLayoutViewModel> monitors)
-        {
-            return monitors
-                .Where(m => m.Configuration.IsManaged && !m.Configuration.IsValid)
-                .ToList();
-        }
-
-        /// <summary>
-        /// Builds the validation error message for the provided invalid monitors.
-        /// </summary>
-        /// <param name="invalidMonitors">The list of invalid monitor view models.</param>
-        /// <returns>The assembled error message.</returns>
-        private static string BuildMessage(List<MonitorLayoutViewModel> invalidMonitors)
-        {
-            var errorBuilder = new StringBuilder();
-            errorBuilder.AppendLine("Een of meer schermen zijn nog niet goed ingesteld en kunnen niet worden opgeslagen:");
-            foreach (var monitor in invalidMonitors)
+            foreach (var monitor in monitors)
             {
-                errorBuilder.AppendLine($" - {monitor.MonitorTitle}:");
-                var config = monitor.Configuration;
-                if (!string.IsNullOrWhiteSpace(config.BehaviorError))
-                    errorBuilder.AppendLine($"     • {config.BehaviorError}");
-                if (!string.IsNullOrWhiteSpace(config.IdleValueError))
-                    errorBuilder.AppendLine($"     • {config.IdleValueError}");
-                if (!string.IsNullOrWhiteSpace(config.ActiveConditionsError))
-                    errorBuilder.AppendLine($"     • {config.ActiveConditionsError}");
-            }
-            errorBuilder.AppendLine("\nPas de gemarkeerde velden aan, of zet het bewaken van dat scherm uit.");
+                var cfg = monitor.Configuration;
+                if (!cfg.IsManaged || cfg.IsValid)
+                    continue;
 
-            return errorBuilder.ToString();
+                report ??= new StringBuilder().AppendLine(Intro);
+                report.Append("• ").Append(monitor.MonitorTitle).AppendLine(":");
+
+                foreach (var problem in new[] { cfg.BehaviorError, cfg.IdleValueError, cfg.ActiveConditionsError })
+                {
+                    if (!string.IsNullOrWhiteSpace(problem))
+                        report.Append("    – ").AppendLine(problem);
+                }
+            }
+
+            return report?.AppendLine().AppendLine(Advice).ToString();
         }
     }
 }
