@@ -2,286 +2,232 @@ using OledProtect.Features.MonitorInformation.Models;
 using OledProtect.Features.MonitorInformation.Services.Interfaces;
 using OledProtect.Native;
 using Serilog;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace OledProtect.Features.MonitorInformation.Services
 {
     /// <summary>
-    /// Reads the attached monitors from the Win32 display APIs and probes their panels over DDC/CI.
+    /// Lists the desktop's monitors through user32 and asks their panels about DDC/CI through dxva2.
     /// </summary>
     public sealed class MonitorInfoProvider : IMonitorInfoProvider
     {
-        // A panel that just woke up sometimes drops the first DDC/CI transaction, so a read gets a second chance.
-        private const int BrightnessReadAttempts = 2;
-        private static readonly TimeSpan FailedReadPause = TimeSpan.FromMilliseconds(50);
+        // Freshly woken panels tend to miss one DDC/CI exchange; each panel gets this many brightness reads.
+        private const int ReadsPerPanel = 2;
+        private static readonly TimeSpan AfterMissedRead = TimeSpan.FromMilliseconds(50);
 
         public List<MonitorInfo> GetAllMonitorsBasicInfo()
         {
-            var identities = IdentifySurfaces();
-            var readings = new List<MonitorInfo>();
+            var owners = MapSurfacesToPanels();
 
-            foreach (nint hMonitor in DisplayMonitors.EnumerateHandles())
-            {
-                if (DisplayMonitors.TryDescribe(hMonitor, out var described))
-                {
-                    readings.Add(BuildReading(hMonitor, described, identities));
-                }
-            }
-
-            return readings;
+            return DisplayMonitors.EnumerateHandles()
+                .Select(handle => DisplayMonitors.TryDescribe(handle, out var info) ? Describe(handle, info, owners) : null)
+                .OfType<MonitorInfo>()
+                .ToList();
         }
 
         public DdcCiCapabilities GetDdcCiCapabilities(MonitorInfo target)
         {
-            var capabilities = ProbeSurface(target.DeviceName);
-            Log.Debug("DDC/CI probe of {HardwareId} ({DeviceName}): supported={IsSupported}, brightness range 0-{MaxBrightness}.",
-                target.HardwareId, target.DeviceName, capabilities.IsSupported, capabilities.MaxBrightness);
-            return capabilities;
+            var found = AskSurface(target.DeviceName);
+            Log.Debug("{DeviceName} / {HardwareId}: DDC/CI {IsSupported}, top level {MaxBrightness}.",
+                target.DeviceName, target.HardwareId, found.IsSupported, found.MaxBrightness);
+            return found;
         }
 
-        private static MonitorInfo BuildReading(
-            nint hMonitor, in NativeMethods.MonitorInfoEx described, Dictionary<string, SurfaceIdentity> identities)
+        private static MonitorInfo Describe(nint handle, NativeMethods.MonitorInfoEx info, Dictionary<string, PanelOwner> owners)
         {
-            string deviceName = described.szDevice;
-            var identity = identities.GetValueOrDefault(deviceName, SurfaceIdentity.Unresolved);
-            if (identity.HardwareId.Length == 0)
+            string surface = info.szDevice;
+            if (!owners.TryGetValue(surface, out var owner))
             {
-                Log.Debug("Could not resolve a hardware ID for {DeviceName}.", deviceName);
+                owner = new PanelOwner("", "");
+                Log.Debug("{DeviceName}: no panel could be matched to this surface.", surface);
             }
 
-            // The HRESULT is not checked: a failed call leaves the DPI at zero, which callers already treat as unknown.
-            NativeMethods.GetDpiForMonitor(hMonitor, NativeMethods.MDT_EFFECTIVE_DPI, out uint dpi, out _);
+            // A failing call leaves dpi at 0, which the rest of the app reads as "unknown"; no need to check it.
+            _ = NativeMethods.GetDpiForMonitor(handle, NativeMethods.MDT_EFFECTIVE_DPI, out uint dpi, out _);
 
             return new MonitorInfo
             {
-                DeviceName = deviceName,
-                HardwareId = identity.HardwareId,
-                TopologyLabel = identity.TopologyLabel,
-                Bounds = described.rcMonitor.ToWindowsRect(),
-                IsPrimary = (described.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0,
+                DeviceName = surface,
+                DisplayNumber = NumberSuffix(surface),
+                HardwareId = owner.HardwareId,
+                TopologyLabel = owner.Label,
+                IsPrimary = (info.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0,
+                Bounds = info.rcMonitor.ToWindowsRect(),
                 Dpi = dpi,
-                DisplayNumber = TrailingNumber(deviceName),
             };
         }
 
-        // \\.\DISPLAY3 -> 3. Anything without trailing digits (or too many of them) -> -1.
-        private static int TrailingNumber(string deviceName)
+        // "\\.\DISPLAY12" gives 12; a name that does not end in digits (or whose digits overflow an int) gives -1.
+        private static int NumberSuffix(string name)
         {
-            int firstDigit = deviceName.Length;
-            while (firstDigit > 0 && char.IsAsciiDigit(deviceName[firstDigit - 1]))
-            {
-                firstDigit--;
-            }
-
-            bool hasDigits = firstDigit < deviceName.Length;
-            return hasDigits && int.TryParse(deviceName.AsSpan(firstDigit), out int number) ? number : -1;
+            ReadOnlySpan<char> whole = name;
+            ReadOnlySpan<char> digits = whole[whole.TrimEnd("0123456789").Length..];
+            return !digits.IsEmpty && int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int n) ? n : -1;
         }
 
-        // ----- DDC/CI probing -----
+        // ===== DDC/CI =====
 
-        private static DdcCiCapabilities ProbeSurface(string deviceName)
+        private static DdcCiCapabilities AskSurface(string surface)
         {
-            nint hMonitor = DisplayMonitors.FindByDeviceName(deviceName);
-            if (hMonitor == 0) return default;
-
-            var panels = DisplayMonitors.OpenPhysicalMonitors(hMonitor);
-            if (panels is null) return default;
+            nint handle = DisplayMonitors.FindByDeviceName(surface);
+            var physical = handle == 0 ? null : DisplayMonitors.OpenPhysicalMonitors(handle);
+            if (physical is null) return default;
 
             try
             {
-                // A duplicated surface has several panels; the first one that speaks DDC/CI decides.
-                foreach (var panel in panels)
-                {
-                    if (TryProbePanel(panel.hPhysicalMonitor, out var capabilities)) return capabilities;
-                }
-
-                return default;
+                // A cloned surface has a physical monitor per panel; the first that answers wins.
+                return physical
+                    .Select(p => AskPanel(p.hPhysicalMonitor))
+                    .FirstOrDefault(answer => answer is not null) ?? default;
             }
             finally
             {
-                DisplayMonitors.Release(panels);
+                DisplayMonitors.Release(physical);
             }
         }
 
-        // A panel counts as DDC/CI-capable when it answers a brightness read. Some (an LG UltraGear OLED over
-        // DisplayPort, for one) never hand out a capabilities string but do take brightness reads and writes,
-        // so the capabilities string is only the fallback, and then the range stays unknown.
-        private static bool TryProbePanel(nint panel, out DdcCiCapabilities capabilities)
+        // Brightness reads come first because some panels (seen on an LG UltraGear OLED via DisplayPort) work
+        // fine with them yet never return a capabilities string. That string is the last resort and gives no range.
+        // Null when the panel did not respond to either.
+        private static DdcCiCapabilities? AskPanel(nint panel)
         {
-            for (int attempt = 0; attempt < BrightnessReadAttempts; attempt++)
+            for (int left = ReadsPerPanel; left > 0; left--)
             {
-                if (DisplayMonitors.TryReadBrightness(panel, out _, out uint maximum) && maximum > 0)
-                {
-                    capabilities = new DdcCiCapabilities(true, maximum);
-                    return true;
-                }
-
-                Thread.Sleep(FailedReadPause);
+                if (DisplayMonitors.TryReadBrightness(panel, out _, out uint top) && top > 0) return new DdcCiCapabilities(true, top);
+                Thread.Sleep(AfterMissedRead);
             }
 
-            capabilities = new DdcCiCapabilities(DisplayMonitors.ReportsCapabilities(panel), 0);
-            return capabilities.IsSupported;
+            return DisplayMonitors.ReportsCapabilities(panel) ? new DdcCiCapabilities(true, 0) : null;
         }
 
-        // ----- Identity: which panel a desktop surface belongs to -----
+        // ===== Which panel owns which desktop surface =====
 
-        // Maps each attached adapter's GDI name (\\.\DISPLAYn) to the panel its surface belongs to.
-        // Adapters whose panel could not be told apart are left out.
-        private static Dictionary<string, SurfaceIdentity> IdentifySurfaces()
+        // Keyed by the adapter's GDI name (\\.\DISPLAYn). Surfaces whose panel stays unknown are not in the map.
+        private static Dictionary<string, PanelOwner> MapSurfacesToPanels()
         {
-            var identities = new Dictionary<string, SurfaceIdentity>();
-            List<ActivePath>? activePaths = null; // only duplicated surfaces need these, so read them lazily
+            var owners = new Dictionary<string, PanelOwner>();
+            Lazy<ActiveTopology> topology = new(ActiveTopology.Read); // only clones need it
 
-            foreach (var adapter in ListDevices(null, 0))
+            var onDesktop = EnumerateDevices(null, 0).Where(a => (a.StateFlags & NativeMethods.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0);
+            foreach (var adapter in onDesktop)
             {
-                if (!IsOnDesktop(adapter)) continue;
+                string[] ids = EnumerateDevices(adapter.DeviceName, 0).Select(m => m.DeviceID ?? "").ToArray();
+                PanelOwner? owner = ids.Length switch
+                {
+                    0 => null,
+                    1 => new PanelOwner(ids[0], ""),
+                    _ => OwnerOfClone(adapter.DeviceName, ids, topology.Value),
+                };
 
-                var hardwareIds = ListDevices(adapter.DeviceName, 0).ConvertAll(child => child.DeviceID ?? "");
-
-                SurfaceIdentity identity;
-                if (hardwareIds.Count == 0)
-                {
-                    continue;
-                }
-                else if (hardwareIds.Count == 1)
-                {
-                    identity = new SurfaceIdentity(hardwareIds[0], "");
-                }
-                else
-                {
-                    activePaths ??= ReadActivePaths();
-                    identity = IdentifyDuplicatedSurface(adapter.DeviceName, hardwareIds, activePaths);
-                }
-
-                if (identity.HardwareId.Length > 0)
-                {
-                    identities[adapter.DeviceName] = identity;
-                }
+                if (owner is { HardwareId.Length: > 0 }) owners[adapter.DeviceName] = owner;
             }
 
-            return identities;
+            return owners;
         }
 
-        // An adapter with several monitor children is a duplicated (cloned) surface. Its children come in no useful
-        // order (a virtual display may well be first), so the active display paths decide: the panel the surface's
-        // own path drives is the monitor, and every child with a path of its own contributes its display number to
-        // the label Windows shows, such as 1|2.
-        private static SurfaceIdentity IdentifyDuplicatedSurface(string adapterName, List<string> hardwareIds, List<ActivePath> activePaths)
+        // A cloned surface lists several monitors under one adapter, in arbitrary order. The CCD path whose source
+        // is this surface names the panel that really drives it (by device interface path); EnumDisplayDevices
+        // with EDD_GET_DEVICE_INTERFACE_NAME gives the same kind of path per listed monitor, so the two can be
+        // matched. The label lists the display numbers of every listed monitor that has an active path ("1|2").
+        private static PanelOwner OwnerOfClone(string surface, string[] ids, ActiveTopology topology)
         {
-            string drivenPanelPath = activePaths.Find(path => SameText(path.GdiDeviceName, adapterName)).DevicePath ?? "";
-            var interfacePaths = ListDevices(adapterName, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME);
+            string driver = topology.TargetOfSource(surface);
+            var members = ids
+                .Zip(EnumerateDevices(surface, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME).Select(m => m.DeviceID ?? ""))
+                .Where(pair => pair.Second.Length > 0)
+                .ToList();
 
-            string owner = "";
-            var sharedNumbers = new List<int>();
-            int childCount = Math.Min(interfacePaths.Count, hardwareIds.Count);
-
-            for (int child = 0; child < childCount; child++)
+            string? matched = members.LastOrDefault(pair => SameText(pair.Second, driver)).First;
+            string owner = string.IsNullOrEmpty(matched) ? ids[0] : matched;
+            if (string.IsNullOrEmpty(matched))
             {
-                string interfacePath = interfacePaths[child].DeviceID ?? "";
-                if (interfacePath.Length == 0) continue;
-
-                if (SameText(interfacePath, drivenPanelPath))
-                {
-                    owner = hardwareIds[child];
-                }
-
-                int pathIndex = activePaths.FindIndex(path => SameText(path.DevicePath, interfacePath));
-                if (pathIndex >= 0)
-                {
-                    sharedNumbers.Add(pathIndex + 1); // display numbers follow the path order, starting at 1
-                }
+                Log.Debug("{DeviceName}: clone of {Count} monitors without a driving path match; taking {HardwareId}.",
+                    surface, ids.Length, owner);
             }
 
-            if (owner.Length == 0)
-            {
-                owner = hardwareIds[0];
-                Log.Debug("{DeviceName} shows {Count} monitors but no active path pointed at one; using the first, {HardwareId}.",
-                    adapterName, hardwareIds.Count, owner);
-            }
-
-            sharedNumbers.Sort();
-            return new SurfaceIdentity(owner, sharedNumbers.Count > 1 ? string.Join('|', sharedNumbers) : "");
+            var numbers = members.Select(pair => topology.NumberOfTarget(pair.Second)).Where(n => n > 0).Order().ToList();
+            return new PanelOwner(owner, numbers.Count > 1 ? string.Join('|', numbers) : "");
         }
 
-        // Walks either the display adapters (parent null) or the monitors attached to one adapter.
-        private static List<NativeMethods.DISPLAY_DEVICE> ListDevices(string? parent, uint flags)
+        // Adapters when parent is null, otherwise the monitors listed under that adapter.
+        private static IEnumerable<NativeMethods.DISPLAY_DEVICE> EnumerateDevices(string? parent, uint flags)
         {
-            var devices = new List<NativeMethods.DISPLAY_DEVICE>();
-            for (uint index = 0; ; index++)
-            {
-                var device = new NativeMethods.DISPLAY_DEVICE { cb = Marshal.SizeOf<NativeMethods.DISPLAY_DEVICE>() };
-                if (!NativeMethods.EnumDisplayDevices(parent, index, ref device, flags)) return devices;
+            uint i = 0;
+            while (TryGet(i++, out var device)) yield return device;
 
-                devices.Add(device);
+            // A fresh struct per index, with cb filled in as the API requires.
+            bool TryGet(uint index, out NativeMethods.DISPLAY_DEVICE found)
+            {
+                found = new NativeMethods.DISPLAY_DEVICE { cb = Marshal.SizeOf<NativeMethods.DISPLAY_DEVICE>() };
+                return NativeMethods.EnumDisplayDevices(parent, index, ref found, flags);
             }
         }
 
-        // The active display paths in the order Windows numbers them (the first is display 1); empty when the
-        // configuration could not be read.
-        private static List<ActivePath> ReadActivePaths()
+        private static bool SameText(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+        // The surface's owning panel and, for clones, the "1|2" style label Windows shows.
+        private sealed record PanelOwner(string HardwareId, string Label);
+
+        /// <summary>
+        /// The active CCD paths (QueryDisplayConfig with QDC_ONLY_ACTIVE_PATHS) reduced to two lookups:
+        /// source GDI name to target device path, and target device path to display number. Windows numbers the
+        /// displays in path order from 1. When a name occurs on more than one path, the first path counts.
+        /// </summary>
+        private sealed class ActiveTopology
         {
-            const uint scope = NativeMethods.QDC_ONLY_ACTIVE_PATHS;
-            if (NativeMethods.GetDisplayConfigBufferSizes(scope, out uint pathCount, out uint modeCount) != 0) return [];
+            private readonly Dictionary<string, string> _targetBySource = new(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, int> _numberByTarget = new(StringComparer.OrdinalIgnoreCase);
 
-            var pathBuffer = new NativeMethods.DISPLAYCONFIG_PATH_INFO[pathCount];
-            var modeBuffer = new NativeMethods.DISPLAYCONFIG_MODE_INFO[modeCount];
-            if (NativeMethods.QueryDisplayConfig(scope, ref pathCount, pathBuffer, ref modeCount, modeBuffer, 0) != 0) return [];
+            public string TargetOfSource(string gdiName) => _targetBySource.GetValueOrDefault(gdiName, "");
 
-            var result = new List<ActivePath>((int)pathCount);
-            for (int i = 0; i < pathCount; i++)
+            public int NumberOfTarget(string devicePath) => _numberByTarget.GetValueOrDefault(devicePath);
+
+            // Empty when the configuration cannot be queried.
+            public static ActiveTopology Read()
             {
-                result.Add(new ActivePath(SourceGdiName(pathBuffer[i]), TargetDevicePath(pathBuffer[i])));
+                var topology = new ActiveTopology();
+                const uint flags = NativeMethods.QDC_ONLY_ACTIVE_PATHS;
+
+                if (NativeMethods.GetDisplayConfigBufferSizes(flags, out uint pathCount, out uint modeCount) != 0) return topology;
+
+                var pathBuffer = new NativeMethods.DISPLAYCONFIG_PATH_INFO[pathCount];
+                var modeBuffer = new NativeMethods.DISPLAYCONFIG_MODE_INFO[modeCount];
+                if (NativeMethods.QueryDisplayConfig(flags, ref pathCount, pathBuffer, ref modeCount, modeBuffer, 0) != 0) return topology;
+
+                foreach (var (path, number) in pathBuffer.Take((int)pathCount).Select((p, i) => (p, i + 1)))
+                {
+                    string target = TargetPath(path);
+                    topology._targetBySource.TryAdd(SourceName(path), target);
+                    topology._numberByTarget.TryAdd(target, number);
+                }
+
+                return topology;
             }
 
-            return result;
-        }
-
-        private static string SourceGdiName(in NativeMethods.DISPLAYCONFIG_PATH_INFO path)
-        {
-            var request = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
+            private static string SourceName(NativeMethods.DISPLAYCONFIG_PATH_INFO path)
             {
-                header = RequestHeader<NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME>(
-                    NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, path.sourceAdapterId, path.sourceId),
-            };
+                var packet = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
+                {
+                    header = Header<NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME>(
+                        NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, path.sourceAdapterId, path.sourceId),
+                };
+                return NativeMethods.DisplayConfigGetDeviceInfo(ref packet) == 0 ? packet.viewGdiDeviceName ?? "" : "";
+            }
 
-            return NativeMethods.DisplayConfigGetDeviceInfo(ref request) == 0 ? request.viewGdiDeviceName : "";
-        }
-
-        private static string TargetDevicePath(in NativeMethods.DISPLAYCONFIG_PATH_INFO path)
-        {
-            var request = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
+            private static string TargetPath(NativeMethods.DISPLAYCONFIG_PATH_INFO path)
             {
-                header = RequestHeader<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(
-                    NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, path.targetAdapterId, path.targetId),
-            };
+                var packet = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
+                {
+                    header = Header<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(
+                        NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, path.targetAdapterId, path.targetId),
+                };
+                return NativeMethods.DisplayConfigGetDeviceInfo(ref packet) == 0 ? packet.monitorDevicePath ?? "" : "";
+            }
 
-            return NativeMethods.DisplayConfigGetDeviceInfo(ref request) == 0 ? request.monitorDevicePath : "";
+            // DisplayConfigGetDeviceInfo wants the size of the complete packet in its header.
+            private static NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER Header<TPacket>(uint kind, NativeMethods.LUID adapter, uint id) =>
+                new() { type = kind, size = (uint)Marshal.SizeOf<TPacket>(), adapterId = adapter, id = id };
         }
-
-        // The header's size field must hold the size of the whole request packet it heads.
-        private static NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER RequestHeader<TPacket>(
-            uint requestType, NativeMethods.LUID adapterId, uint id) =>
-            new()
-            {
-                type = requestType,
-                size = (uint)Marshal.SizeOf<TPacket>(),
-                adapterId = adapterId,
-                id = id,
-            };
-
-        private static bool IsOnDesktop(in NativeMethods.DISPLAY_DEVICE adapter) =>
-            (adapter.StateFlags & NativeMethods.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
-
-        private static bool SameText(string? left, string? right) =>
-            string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
-
-        // The panel a desktop surface belongs to, plus the display numbers sharing it when it is duplicated.
-        private readonly record struct SurfaceIdentity(string HardwareId, string TopologyLabel)
-        {
-            internal static SurfaceIdentity Unresolved { get; } = new("", "");
-        }
-
-        // One active display path: the GDI surface it shows and the device interface path of the panel it drives.
-        private readonly record struct ActivePath(string GdiDeviceName, string DevicePath);
     }
 }

@@ -3,39 +3,48 @@ using OledProtect.Features.MonitorDimming.Services.Interfaces;
 namespace OledProtect.Tests.TestDoubles
 {
     /// <summary>
-    /// A pretend panel behind a DDC/CI channel. It holds one brightness value; by default a write is what the
-    /// next read returns, which is how a panel that applied the write behaves.
+    /// A simulated panel. It keeps a level, logs every write attempt and counts how often its channel was closed.
+    /// Its knobs (<see cref="Silent"/>, <see cref="Stubborn"/>, <see cref="RejectNext"/>, <see cref="Drift"/>) make it misbehave.
+    /// The same object stands for every channel opened to the panel, so its state survives reconnects.
     /// </summary>
-    public sealed class FakeDdcCiSession(uint initialBrightness) : IDdcCiSession
+    public sealed class FakeDdcCiSession : IDdcCiSession
     {
-        private uint _level = initialBrightness;
+        private readonly List<uint> _attempts = [];
 
-        /// <summary>Reads report "no answer".</summary>
-        public bool IgnoresReads { get; set; }
+        public FakeDdcCiSession(uint level) => Level = level;
 
-        /// <summary>Writes are logged but refused, and the level stays as it was.</summary>
-        public bool RefusesWrites { get; set; }
+        /// <summary>What the panel shows right now.</summary>
+        public uint Level { get; private set; }
 
-        /// <summary>When set, the panel reads back this value after any accepted write instead of the written one.</summary>
-        public uint? SettlesAt { get; set; }
+        /// <summary>When true, every read goes unanswered.</summary>
+        public bool Silent { get; set; }
 
-        /// <summary>Every value handed to <see cref="SetBrightness"/>, refused ones included, oldest first.</summary>
-        public List<uint> WrittenBrightnessLevels { get; } = [];
+        /// <summary>When true, every write is rejected and <see cref="Level"/> does not move.</summary>
+        public bool Stubborn { get; set; }
 
-        /// <summary>How often the channel was disposed; equal to the number of opens when nothing leaked.</summary>
-        public int Disposals { get; private set; }
+        /// <summary>How many of the coming writes are rejected before the panel starts accepting again.</summary>
+        public int RejectNext { get; set; }
 
-        public uint? GetBrightness() => IgnoresReads ? null : _level;
+        /// <summary>Added to each accepted write, imitating a panel that snaps to its own step size.</summary>
+        public int Drift { get; set; }
 
-        public bool SetBrightness(uint rawValue)
+        /// <summary>Each value a write was attempted with, rejected ones too, in order.</summary>
+        public IReadOnlyList<uint> Attempts => _attempts;
+
+        /// <summary>Number of channels closed; matches the number opened when nothing leaked.</summary>
+        public int Closed { get; private set; }
+
+        uint? IDdcCiSession.GetBrightness() => Silent ? null : Level;
+
+        bool IDdcCiSession.SetBrightness(uint rawValue)
         {
-            WrittenBrightnessLevels.Add(rawValue);
-            if (RefusesWrites) return false;
-
-            _level = SettlesAt ?? rawValue;
-            return true;
+            _attempts.Add(rawValue);
+            bool rejected = Stubborn || RejectNext > 0;
+            if (RejectNext > 0) RejectNext--;
+            if (!rejected) Level = (uint)(rawValue + Drift);
+            return !rejected;
         }
 
-        public void Dispose() => Disposals++;
+        void IDisposable.Dispose() => Closed++;
     }
 }

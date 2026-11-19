@@ -5,45 +5,56 @@ using Serilog;
 namespace OledProtect.Features.MonitorInformation.Services
 {
     /// <summary>
-    /// Caches the probed monitor list and makes sure concurrent callers share one scan instead of each
-    /// hammering the DDC/CI bus. Thread-safe.
+    /// Keeps the last probed monitor list. Probing talks DDC/CI to every panel, so only one probe runs at a time
+    /// and requests that queue behind it reuse its result when it is recent enough. Thread-safe.
     /// </summary>
     public sealed class MonitorInfoManager : IMonitorInfoManager
     {
         private readonly IMonitorInfoProvider _provider;
-        private readonly object _gate = new();
 
-        // The scan GetCurrentMonitorsAsync hands out. Null before the first scan and after a failed one.
-        private Task<IReadOnlyList<MonitorInfo>>? _latestScan;
+        // One probe at a time.
+        private readonly SemaphoreSlim _probeTurn = new(1, 1);
 
-        // The scan a refresh started; a second refresh joins it while it is still running.
-        private Task<IReadOnlyList<MonitorInfo>>? _pendingRefresh;
+        // Guards _demanded and _openRefreshes.
+        private readonly object _books = new();
+
+        // Every refresh that does not join a running one asks for a newer generation of the list.
+        private int _demanded;
+        private int _openRefreshes;
+
+        // The last successful probe and the generation it satisfies; null until one succeeded.
+        private volatile Snapshot? _snapshot;
 
         public MonitorInfoManager(IMonitorInfoProvider monitorInfoProvider) => _provider = monitorInfoProvider;
 
         public Task<IReadOnlyList<MonitorInfo>> GetCurrentMonitorsAsync()
         {
-            lock (_gate)
-            {
-                _latestScan ??= BeginScan();
-                return _latestScan;
-            }
+            int wanted;
+            lock (_books) wanted = _demanded;
+
+            return _snapshot is { } fresh && fresh.Generation >= wanted ? fresh.Ready : ObtainAsync(wanted);
         }
 
-        public Task<IReadOnlyList<MonitorInfo>> RefreshMonitorsAsync()
+        public async Task<IReadOnlyList<MonitorInfo>> RefreshMonitorsAsync()
         {
-            lock (_gate)
+            int wanted;
+            lock (_books)
             {
-                if (_pendingRefresh is { IsCompleted: false } running)
-                {
-                    Log.Debug("A monitor rescan is already under way; this refresh request joins it.");
-                    return running;
-                }
+                // A refresh that is still open answers this one too; otherwise ask for a newer list.
+                if (_openRefreshes == 0) _demanded++;
+                else Log.Debug("Monitor rescan requested while one is open; sharing its result.");
 
-                Log.Information("Rescanning the attached monitors on request.");
-                _pendingRefresh = BeginScan();
-                _latestScan = _pendingRefresh;
-                return _pendingRefresh;
+                wanted = _demanded;
+                _openRefreshes++;
+            }
+
+            try
+            {
+                return await ObtainAsync(wanted).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_books) _openRefreshes--;
             }
         }
 
@@ -53,48 +64,59 @@ namespace OledProtect.Features.MonitorInformation.Services
         {
             if (readings is null) return;
 
-            // Everything downstream is keyed on the hardware ID, so a monitor without one cannot be managed.
-            readings.RemoveAll(IsUnidentified);
-
-            foreach (var monitor in readings)
+            // Settings, state and dimming all key on the hardware ID; a monitor without one is dropped here.
+            foreach (var nameless in readings.Where(r => string.IsNullOrEmpty(r.HardwareId)).ToList())
             {
-                monitor.Capabilities = _provider.GetDdcCiCapabilities(monitor);
+                Log.Warning("{DeviceName} dropped from the monitor list: Windows gave it no hardware ID.", nameless.DeviceName);
+                readings.Remove(nameless);
+            }
+
+            readings.ForEach(r => r.Capabilities = _provider.GetDdcCiCapabilities(r));
+        }
+
+        // Waits for the probe turn, then either takes a list that a probe finished meanwhile, or probes itself.
+        // A failed probe leaves the snapshot alone; its caller gets the exception and the next request probes again.
+        private async Task<IReadOnlyList<MonitorInfo>> ObtainAsync(int wanted)
+        {
+            await _probeTurn.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (_snapshot is { } fresh && fresh.Generation >= wanted) return fresh.List;
+
+                int generation;
+                lock (_books) generation = _demanded;
+
+                Log.Information("Probing the attached monitors (list generation {Generation}).", generation);
+                try
+                {
+                    IReadOnlyList<MonitorInfo> list = await Task.Run(ProbeAll).ConfigureAwait(false);
+                    _snapshot = new Snapshot(list, generation);
+                    return list;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Monitor probe failed; nothing cached, the next request probes again.");
+                    throw;
+                }
+            }
+            finally
+            {
+                _probeTurn.Release();
             }
         }
 
-        private static bool IsUnidentified(MonitorInfo monitor)
+        private IReadOnlyList<MonitorInfo> ProbeAll()
         {
-            if (!string.IsNullOrEmpty(monitor.HardwareId)) return false;
-
-            Log.Warning("Monitor {DeviceName} has no hardware ID and is left out; it will not be managed.", monitor.DeviceName);
-            return true;
+            var list = _provider.GetAllMonitorsBasicInfo();
+            EnrichMonitorInfoList(list);
+            return list;
         }
 
-        // Must run under _gate, so the caller has stored the task before a failure handler can look for it.
-        private Task<IReadOnlyList<MonitorInfo>> BeginScan()
+        // A finished probe and the generation it was started for. Ready is created once, so every cache hit
+        // hands out the same completed task.
+        private sealed record Snapshot(IReadOnlyList<MonitorInfo> List, int Generation)
         {
-            Task<IReadOnlyList<MonitorInfo>> scan = Task.Run(ScanAndProbe);
-            _ = scan.ContinueWith(ForgetFailedScan, CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
-            return scan;
-        }
-
-        private IReadOnlyList<MonitorInfo> ScanAndProbe()
-        {
-            var readings = _provider.GetAllMonitorsBasicInfo();
-            EnrichMonitorInfoList(readings);
-            return readings;
-        }
-
-        // A failed scan must not stay cached, or every later caller would get the same exception.
-        private void ForgetFailedScan(Task<IReadOnlyList<MonitorInfo>> failed)
-        {
-            Log.Error(failed.Exception?.GetBaseException(), "Scanning the monitors failed; the next request will scan again.");
-
-            lock (_gate)
-            {
-                if (ReferenceEquals(_latestScan, failed)) _latestScan = null;
-            }
+            public Task<IReadOnlyList<MonitorInfo>> Ready { get; } = Task.FromResult(List);
         }
     }
 }

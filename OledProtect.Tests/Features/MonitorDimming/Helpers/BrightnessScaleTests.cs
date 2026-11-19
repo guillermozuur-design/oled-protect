@@ -4,44 +4,30 @@ namespace OledProtect.Tests.Features.MonitorDimming.Helpers
 {
     public sealed class BrightnessScaleTests
     {
-        [Theory]
-        [InlineData(1, 3u)]     // 2.55
-        [InlineData(15, 38u)]   // 38.25
-        [InlineData(50, 128u)]  // 127.5: halves round up
-        [InlineData(60, 153u)]
-        [InlineData(99, 252u)]  // 252.45
-        public void PanelWithItsOwnRange_GetsThePercentOfThatRange(int percent, uint expected)
+        // percent, panel maximum, expected raw level
+        public static TheoryData<int, uint, uint> Table => new()
         {
-            Assert.Equal(expected, BrightnessScale.ToRawBrightness(percent, 255));
-        }
+            { 0, 255, 0 },
+            { 1, 255, 3 },              // 2.55
+            { 15, 255, 38 },            // 38.25
+            { 50, 255, 128 },           // 127.5, half rounds up
+            { 60, 255, 153 },
+            { 99, 255, 252 },           // 252.45
+            { 100, 255, 255 },
+            { 50, 50, 25 },
+            { 33, 10, 3 },              // 3.3
+            { 35, 10, 4 },              // 3.5, half rounds up
+            { 15, 0, 15 },              // no range reported: percent as is
+            { 15, 100, 15 },            // the panel already works in percent
+            { -1, 255, 0 },             // clamped to 0 first
+            { 101, 255, 255 },          // clamped to 100 first
+            { 250, 0, 100 },            // clamped even without a range
+            { 100, uint.MaxValue, uint.MaxValue }, // no overflow on huge ranges
+        };
 
         [Theory]
-        [InlineData(0u)]   // the panel never reported a range
-        [InlineData(100u)] // the panel already counts in percent
-        public void PanelWithoutAUsableRange_GetsThePercentUnchanged(uint maxBrightness)
-        {
-            Assert.Equal(15u, BrightnessScale.ToRawBrightness(15, maxBrightness));
-        }
-
-        [Theory]
-        [InlineData(-1, 0u)]
-        [InlineData(101, 255u)]
-        public void PercentOutsideZeroToHundred_IsClampedFirst(int percent, uint expected)
-        {
-            Assert.Equal(expected, BrightnessScale.ToRawBrightness(percent, 255));
-        }
-
-        [Fact]
-        public void TheEndsOfThePercentScale_MapToTheEndsOfTheRange()
-        {
-            Assert.Equal(0u, BrightnessScale.ToRawBrightness(0, 255));
-            Assert.Equal(255u, BrightnessScale.ToRawBrightness(100, 255));
-        }
-
-        [Fact]
-        public void VeryLargeRange_DoesNotOverflow()
-        {
-            Assert.Equal(uint.MaxValue, BrightnessScale.ToRawBrightness(100, uint.MaxValue));
-        }
+        [MemberData(nameof(Table))]
+        public void Percent_maps_onto_the_panel_range(int percent, uint maximum, uint expected) =>
+            Assert.Equal(expected, BrightnessScale.ToRawBrightness(percent, maximum));
     }
 }

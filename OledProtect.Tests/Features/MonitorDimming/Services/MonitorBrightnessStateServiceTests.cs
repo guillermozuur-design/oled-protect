@@ -1,4 +1,3 @@
-using Moq;
 using OledProtect.Features.MonitorDimming.Services;
 using OledProtect.Storage.Interfaces;
 
@@ -6,41 +5,52 @@ namespace OledProtect.Tests.Features.MonitorDimming.Services
 {
     public sealed class MonitorBrightnessStateServiceTests
     {
-        // Existing installs have their state under this name; the test pins it so a rename cannot slip through.
-        private const string ExpectedFile = "brightness_state.json";
+        // Installed copies already keep their saved levels in this file, so its name is part of the contract.
+        private const string StateFile = "brightness_state.json";
 
-        private readonly Mock<IAppDataFileStore> _store = new();
+        private readonly MemoryFiles _files = new();
 
         [Fact]
-        public void LoadState_ReturnsWhatTheFileHolds()
+        public void Saved_levels_come_back_as_they_were_written()
         {
-            _store.Setup(s => s.Read<Dictionary<string, uint>>(ExpectedFile))
-                .Returns(new Dictionary<string, uint> { ["PNP-OLED"] = 80 });
+            _files.Content[StateFile] = new Dictionary<string, uint> { ["GSM-1"] = 80, ["DEL-2"] = 120 };
 
-            var loaded = new MonitorBrightnessStateService(_store.Object).LoadState();
+            var loaded = new MonitorBrightnessStateService(_files).LoadState();
 
-            Assert.Equal(80u, Assert.Single(loaded).Value);
+            Assert.Equal(new Dictionary<string, uint> { ["GSM-1"] = 80, ["DEL-2"] = 120 }, loaded);
         }
 
         [Fact]
-        public void LoadState_UnreadableOrMissingFile_GivesAnEmptyMap()
+        public void Missing_or_unreadable_file_loads_as_an_empty_map()
         {
-            _store.Setup(s => s.Read<Dictionary<string, uint>>(ExpectedFile)).Returns(default(Dictionary<string, uint>));
-
-            var loaded = new MonitorBrightnessStateService(_store.Object).LoadState();
+            var loaded = new MonitorBrightnessStateService(_files).LoadState();
 
             Assert.NotNull(loaded);
             Assert.Empty(loaded);
         }
 
         [Fact]
-        public void SaveState_WritesTheMapToTheStateFile()
+        public void Saving_writes_the_map_to_the_state_file()
         {
-            var snapshot = new Dictionary<string, uint> { ["PNP-OLED"] = 80 };
+            var levels = new Dictionary<string, uint> { ["GSM-1"] = 80 };
 
-            new MonitorBrightnessStateService(_store.Object).SaveState(snapshot);
+            new MonitorBrightnessStateService(_files).SaveState(levels);
 
-            _store.Verify(s => s.TryWrite(ExpectedFile, snapshot), Times.Once);
+            Assert.Equal([StateFile], _files.Content.Keys);
+            Assert.Same(levels, _files.Content[StateFile]);
+        }
+
+        private sealed class MemoryFiles : IAppDataFileStore
+        {
+            public Dictionary<string, object?> Content { get; } = [];
+
+            public T? Read<T>(string fileName) => Content.TryGetValue(fileName, out var value) ? (T?)value : default;
+
+            public bool TryWrite<T>(string fileName, T value)
+            {
+                Content[fileName] = value;
+                return true;
+            }
         }
     }
 }

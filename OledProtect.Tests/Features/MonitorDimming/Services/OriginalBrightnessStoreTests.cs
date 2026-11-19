@@ -1,4 +1,3 @@
-using Moq;
 using OledProtect.Features.MonitorDimming.Services;
 using OledProtect.Features.MonitorDimming.Services.Interfaces;
 
@@ -6,101 +5,136 @@ namespace OledProtect.Tests.Features.MonitorDimming.Services
 {
     public sealed class OriginalBrightnessStoreTests
     {
-        private const string Panel = "PNP-OLED";
+        private const string Panel = "GSM-1";
 
-        private readonly Mock<IMonitorBrightnessStateService> _file = new();
-
-        public OriginalBrightnessStoreTests() => FileHolds(new Dictionary<string, uint>());
+        private readonly StateFile _disk = new();
 
         [Fact]
-        public void Recordings_SavedByAnEarlierRun_AreAvailableRightAway()
+        public void Levels_left_by_the_previous_run_are_known_at_once()
         {
-            FileHolds(new Dictionary<string, uint> { [Panel] = 80 });
+            _disk.OnDisk = new() { [Panel] = 80 };
 
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
 
-            Assert.True(store.TryGetOriginal(Panel, out uint level));
-            Assert.Equal(80u, level);
+            Assert.Equal(80u, LevelOf(store));
         }
 
         [Fact]
-        public void TryGetOriginal_UnknownMonitor_IsFalse()
+        public void Unknown_monitor_has_no_level()
         {
-            Assert.False(NewStore().TryGetOriginal(Panel, out _));
+            Assert.False(new OriginalBrightnessStore(_disk).TryGetOriginal(Panel, out _));
         }
 
         [Fact]
-        public void RecordOriginal_FirstTime_KeepsTheLevelAndWritesItToTheFile()
+        public void First_record_is_kept_and_written_through()
         {
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
 
             store.RecordOriginal(Panel, 80);
 
-            Assert.True(store.TryGetOriginal(Panel, out uint level));
-            Assert.Equal(80u, level);
-            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved[Panel] == 80)), Times.Once);
+            Assert.Equal(80u, LevelOf(store));
+            Assert.Equal([$"{Panel}=80"], _disk.Saves);
         }
 
         [Fact]
-        public void RecordOriginal_AlreadyRecorded_KeepsTheFirstLevelAndSavesNothingMore()
+        public void Second_record_does_not_overwrite_the_first_and_saves_nothing()
         {
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
             store.RecordOriginal(Panel, 80);
 
             store.RecordOriginal(Panel, 5);
 
-            store.TryGetOriginal(Panel, out uint level);
-            Assert.Equal(80u, level);
-            _file.Verify(f => f.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Once);
+            Assert.Equal(80u, LevelOf(store));
+            Assert.Single(_disk.Saves);
         }
 
         [Fact]
-        public void ReplaceOriginal_AlreadyRecorded_OverwritesAndSaves()
+        public void Replace_overwrites_and_saves()
         {
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
             store.RecordOriginal(Panel, 80);
 
             store.ReplaceOriginal(Panel, 40);
 
-            store.TryGetOriginal(Panel, out uint level);
-            Assert.Equal(40u, level);
-            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved[Panel] == 40)), Times.Once);
+            Assert.Equal(40u, LevelOf(store));
+            Assert.Equal($"{Panel}=40", _disk.Saves[^1]);
         }
 
         [Fact]
-        public void RemoveOriginal_Recorded_ForgetsItAndSavesTheEmptyMap()
+        public void Replace_also_works_for_a_monitor_without_a_level()
         {
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
+
+            store.ReplaceOriginal(Panel, 40);
+
+            Assert.Equal(40u, LevelOf(store));
+        }
+
+        [Fact]
+        public void Remove_forgets_the_level_and_saves_the_emptied_map()
+        {
+            var store = new OriginalBrightnessStore(_disk);
             store.RecordOriginal(Panel, 80);
 
             store.RemoveOriginal(Panel);
 
             Assert.False(store.TryGetOriginal(Panel, out _));
-            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved.Count == 0)), Times.Once);
+            Assert.Equal("", _disk.Saves[^1]);
         }
 
         [Fact]
-        public void RemoveOriginal_NothingRecorded_DoesNotTouchTheFile()
+        public void Removing_an_unknown_monitor_leaves_the_file_alone()
         {
-            NewStore().RemoveOriginal(Panel);
+            new OriginalBrightnessStore(_disk).RemoveOriginal(Panel);
 
-            _file.Verify(f => f.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Never);
+            Assert.Empty(_disk.Saves);
         }
 
         [Fact]
-        public void GetAll_ReturnsACopyThatCannotChangeTheStore()
+        public void Snapshot_is_a_copy()
         {
-            var store = NewStore();
+            var store = new OriginalBrightnessStore(_disk);
             store.RecordOriginal(Panel, 80);
 
-            var copy = store.GetAll();
-            copy.Clear();
+            store.GetAll().Remove(Panel);
 
-            Assert.True(store.TryGetOriginal(Panel, out _));
+            Assert.Equal(80u, LevelOf(store));
         }
 
-        private OriginalBrightnessStore NewStore() => new(_file.Object);
+        [Fact]
+        public void Saved_maps_are_copies_that_later_changes_do_not_touch()
+        {
+            var store = new OriginalBrightnessStore(_disk);
+            store.RecordOriginal(Panel, 80);
+            var firstSave = _disk.LastSaved;
 
-        private void FileHolds(Dictionary<string, uint> content) => _file.Setup(f => f.LoadState()).Returns(content);
+            store.ReplaceOriginal(Panel, 40);
+
+            Assert.Equal(80u, firstSave![Panel]);
+        }
+
+        private static uint LevelOf(OriginalBrightnessStore store)
+        {
+            Assert.True(store.TryGetOriginal(Panel, out uint level));
+            return level;
+        }
+
+        // Each save is written down as "id=level" pairs, joined by commas in key order.
+        private sealed class StateFile : IMonitorBrightnessStateService
+        {
+            public Dictionary<string, uint> OnDisk { get; set; } = [];
+
+            public List<string> Saves { get; } = [];
+
+            public Dictionary<string, uint>? LastSaved { get; private set; }
+
+            public Dictionary<string, uint> LoadState() => OnDisk;
+
+            public void SaveState(Dictionary<string, uint> snapshot)
+            {
+                LastSaved = snapshot;
+                Saves.Add(string.Join(",", snapshot.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}")));
+            }
+        }
     }
 }

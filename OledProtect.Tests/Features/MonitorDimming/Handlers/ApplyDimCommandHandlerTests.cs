@@ -1,32 +1,31 @@
-using Moq;
 using OledProtect.Features.MonitorDimming.Commands;
 using OledProtect.Features.MonitorDimming.Handlers;
-using OledProtect.Features.MonitorDimming.Services.Interfaces;
 
 namespace OledProtect.Tests.Features.MonitorDimming.Handlers
 {
     public sealed class ApplyDimCommandHandlerTests
     {
-        private readonly Mock<IMonitorDimmingService> _dimming = new();
-        private readonly ApplyDimCommand _dimTo15 = new() { HardwareId = "PNP-OLED", DimLevel = 15 };
+        private readonly RecordingDimmer _dimmer = new();
+
+        private Task Send(string id, int level) =>
+            new ApplyDimCommandHandler(_dimmer).HandleAsync(new ApplyDimCommand { HardwareId = id, DimLevel = level });
 
         [Fact]
-        public async Task PassesTheMonitorAndLevelToTheDimmingService()
+        public async Task Monitor_and_level_arrive_unchanged_at_the_dimmer()
         {
-            await new ApplyDimCommandHandler(_dimming.Object).HandleAsync(_dimTo15);
+            await Send("GSM-1", 15);
 
-            _dimming.Verify(d => d.DimMonitorAsync("PNP-OLED", 15), Times.Once);
+            Assert.Equal(["dim GSM-1 15"], _dimmer.Calls);
         }
 
         [Fact]
-        public async Task FailureInTheDimmingService_IsLoggedNotThrown()
+        public async Task Dimmer_failure_is_swallowed_so_the_idle_loop_keeps_going()
         {
-            _dimming.Setup(d => d.DimMonitorAsync("PNP-OLED", 15)).ThrowsAsync(new InvalidOperationException("bus error"));
+            _dimmer.Broken.Add("GSM-1");
 
-            var thrown = await Record.ExceptionAsync(() => new ApplyDimCommandHandler(_dimming.Object).HandleAsync(_dimTo15));
+            await Send("GSM-1", 15); // must not throw
 
-            Assert.Null(thrown);
-            _dimming.Verify(d => d.DimMonitorAsync("PNP-OLED", 15), Times.Once);
+            Assert.Equal(["dim GSM-1 15"], _dimmer.Calls);
         }
     }
 }
