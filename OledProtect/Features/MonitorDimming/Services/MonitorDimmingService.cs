@@ -3,29 +3,29 @@ using OledProtect.Features.MonitorDimming.Services.Interfaces;
 using OledProtect.Features.MonitorInformation.Models;
 using OledProtect.Features.MonitorInformation.Services.Interfaces;
 using Serilog;
-using System.Collections.Concurrent;
 
 namespace OledProtect.Features.MonitorDimming.Services
 {
     /// <summary>
-    /// Dims, restores and schedules monitor brightness over DDC/CI. Operations on one monitor are serialised;
-    /// different monitors proceed in parallel. Safe to call from any thread.
+    /// Talks brightness to the panels over DDC/CI: dim, wake and follow the brightness schedule.
+    /// Requests for one panel form a first-come-first-served queue; separate panels never wait on each other.
     /// </summary>
     public sealed class MonitorDimmingService : IMonitorDimmingService
     {
-        // A restore is only trusted once the panel reads back the value; a panel that is still waking up may need
-        // a few tries before it takes the write.
-        private const int MaxRestoreTries = 3;
-        private static readonly TimeSpan RestoreRetryPause = TimeSpan.FromMilliseconds(200);
+        // Waking panels are slow to accept writes, so a wake gets a few rounds of write-then-verify.
+        private const int WakeRounds = 3;
+        private static readonly TimeSpan PauseBetweenRounds = TimeSpan.FromMilliseconds(200);
 
-        // Panels quantise their brightness steps, so a read-back this close to the written value counts as applied.
-        private const uint ReadBackTolerance = 2;
+        // How far the verify read may drift from the written value (panels round to their own step size).
+        private const uint VerifySlack = 2;
 
-        private readonly IMonitorInfoManager _monitors;
-        private readonly IDdcCiAccess _bus;
-        private readonly IOriginalBrightnessStore _originals;
-        private readonly BrightnessFadeOptions _fade;
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _monitorLocks = new();
+        private readonly IMonitorInfoManager _screens;
+        private readonly IDdcCiAccess _ddc;
+        private readonly IOriginalBrightnessStore _memory;
+        private readonly BrightnessFadeOptions _glide;
+
+        // Per panel: the last queued request. A new request starts once that one has finished, however it ended.
+        private readonly Dictionary<string, Task> _queueTails = new(StringComparer.Ordinal);
 
         public MonitorDimmingService(
             IMonitorInfoManager monitorInfoManager,
@@ -33,257 +33,203 @@ namespace OledProtect.Features.MonitorDimming.Services
             IOriginalBrightnessStore originalBrightnessStore,
             BrightnessFadeOptions? fadeOptions = null)
         {
-            _monitors = monitorInfoManager;
-            _bus = bus;
-            _originals = originalBrightnessStore;
-            _fade = fadeOptions ?? BrightnessFadeOptions.None;
+            _screens = monitorInfoManager;
+            _ddc = bus;
+            _memory = originalBrightnessStore;
+            _glide = fadeOptions ?? BrightnessFadeOptions.None;
         }
 
-        private enum ChannelResult
+        public Task DimMonitorAsync(string? hardwareId, int percent)
         {
-            Unreachable, // no channel could be opened, so nothing was written
-            Failed,      // the channel opened but the work did not succeed
-            Succeeded,
-        }
-
-        public async Task DimMonitorAsync(string? hardwareId, int percent)
-        {
-            if (hardwareId is not { Length: > 0 })
+            if (string.IsNullOrEmpty(hardwareId))
             {
-                Log.Warning("Dim request without a hardware ID ignored.");
-                return;
+                Log.Warning("Dim skipped: the request named no monitor.");
+                return Task.CompletedTask;
             }
 
-            await RunExclusiveAsync(hardwareId, async () =>
-            {
-                await DimAsync(hardwareId, percent);
-                return true;
-            });
+            return Enqueue(hardwareId, () => DimNowAsync(hardwareId, percent));
         }
 
         public Task UndimMonitorAsync(string hardwareId)
         {
-            if (hardwareId is not { Length: > 0 })
+            if (string.IsNullOrEmpty(hardwareId))
             {
-                Log.Warning("Undim request without a hardware ID ignored.");
+                Log.Warning("Wake skipped: the request named no monitor.");
                 return Task.CompletedTask;
             }
 
-            return RunExclusiveAsync(hardwareId, async () =>
-            {
-                await UndimAsync(hardwareId);
-                return true;
-            });
+            return Enqueue(hardwareId, () => WakeNowAsync(hardwareId));
         }
 
         /// <summary>
-        /// While the monitor is dimmed or blacked out only the level it will wake to is changed, so waking it lands
-        /// on the scheduled brightness rather than the stale one.
+        /// A dimmed (or blacked-out) panel is left dark; only the level it returns to is moved to the schedule's value.
         /// </summary>
-        public Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent)
+        public Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent) =>
+            string.IsNullOrEmpty(hardwareId)
+                ? Task.FromResult(false)
+                : Enqueue(hardwareId, () => ScheduleNowAsync(hardwareId, percent));
+
+        public Dictionary<string, uint> GetDimmedMonitors() => _memory.GetAll();
+
+        // ===== The three requests (always running at the head of their panel's queue) =====
+
+        private async Task<bool> DimNowAsync(string id, int percent)
         {
-            if (hardwareId is not { Length: > 0 }) return Task.FromResult(false);
+            var screen = await LocateAsync(id).ConfigureAwait(false);
+            uint goal = PanelUnits(screen, id, percent);
 
-            return RunExclusiveAsync(hardwareId, () => ApplyScheduledAsync(hardwareId, percent));
-        }
+            using var link = Connect(screen, id);
+            if (link is null) return false;
 
-        public Dictionary<string, uint> GetDimmedMonitors() => _originals.GetAll();
-
-        // ----- Operations; each runs while holding the monitor's lock -----
-
-        private async Task DimAsync(string hardwareId, int percent)
-        {
-            var monitor = await FindMonitorAsync(hardwareId);
-            uint target = ScaleForMonitor(monitor, hardwareId, percent);
-
-            UseChannel(monitor, hardwareId, channel =>
+            if (link.GetBrightness() is not uint startLevel)
             {
-                uint? before = ReadBrightness(channel, hardwareId);
-                if (before is not uint current) return false;
-
-                // Recorded before the first write, so a crash halfway through the fade can still be undone.
-                _originals.RecordOriginal(hardwareId, current);
-                return FadeTo(channel, hardwareId, current, target);
-            });
-        }
-
-        private async Task UndimAsync(string hardwareId)
-        {
-            if (!_originals.TryGetOriginal(hardwareId, out uint original)) return;
-
-            // An unconfirmed restore keeps the recording, so a reconnect, a settings save or the next start retries it.
-            if (await TryRestoreAsync(hardwareId, original))
-            {
-                _originals.RemoveOriginal(hardwareId);
+                Log.Warning("Dim of {HardwareId} skipped: the panel did not report its current level.", id);
+                return false;
             }
+
+            // Saved first: if the app dies mid-fade, the next start still knows where to go back to.
+            _memory.RecordOriginal(id, startLevel);
+            return Glide(link, id, startLevel, goal);
         }
 
-        private async Task<bool> ApplyScheduledAsync(string hardwareId, int percent)
+        private async Task<bool> WakeNowAsync(string id)
         {
-            var monitor = await FindMonitorAsync(hardwareId);
-            uint target = ScaleForMonitor(monitor, hardwareId, percent);
+            if (!_memory.TryGetOriginal(id, out uint savedLevel)) return false;
 
-            if (_originals.TryGetOriginal(hardwareId, out _))
+            bool confirmed = await WriteVerifiedAsync(id, savedLevel).ConfigureAwait(false);
+
+            // Without confirmation the saved level stays, so a later wake (reconnect, settings save, restart) retries.
+            if (confirmed) _memory.RemoveOriginal(id);
+            return confirmed;
+        }
+
+        private async Task<bool> ScheduleNowAsync(string id, int percent)
+        {
+            var screen = await LocateAsync(id).ConfigureAwait(false);
+            uint goal = PanelUnits(screen, id, percent);
+
+            if (_memory.TryGetOriginal(id, out _))
             {
-                _originals.ReplaceOriginal(hardwareId, target);
-                Log.Information("Monitor {HardwareId} is dimmed now; it will wake up at the scheduled brightness {Brightness}.", hardwareId, target);
+                _memory.ReplaceOriginal(id, goal);
+                Log.Information("Schedule: {HardwareId} is dark at the moment; it will come back at level {Level}.", id, goal);
                 return true;
             }
 
-            var result = UseChannel(monitor, hardwareId, channel =>
-            {
-                if (channel.GetBrightness() is not uint current) return false;
-                if (current == target) return true;
+            using var link = Connect(screen, id);
+            if (link?.GetBrightness() is not uint level) return false;
+            if (level == goal) return true;
 
-                Log.Information("Brightness schedule: monitor {HardwareId} goes from {From} to {To}.", hardwareId, current, target);
-                return FadeTo(channel, hardwareId, current, target);
-            });
-
-            return result == ChannelResult.Succeeded;
+            Log.Information("Schedule: moving {HardwareId} from level {Old} to {New}.", id, level, goal);
+            return Glide(link, id, level, goal);
         }
 
-        private async Task<bool> TryRestoreAsync(string hardwareId, uint original)
-        {
-            for (int attempt = 1; ; attempt++)
-            {
-                var monitor = await FindMonitorAsync(hardwareId);
-                var result = UseChannel(monitor, hardwareId, channel =>
-                    WriteRestore(channel, hardwareId, original) && ReadsBackAs(channel, hardwareId, original));
+        // ===== Write, read back, and try again =====
 
-                if (result == ChannelResult.Succeeded)
+        // Each round looks the monitor up afresh, writes the level and reads it back. An unreachable panel ends
+        // the attempt at once (retrying cannot help); a refused write or a wrong read-back earns another round.
+        private async Task<bool> WriteVerifiedAsync(string id, uint level)
+        {
+            for (int round = 1; round <= WakeRounds; round++)
+            {
+                if (round > 1) await Task.Delay(PauseBetweenRounds).ConfigureAwait(false);
+
+                using var link = Connect(await LocateAsync(id).ConfigureAwait(false), id);
+                if (link is null)
                 {
-                    Log.Information("Monitor {HardwareId} is back at its original brightness {Brightness}.", hardwareId, original);
+                    Log.Warning("Wake of {HardwareId} postponed: no DDC/CI link; level {Level} stays saved.", id, level);
+                    return false;
+                }
+
+                string? complaint =
+                    !link.SetBrightness(level) ? "rejected the write"
+                    : link.GetBrightness() is not uint echo ? "gave no answer when read back"
+                    : Spread(echo, level) > VerifySlack ? $"read back as {echo}"
+                    : null;
+
+                if (complaint is null)
+                {
+                    Log.Information("Wake of {HardwareId} verified at level {Level}.", id, level);
                     return true;
                 }
 
-                if (result == ChannelResult.Unreachable)
-                {
-                    Log.Warning("Monitor {HardwareId} cannot be reached; its original brightness {Brightness} stays recorded for a later try.",
-                        hardwareId, original);
-                    return false;
-                }
-
-                if (attempt >= MaxRestoreTries)
-                {
-                    Log.Warning("Monitor {HardwareId} did not take brightness {Brightness} in {Tries} tries; the recording is kept.",
-                        hardwareId, original, MaxRestoreTries);
-                    return false;
-                }
-
-                await Task.Delay(RestoreRetryPause);
-            }
-        }
-
-        // ----- Building blocks -----
-
-        // DDC/CI transactions and fade pauses take a while, and callers include the idle loop (holding its own lock)
-        // and the UI thread, so the work always moves to the thread pool before it queues on the monitor's lock.
-        private Task<T> RunExclusiveAsync<T>(string hardwareId, Func<Task<T>> work) =>
-            Task.Run(async () =>
-            {
-                var monitorLock = _monitorLocks.GetOrAdd(hardwareId, static _ => new SemaphoreSlim(1, 1));
-                await monitorLock.WaitAsync();
-                try
-                {
-                    return await work();
-                }
-                finally
-                {
-                    monitorLock.Release();
-                }
-            });
-
-        private async Task<MonitorInfo?> FindMonitorAsync(string hardwareId)
-        {
-            var attached = await _monitors.GetCurrentMonitorsAsync();
-            return attached.FirstOrDefault(monitor => monitor.HardwareId == hardwareId);
-        }
-
-        // Percent to the panel's own units, using the range it reported when it was last probed.
-        private static uint ScaleForMonitor(MonitorInfo? monitor, string hardwareId, int percent)
-        {
-            uint range = monitor?.Capabilities?.MaxBrightness ?? 0;
-            uint raw = BrightnessScale.ToRawBrightness(percent, range);
-            if (raw != percent)
-            {
-                Log.Debug("{Percent}% is brightness {Raw} on monitor {HardwareId} (range 0-{Range}).", percent, raw, hardwareId, range);
+                Log.Warning("Wake of {HardwareId}, round {Round}/{Rounds}: level {Level} {Complaint}.",
+                    id, round, WakeRounds, level, complaint);
             }
 
-            return raw;
-        }
-
-        // The only place a channel is opened; it is always disposed again before returning.
-        private ChannelResult UseChannel(MonitorInfo? monitor, string hardwareId, Func<IDdcCiSession, bool> work)
-        {
-            using var channel = monitor is null ? null : _bus.OpenSession(monitor.DeviceName);
-            if (channel is null)
-            {
-                Log.Warning("No DDC/CI channel to monitor {HardwareId}.", hardwareId);
-                return ChannelResult.Unreachable;
-            }
-
-            return work(channel) ? ChannelResult.Succeeded : ChannelResult.Failed;
-        }
-
-        // Walks from one level to the other in _fade.Steps writes, so the change is a fade instead of a jump.
-        // An intermediate write that is refused ends the walk early; the final value is always attempted.
-        private bool FadeTo(IDdcCiSession channel, string hardwareId, uint from, uint to)
-        {
-            int steps = Math.Max(1, _fade.Steps);
-            if (from != to)
-            {
-                double distance = (double)to - from;
-                for (int step = 1; step < steps; step++)
-                {
-                    uint level = (uint)Math.Round(from + distance * step / steps);
-                    if (!channel.SetBrightness(level)) break;
-
-                    Thread.Sleep(_fade.StepDelay);
-                }
-            }
-
-            if (!channel.SetBrightness(to))
-            {
-                Log.Warning("Monitor {HardwareId} refused brightness {Brightness}.", hardwareId, to);
-                return false;
-            }
-
-            Log.Information("Monitor {HardwareId} set to brightness {Brightness}.", hardwareId, to);
-            return true;
-        }
-
-        private static bool WriteRestore(IDdcCiSession channel, string hardwareId, uint original)
-        {
-            if (!channel.SetBrightness(original))
-            {
-                Log.Warning("Monitor {HardwareId} refused its original brightness {Brightness}.", hardwareId, original);
-                return false;
-            }
-
-            Log.Debug("Original brightness {Brightness} written to monitor {HardwareId}; checking the read-back.", original, hardwareId);
-            return true;
-        }
-
-        private static bool ReadsBackAs(IDdcCiSession channel, string hardwareId, uint expected)
-        {
-            if (ReadBrightness(channel, hardwareId) is not uint actual) return false;
-
-            uint gap = actual >= expected ? actual - expected : expected - actual;
-            if (gap <= ReadBackTolerance) return true;
-
-            Log.Warning("Monitor {HardwareId} reads back brightness {Actual} after being set to {Expected}.", hardwareId, actual, expected);
+            Log.Warning("Wake of {HardwareId} not verified after {Rounds} rounds; level {Level} stays saved.", id, WakeRounds, level);
             return false;
         }
 
-        private static uint? ReadBrightness(IDdcCiSession channel, string hardwareId)
+        // ===== Shared plumbing =====
+
+        // Chains the request behind the panel's previous one and always runs it on the thread pool: fades block
+        // their thread between writes, and callers include the UI thread and the idle loop.
+        private Task<T> Enqueue<T>(string id, Func<Task<T>> request)
         {
-            uint? value = channel.GetBrightness();
-            if (value is null)
+            lock (_queueTails)
             {
-                Log.Warning("Could not read the brightness of monitor {HardwareId}.", hardwareId);
+                Task before = _queueTails.GetValueOrDefault(id) ?? Task.CompletedTask;
+                Task<T> mine = Task.Run(async () =>
+                {
+                    await Task.WhenAny(before).ConfigureAwait(false); // its failure belongs to its own caller
+                    return await request().ConfigureAwait(false);
+                });
+
+                _queueTails[id] = mine;
+                return mine;
+            }
+        }
+
+        private async Task<MonitorInfo?> LocateAsync(string id)
+        {
+            foreach (var screen in await _screens.GetCurrentMonitorsAsync().ConfigureAwait(false))
+            {
+                if (screen.HardwareId == id) return screen;
             }
 
-            return value;
+            return null;
         }
+
+        // Null when the monitor is gone or its panel cannot be reached; the caller disposes what it gets.
+        private IDdcCiSession? Connect(MonitorInfo? screen, string id)
+        {
+            var link = screen is null ? null : _ddc.OpenSession(screen.DeviceName);
+            if (link is null) Log.Warning("{HardwareId}: no DDC/CI link available.", id);
+            return link;
+        }
+
+        // Converts a percentage to the panel's own scale, as reported by its last probe.
+        private static uint PanelUnits(MonitorInfo? screen, string id, int percent)
+        {
+            uint top = screen?.Capabilities?.MaxBrightness ?? 0;
+            uint units = BrightnessScale.ToRawBrightness(percent, top);
+            if (units != percent)
+            {
+                Log.Debug("{HardwareId}: {Percent} percent = level {Units} of {Top}.", id, percent, units, top);
+            }
+
+            return units;
+        }
+
+        // Moves the panel in _glide.Steps writes. The in-between levels are best effort (the first refusal skips
+        // the rest of them); the goal itself is always written, and only its outcome counts.
+        private bool Glide(IDdcCiSession link, string id, uint from, uint to)
+        {
+            int stepCount = Math.Max(1, _glide.Steps);
+            int inBetween = from == to ? 0 : stepCount - 1;
+            double span = (double)to - from;
+
+            for (int k = 1; k <= inBetween && link.SetBrightness((uint)Math.Round(from + span * k / stepCount)); k++)
+            {
+                Thread.Sleep(_glide.StepDelay);
+            }
+
+            bool landed = link.SetBrightness(to);
+            if (landed) Log.Information("{HardwareId} now at level {Level}.", id, to);
+            else Log.Warning("{HardwareId} rejected level {Level}.", id, to);
+            return landed;
+        }
+
+        private static uint Spread(uint a, uint b) => a > b ? a - b : b - a;
     }
 }

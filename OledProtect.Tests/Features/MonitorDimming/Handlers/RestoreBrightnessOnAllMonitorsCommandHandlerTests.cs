@@ -1,48 +1,43 @@
-using Moq;
 using OledProtect.Features.MonitorDimming.Commands;
 using OledProtect.Features.MonitorDimming.Handlers;
-using OledProtect.Features.MonitorDimming.Services.Interfaces;
 
 namespace OledProtect.Tests.Features.MonitorDimming.Handlers
 {
     public sealed class RestoreBrightnessOnAllMonitorsCommandHandlerTests
     {
-        private readonly Mock<IMonitorDimmingService> _dimming = new();
+        private readonly RecordingDimmer _dimmer = new();
 
-        private Task Run() =>
-            new RestoreBrightnessOnAllMonitorsCommandHandler(_dimming.Object).HandleAsync(new RestoreBrightnessOnAllMonitorsCommand());
-
-        private void LeftDimmed(params string[] hardwareIds) =>
-            _dimming.Setup(d => d.GetDimmedMonitors()).Returns(hardwareIds.ToDictionary(id => id, _ => 80u));
+        private Task Startup() =>
+            new RestoreBrightnessOnAllMonitorsCommandHandler(_dimmer).HandleAsync(new RestoreBrightnessOnAllMonitorsCommand());
 
         [Fact]
-        public async Task NothingLeftDimmed_RestoresNothing()
+        public async Task Clean_previous_run_means_no_wake_calls()
         {
-            LeftDimmed();
+            await Startup();
 
-            await Run();
-
-            _dimming.Verify(d => d.UndimMonitorAsync(It.IsAny<string>()), Times.Never);
+            Assert.Empty(_dimmer.Calls);
         }
 
         [Fact]
-        public async Task EveryMonitorLeftDimmed_IsRestoredOnce()
+        public async Task Each_monitor_left_dimmed_is_woken_exactly_once()
         {
-            LeftDimmed("PNP-LEFT", "PNP-RIGHT");
+            _dimmer.LeftDimmed["GSM-1"] = 80;
+            _dimmer.LeftDimmed["DEL-2"] = 120;
 
-            await Run();
+            await Startup();
 
-            _dimming.Verify(d => d.UndimMonitorAsync("PNP-LEFT"), Times.Once);
-            _dimming.Verify(d => d.UndimMonitorAsync("PNP-RIGHT"), Times.Once);
+            Assert.Equal(["undim DEL-2", "undim GSM-1"], _dimmer.Calls.Order());
         }
 
         [Fact]
-        public async Task FailureInTheDimmingService_ReachesTheCaller()
+        public async Task Dimmer_failure_is_passed_on_to_the_startup_code()
         {
-            LeftDimmed("PNP-LEFT");
-            _dimming.Setup(d => d.UndimMonitorAsync("PNP-LEFT")).ThrowsAsync(new InvalidOperationException("bus error"));
+            _dimmer.LeftDimmed["GSM-1"] = 80;
+            _dimmer.Broken.Add("GSM-1");
 
-            await Assert.ThrowsAsync<InvalidOperationException>(Run);
+            var failure = await Record.ExceptionAsync(Startup);
+
+            Assert.IsType<InvalidOperationException>(failure);
         }
     }
 }

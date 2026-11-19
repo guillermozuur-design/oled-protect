@@ -1,32 +1,30 @@
-using Moq;
 using OledProtect.Features.MonitorDimming.Commands;
 using OledProtect.Features.MonitorDimming.Handlers;
-using OledProtect.Features.MonitorDimming.Services.Interfaces;
 
 namespace OledProtect.Tests.Features.MonitorDimming.Handlers
 {
     public sealed class ApplyUndimCommandHandlerTests
     {
-        private readonly Mock<IMonitorDimmingService> _dimming = new();
-        private readonly ApplyUndimCommand _undim = new() { HardwareId = "PNP-OLED" };
+        private readonly RecordingDimmer _dimmer = new();
+
+        private Task Send(string id) => new ApplyUndimCommandHandler(_dimmer).HandleAsync(new ApplyUndimCommand { HardwareId = id });
 
         [Fact]
-        public async Task AsksTheDimmingServiceToRestoreThatMonitor()
+        public async Task Named_monitor_is_handed_to_the_dimmer_for_waking()
         {
-            await new ApplyUndimCommandHandler(_dimming.Object).HandleAsync(_undim);
+            await Send("GSM-1");
 
-            _dimming.Verify(d => d.UndimMonitorAsync("PNP-OLED"), Times.Once);
+            Assert.Equal(["undim GSM-1"], _dimmer.Calls);
         }
 
         [Fact]
-        public async Task FailureInTheDimmingService_IsLoggedNotThrown()
+        public async Task Dimmer_failure_is_swallowed_so_other_monitors_keep_working()
         {
-            _dimming.Setup(d => d.UndimMonitorAsync("PNP-OLED")).ThrowsAsync(new InvalidOperationException("bus error"));
+            _dimmer.Broken.Add("GSM-1");
 
-            var thrown = await Record.ExceptionAsync(() => new ApplyUndimCommandHandler(_dimming.Object).HandleAsync(_undim));
+            await Send("GSM-1"); // must not throw
 
-            Assert.Null(thrown);
-            _dimming.Verify(d => d.UndimMonitorAsync("PNP-OLED"), Times.Once);
+            Assert.Equal(["undim GSM-1"], _dimmer.Calls);
         }
     }
 }
