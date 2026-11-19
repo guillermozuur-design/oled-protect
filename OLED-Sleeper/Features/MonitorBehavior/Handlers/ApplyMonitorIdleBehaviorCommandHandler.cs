@@ -3,48 +3,39 @@ using OLED_Sleeper.Features.MonitorBehavior.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Commands;
 using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorDimming.Commands;
+using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Messaging.Interfaces;
 using Serilog;
 
 namespace OLED_Sleeper.Features.MonitorBehavior.Handlers
 {
-    /// <summary>
-    /// Handles the <see cref="ApplyMonitorIdleBehaviorCommand"/> by dispatching the appropriate dim or blackout command.
-    /// </summary>
-    public class ApplyMonitorIdleBehaviorCommandHandler : ICommandHandler<ApplyMonitorIdleBehaviorCommand>
+    // Turns "this screen is idle" into the concrete command for the behaviour the user picked. Failures of
+    // that command are left to the caller.
+    public class ApplyMonitorIdleBehaviorCommandHandler(IMediator mediator) : ICommandHandler<ApplyMonitorIdleBehaviorCommand>
     {
-        private readonly IMediator _mediator;
-
-        public ApplyMonitorIdleBehaviorCommandHandler(IMediator mediator)
+        public Task HandleAsync(ApplyMonitorIdleBehaviorCommand command)
         {
-            _mediator = mediator;
+            MonitorSettings settings = command.EventArgs.Settings;
+            string id = command.EventArgs.HardwareId;
+
+            return settings.Behavior switch
+            {
+                MonitorBehaviorType.Dim => mediator.SendAsync(new ApplyDimCommand { HardwareId = id, DimLevel = (int)settings.DimLevel }),
+                MonitorBehaviorType.Blackout => Cover(id, OverlayScene.Black, settings.LowerBrightnessOnBlackout),
+                MonitorBehaviorType.Screensaver => Cover(id, OverlayScene.Stars, lowerBrightness: false),
+                MonitorBehaviorType.Flights => Cover(id, OverlayScene.Flights, lowerBrightness: false),
+                _ => LeaveAlone(id),
+            };
         }
 
-        /// <summary>
-        /// Handles the <see cref="ApplyMonitorIdleBehaviorCommand"/> by dispatching the appropriate dim or blackout command for the monitor.
-        /// </summary>
-        /// <param name="command">The command containing the monitor idle event arguments.</param>
-        public async Task HandleAsync(ApplyMonitorIdleBehaviorCommand command)
+        // Screensaver scenes need the panel lit, so only plain black may also turn the backlight down.
+        private Task Cover(string id, OverlayScene scene, bool lowerBrightness) =>
+            mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = id, Scene = scene, LowerBrightness = lowerBrightness });
+
+        private static Task LeaveAlone(string id)
         {
-            var e = command.EventArgs;
-            switch (e.Settings.Behavior)
-            {
-                case MonitorBehaviorType.Blackout:
-                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, LowerBrightness = e.Settings.LowerBrightnessOnBlackout });
-                    break;
-                case MonitorBehaviorType.Screensaver:
-                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, Scene = OverlayScene.Stars });
-                    break;
-                case MonitorBehaviorType.Flights:
-                    await _mediator.SendAsync(new ApplyBlackoutOverlayCommand { HardwareId = e.HardwareId, Scene = OverlayScene.Flights });
-                    break;
-                case MonitorBehaviorType.Dim:
-                    await _mediator.SendAsync(new ApplyDimCommand { HardwareId = e.HardwareId, DimLevel = (int)e.Settings.DimLevel });
-                    break;
-                default:
-                    Log.Information("No idle behavior to apply for monitor {HardwareId}.", e.HardwareId);
-                    break;
-            }
+            Log.Information("Screen {HardwareId} is idle but has no idle behaviour set.", id);
+            return Task.CompletedTask;
         }
     }
 }

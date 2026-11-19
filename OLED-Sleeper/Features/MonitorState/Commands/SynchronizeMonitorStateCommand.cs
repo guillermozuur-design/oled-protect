@@ -3,29 +3,13 @@ using OLED_Sleeper.Messaging.Interfaces;
 
 namespace OLED_Sleeper.Features.MonitorState.Commands
 {
-    /// <summary>
-    /// Command to synchronize the application's monitor state with the current set of connected monitors and settings.
-    /// This command is typically dispatched when the set of physical or logical monitors changes (e.g., connection/disconnection, hotplug, etc.).
-    /// It provides both the previous and current monitor lists so that the handler can reconcile overlays, brightness, and idle detection state.
-    /// </summary>
-    public class SynchronizeMonitorStateCommand : ICommand
+    // Raised whenever the set of screens changes (and once at start-up with an empty "before" list), so
+    // overlays, brightness and idle tracking can be rebuilt for the new arrangement.
+    public sealed class SynchronizeMonitorStateCommand(IReadOnlyList<MonitorInfo> oldMonitors, IReadOnlyList<MonitorInfo> newMonitors)
+        : ICommand
     {
-        /// <summary>
-        /// Gets the list of monitors before the change occurred.
-        /// </summary>
-        public IReadOnlyList<MonitorInfo> OldMonitors { get; }
+        public IReadOnlyList<MonitorInfo> OldMonitors => oldMonitors;
 
-        /// <summary>
-        /// Gets the list of monitors after the change occurred.
-        /// </summary>
-        public IReadOnlyList<MonitorInfo> NewMonitors { get; }
-
-        /// <param name="oldMonitors">The list of monitors before the change.</param>
-        /// <param name="newMonitors">The list of monitors after the change.</param>
-        public SynchronizeMonitorStateCommand(IReadOnlyList<MonitorInfo> oldMonitors, IReadOnlyList<MonitorInfo> newMonitors)
-        {
-            OldMonitors = oldMonitors;
-            NewMonitors = newMonitors;
-        }
+        public IReadOnlyList<MonitorInfo> NewMonitors => newMonitors;
     }
 }

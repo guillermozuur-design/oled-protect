@@ -3,16 +3,15 @@ using OLED_Sleeper.Messaging.Interfaces;
 
 namespace OLED_Sleeper.Features.MonitorBehavior.Commands
 {
-    /// <summary>
-    /// Command to apply the active behavior to a specific monitor.
-    /// This is a data-transfer object that carries the necessary information for the handler to perform the action.
-    /// </summary>
-    /// <param name="eventArgs">The event arguments for the monitor activation event.</param>
-    public class ApplyMonitorActiveBehaviorCommand(MonitorIdleStateEventArgs eventArgs) : ICommand
+    // Sent by idle detection when an idle screen sees activity again. The handler may set
+    // EventArgs.IsIgnored to tell the sender the wake-up was not real.
+    public sealed class ApplyMonitorActiveBehaviorCommand : ICommand
     {
-        /// <summary>
-        /// The event arguments containing monitor state and context for the activation event.
-        /// </summary>
-        public MonitorIdleStateEventArgs EventArgs { get; init; } = eventArgs;
+        public ApplyMonitorActiveBehaviorCommand(MonitorIdleStateEventArgs eventArgs)
+        {
+            EventArgs = eventArgs;
+        }
+
+        public MonitorIdleStateEventArgs EventArgs { get; init; }
     }
 }

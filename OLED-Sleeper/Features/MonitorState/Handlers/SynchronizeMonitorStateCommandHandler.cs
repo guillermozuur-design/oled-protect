@@ -8,85 +8,83 @@ using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
 using OLED_Sleeper.Messaging.Interfaces;
 using Serilog;
 
-namespace OLED_Sleeper.Features.MonitorState.Handlers;
-
-/// <summary>
-/// Handles the <see cref="SynchronizeMonitorStateCommand"/> to reconcile the application's monitor state.
-/// <para>
-/// This handler is responsible for:
-/// <list type="bullet">
-/// <item><description>Stopping idle detection to reset state.</description></item>
-/// <item><description>Removing overlays and resetting brightness for all old and newly connected monitors.</description></item>
-/// <item><description>Updating managed monitor settings based on the new set of active monitors.</description></item>
-/// <item><description>Restarting idle detection with the updated settings.</description></item>
-/// </list>
-/// </para>
-/// </summary>
-public class SynchronizeMonitorStateCommandHandler(
-    IMonitorIdleDetectionService idleDetectionService,
-    IMonitorSettingsFileService settingsFileService,
-    IMonitorDimmingService dimmingService,
-    IMonitorBlackoutService blackoutService)
-    : ICommandHandler<SynchronizeMonitorStateCommand>
+namespace OLED_Sleeper.Features.MonitorState.Handlers
 {
-    /// <summary>
-    /// Handles the synchronization of monitor state by stopping idle detection, clearing overlays and brightness,
-    /// updating managed monitor settings, and restarting idle detection.
-    /// </summary>
-    /// <param name="command">The command containing the old and new monitor lists.</param>
-    public async Task HandleAsync(SynchronizeMonitorStateCommand command)
+    // After the screen set changes, start from a clean slate: idle tracking off, every affected screen
+    // woken up, settings re-joined to the screens that are really there, then tracking back on.
+    public class SynchronizeMonitorStateCommandHandler(
+        IMonitorIdleDetectionService idleDetection,
+        IMonitorSettingsFileService settingsFiles,
+        IMonitorDimmingService dimming,
+        IMonitorBlackoutService overlays)
+        : ICommandHandler<SynchronizeMonitorStateCommand>
     {
-        idleDetectionService.Stop();
-
-        RemoveOverlaysAndResetBrightness(command.OldMonitors);
-        RemoveOverlaysAndResetBrightness(GetNewlyConnectedMonitors(command.NewMonitors, command.OldMonitors));
-
-        var savedSettings = settingsFileService.LoadSettings();
-        UpdateManagedSettings(savedSettings, command.NewMonitors);
-
-        // Awaited so idle detection restarts against the new settings rather than racing them.
-        await idleDetectionService.UpdateSettingsAsync(savedSettings, command.NewMonitors);
-        idleDetectionService.Start();
-
-        Log.Information("Monitor state synchronized. Active monitors: {Count}", command.NewMonitors.Count);
-    }
-
-    /// <summary>
-    /// Removes blackout overlays and resets brightness for the specified monitors.
-    /// </summary>
-    /// <param name="monitors">The collection of monitors to process.</param>
-    private void RemoveOverlaysAndResetBrightness(IEnumerable<MonitorInfo> monitors)
-    {
-        foreach (var monitor in monitors)
+        public async Task HandleAsync(SynchronizeMonitorStateCommand command)
         {
-            blackoutService.HideBlackoutOverlayAsync(monitor.HardwareId);
-            dimmingService.UndimMonitorAsync(monitor.HardwareId);
+            idleDetection.Stop();
+
+            foreach (string id in ScreensToWake(command))
+            {
+                WakeWithoutWaiting(id);
+            }
+
+            List<MonitorSettings> settings = settingsFiles.LoadSettings();
+            KeepOnlyConnectedManaged(settings, command.NewMonitors);
+
+            // Wait for the new settings before restarting, so detection never runs on the old ones.
+            await idleDetection.UpdateSettingsAsync(settings, command.NewMonitors);
+            idleDetection.Start();
+
+            Log.Information("Screen set synchronised; {Count} screen(s) connected.", command.NewMonitors.Count);
         }
-    }
 
-    /// <summary>
-    /// Gets the monitors that are newly connected (present in newMonitors but not in oldMonitors).
-    /// </summary>
-    /// <param name="newMonitors">The current list of monitors.</param>
-    /// <param name="oldMonitors">The previous list of monitors.</param>
-    /// <returns>A collection of monitors that are newly connected.</returns>
-    private IEnumerable<MonitorInfo> GetNewlyConnectedMonitors(IReadOnlyList<MonitorInfo> newMonitors, IReadOnlyList<MonitorInfo> oldMonitors)
-    {
-        var oldIds = oldMonitors.Select(b => b.HardwareId);
-        return newMonitors.ExceptBy(oldIds, a => a.HardwareId).ToList();
-    }
-
-    /// <summary>
-    /// Updates the IsManaged property of each monitor setting based on whether the monitor is currently active.
-    /// </summary>
-    /// <param name="settings">The list of monitor settings to update.</param>
-    /// <param name="activeMonitors">The list of currently active monitors.</param>
-    private void UpdateManagedSettings(List<MonitorSettings> settings, IReadOnlyList<MonitorInfo> activeMonitors)
-    {
-        foreach (var setting in settings)
+        // Everything that was there before, plus whatever just appeared. A newcomer may be a panel that
+        // was asleep under an earlier session and still carries an overlay or low brightness.
+        private static IEnumerable<string> ScreensToWake(SynchronizeMonitorStateCommand command)
         {
-            var isActiveMonitor = activeMonitors.Any(m => m.HardwareId == setting.HardwareId);
-            setting.IsManaged = setting.IsManaged && isActiveMonitor;
+            var before = new HashSet<string>(command.OldMonitors.Select(m => m.HardwareId));
+            foreach (MonitorInfo monitor in command.OldMonitors)
+            {
+                yield return monitor.HardwareId;
+            }
+
+            foreach (MonitorInfo monitor in command.NewMonitors)
+            {
+                if (before.Add(monitor.HardwareId))
+                {
+                    yield return monitor.HardwareId;
+                }
+            }
+        }
+
+        // Not awaited: brightness over DDC/CI can take seconds and must not hold up the restart. Failures
+        // are still logged instead of disappearing as unobserved task exceptions.
+        private void WakeWithoutWaiting(string hardwareId)
+        {
+            _ = LogFailure(overlays.HideBlackoutOverlayAsync(hardwareId), "remove the overlay of", hardwareId);
+            _ = LogFailure(dimming.UndimMonitorAsync(hardwareId), "restore the brightness of", hardwareId);
+        }
+
+        private static async Task LogFailure(Task work, string what, string hardwareId)
+        {
+            try
+            {
+                await work;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "While synchronising, could not {What} screen {HardwareId}.", what, hardwareId);
+            }
+        }
+
+        // A screen stays managed only while it is connected; its other settings are left untouched.
+        private static void KeepOnlyConnectedManaged(List<MonitorSettings> settings, IReadOnlyList<MonitorInfo> connected)
+        {
+            var connectedIds = connected.Select(m => m.HardwareId).ToHashSet();
+            foreach (MonitorSettings setting in settings.Where(s => s.IsManaged))
+            {
+                setting.IsManaged = connectedIds.Contains(setting.HardwareId);
+            }
         }
     }
 }

@@ -11,114 +11,69 @@ namespace OLED_Sleeper.Tests.Features.MonitorBehavior.Handlers
 {
     public class ApplyMonitorActiveBehaviorCommandHandlerTests
     {
-        private const string HardwareId = "MON-123";
-        private const nint OverlayHandle = 0x1234;
-        private const nint ForeignHandle = 0x5678;
+        private const string Id = "SCREEN-7";
+        private static readonly nint OurOverlay = 0x2A0;
+        private static readonly nint SomeApp = 0x3B0;
 
-        private readonly Mock<IMonitorBlackoutService> _monitorBlackoutServiceMock;
-        private readonly Mock<IMediator> _mediatorMock;
-        private readonly ApplyMonitorActiveBehaviorCommandHandler _handler;
+        private readonly Mock<IMonitorBlackoutService> _overlays = new();
+        private readonly Mock<IMediator> _mediator = new();
 
         public ApplyMonitorActiveBehaviorCommandHandlerTests()
         {
-            _monitorBlackoutServiceMock = new Mock<IMonitorBlackoutService>();
-            _mediatorMock = new Mock<IMediator>();
+            _overlays.Setup(o => o.IsOverlayWindow(It.IsAny<nint>())).Returns((nint h) => h == OurOverlay);
+        }
 
-            _handler = new ApplyMonitorActiveBehaviorCommandHandler(
-                _monitorBlackoutServiceMock.Object,
-                _mediatorMock.Object);
+        private async Task<MonitorIdleStateEventArgs> Wake(ActivityReason reason, nint focused)
+        {
+            var wake = new MonitorIdleStateEventArgs(Id, 2, new Rect(0, 0, 2560, 1440),
+                new MonitorSettings { HardwareId = Id, IsManaged = true }, focused, reason);
+            await new ApplyMonitorActiveBehaviorCommandHandler(_overlays.Object, _mediator.Object)
+                .HandleAsync(new ApplyMonitorActiveBehaviorCommand(wake));
+            return wake;
+        }
+
+        private void VerifyRestoredOnce() =>
+            _mediator.Verify(m => m.SendAsync(It.Is<RestoreMonitorStateCommand>(c => c.HardwareId == Id)), Times.Once);
+
+        [Fact]
+        public async Task FocusOnOurOwnOverlay_IsVetoedAndNothingIsRestored()
+        {
+            var wake = await Wake(ActivityReason.ActiveWindow, OurOverlay);
+
+            Assert.True(wake.IsIgnored);
+            _mediator.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_WhenActiveWindowIsOverlay_FlagsIgnoredAndDoesNotRestore()
+        public async Task FocusOnAnotherWindow_RestoresTheScreen()
         {
-            // Arrange
-            var eventArgs = CreateEventArgs(ActivityReason.ActiveWindow, OverlayHandle);
-            SetupOverlayHandle(OverlayHandle);
+            var wake = await Wake(ActivityReason.ActiveWindow, SomeApp);
 
-            // Act
-            await _handler.HandleAsync(new ApplyMonitorActiveBehaviorCommand(eventArgs));
-
-            // Assert
-            Assert.True(eventArgs.IsIgnored);
-            _mediatorMock.VerifyNoOtherCalls();
-        }
-
-        [Fact]
-        public async Task HandleAsync_WhenActiveWindowIsNotOverlay_SendsRestoreMonitorStateCommand()
-        {
-            // Arrange
-            var eventArgs = CreateEventArgs(ActivityReason.ActiveWindow, ForeignHandle);
-            SetupOverlayHandle(OverlayHandle);
-
-            // Act
-            await _handler.HandleAsync(new ApplyMonitorActiveBehaviorCommand(eventArgs));
-
-            // Assert
-            Assert.False(eventArgs.IsIgnored);
-            _mediatorMock.Verify(m => m.SendAsync(It.Is<RestoreMonitorStateCommand>(c => c.HardwareId == HardwareId)), Times.Once);
+            Assert.False(wake.IsIgnored);
+            VerifyRestoredOnce();
         }
 
         [Theory]
+        [InlineData(ActivityReason.None)]
         [InlineData(ActivityReason.MousePosition)]
         [InlineData(ActivityReason.SystemInput)]
-        [InlineData(ActivityReason.None)]
-        public async Task HandleAsync_WhenReasonIsNotActiveWindow_RestoresEvenIfForegroundWindowIsOverlay(ActivityReason reason)
+        [InlineData(ActivityReason.KeepAwakeApp)]
+        public async Task OtherReasons_RestoreEvenWhileOurOverlayHasFocus(ActivityReason reason)
         {
-            // Arrange
-            var eventArgs = CreateEventArgs(reason, OverlayHandle);
-            SetupOverlayHandle(OverlayHandle);
+            var wake = await Wake(reason, OurOverlay);
 
-            // Act
-            await _handler.HandleAsync(new ApplyMonitorActiveBehaviorCommand(eventArgs));
-
-            // Assert
-            Assert.False(eventArgs.IsIgnored);
-            _mediatorMock.Verify(m => m.SendAsync(It.Is<RestoreMonitorStateCommand>(c => c.HardwareId == HardwareId)), Times.Once);
+            Assert.False(wake.IsIgnored);
+            VerifyRestoredOnce();
         }
 
         [Fact]
-        public async Task HandleAsync_WhenRestoreFails_DoesNotThrow()
+        public async Task AFailedRestore_DoesNotEscape()
         {
-            // Arrange
-            var eventArgs = CreateEventArgs(ActivityReason.SystemInput, ForeignHandle);
+            _mediator.Setup(m => m.SendAsync(It.IsAny<RestoreMonitorStateCommand>())).ThrowsAsync(new InvalidOperationException("nope"));
 
-            _mediatorMock
-                .Setup(m => m.SendAsync(It.IsAny<RestoreMonitorStateCommand>()))
-                .ThrowsAsync(new InvalidOperationException("Restore failed."));
+            var error = await Record.ExceptionAsync(() => Wake(ActivityReason.SystemInput, SomeApp));
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(new ApplyMonitorActiveBehaviorCommand(eventArgs)));
-
-            // Assert
-            Assert.Null(exception);
-            Assert.False(eventArgs.IsIgnored);
-        }
-
-        /// <summary>
-        /// Makes IsOverlayWindow answer true only for the given handle.
-        /// </summary>
-        private void SetupOverlayHandle(nint overlayHandle)
-        {
-            _monitorBlackoutServiceMock
-                .Setup(x => x.IsOverlayWindow(It.IsAny<nint>()))
-                .Returns<nint>(handle => handle == overlayHandle);
-        }
-
-        /// <summary>
-        /// Builds active event args for the given activity reason and foreground window handle.
-        /// </summary>
-        private static MonitorIdleStateEventArgs CreateEventArgs(ActivityReason reason, nint foregroundWindowHandle)
-        {
-            var settings = new MonitorSettings { HardwareId = HardwareId, IsManaged = true };
-
-            return new MonitorIdleStateEventArgs(
-                HardwareId,
-                displayNumber: 1,
-                bounds: new Rect(0, 0, 1920, 1080),
-                settings,
-                foregroundWindowHandle,
-                reason);
+            Assert.Null(error);
         }
     }
 }

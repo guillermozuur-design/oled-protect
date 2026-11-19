@@ -7,62 +7,31 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
 {
     public class HideBlackoutOverlayCommandHandlerTests
     {
-        private readonly Mock<IMonitorBlackoutService> _monitorBlackoutServiceMock;
-        private readonly HideBlackoutOverlayCommandHandler _handler;
+        private readonly Mock<IMonitorBlackoutService> _overlays = new();
 
-        public HideBlackoutOverlayCommandHandlerTests()
+        private Task Run(string id) =>
+            new HideBlackoutOverlayCommandHandler(_overlays.Object).HandleAsync(new HideBlackoutOverlayCommand { HardwareId = id });
+
+        [Theory]
+        [InlineData("SCREEN-7")]
+        [InlineData("")]
+        public async Task Hides_TheOverlayOfTheGivenScreen(string id)
         {
-            _monitorBlackoutServiceMock = new Mock<IMonitorBlackoutService>();
-            _handler = new HideBlackoutOverlayCommandHandler(_monitorBlackoutServiceMock.Object);
+            await Run(id);
+
+            _overlays.Verify(o => o.HideBlackoutOverlayAsync(id), Times.Once);
+            _overlays.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_CallsHideBlackoutOverlayAsync()
+        public async Task AFailingOverlay_IsSwallowed()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new HideBlackoutOverlayCommand { HardwareId = hardwareId };
-            _monitorBlackoutServiceMock
-                .Setup(x => x.HideBlackoutOverlayAsync(hardwareId))
-                .Returns(Task.CompletedTask);
+            _overlays.Setup(o => o.HideBlackoutOverlayAsync("SCREEN-7")).ThrowsAsync(new InvalidOperationException("boom"));
 
-            // Act
-            await _handler.HandleAsync(command);
+            Exception? error = await Record.ExceptionAsync(() => Run("SCREEN-7"));
 
-            // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.HideBlackoutOverlayAsync(hardwareId), Times.Once);
-        }
-
-        [Fact]
-        public async Task HandleAsync_WhenServiceThrows_CatchesExceptionAndDoesNotThrow()
-        {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new HideBlackoutOverlayCommand { HardwareId = hardwareId };
-            _monitorBlackoutServiceMock
-                .Setup(x => x.HideBlackoutOverlayAsync(hardwareId))
-                .ThrowsAsync(new Exception("Simulated failure"));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.HideBlackoutOverlayAsync(hardwareId), Times.Once);
-        }
-
-        [Fact]
-        public async Task HandleAsync_WithEmptyHardwareId_DoesNotThrow()
-        {
-            // Arrange
-            var command = new HideBlackoutOverlayCommand { HardwareId = string.Empty };
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.HideBlackoutOverlayAsync(It.IsAny<string>()), Times.Once);
+            Assert.Null(error);
+            _overlays.Verify(o => o.HideBlackoutOverlayAsync("SCREEN-7"), Times.Once);
         }
     }
 }

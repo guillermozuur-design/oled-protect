@@ -3,26 +3,20 @@ using OLED_Sleeper.Messaging.Interfaces;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Commands
 {
-    /// <summary>
-    /// Represents a command to apply the blackout behavior to a specific monitor.
-    /// This is a data-transfer object that carries the necessary information
-    /// for the handler to perform the action.
-    /// </summary>
-    public class ApplyBlackoutOverlayCommand : ICommand
+    // Covers one screen with an overlay. Optionally also drops its backlight to zero, which only matters
+    // for plain black: a scene drawn on top would become invisible.
+    public sealed class ApplyBlackoutOverlayCommand : ICommand
     {
-        /// <summary>
-        /// The unique hardware identifier of the target monitor.
-        /// </summary>
-        public required string HardwareId { get; init; }
+        private readonly string _hardwareId = string.Empty;
 
-        /// <summary>
-        /// Whether to also set the monitor's hardware brightness to zero. False when unset.
-        /// </summary>
-        public bool LowerBrightness { get; init; } = false;
+        public required string HardwareId
+        {
+            get => _hardwareId;
+            init => _hardwareId = value ?? throw new ArgumentNullException(nameof(HardwareId));
+        }
 
-        /// <summary>
-        /// What the overlay shows once the screen is black (black, stars or flights).
-        /// </summary>
+        public bool LowerBrightness { get; init; }
+
         public OverlayScene Scene { get; init; } = OverlayScene.Black;
     }
 }

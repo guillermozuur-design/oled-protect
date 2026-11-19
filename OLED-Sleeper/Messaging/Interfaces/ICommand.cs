@@ -1,7 +1,5 @@
 namespace OLED_Sleeper.Messaging.Interfaces
 {
-    /// <summary>
-    /// Marker interface for all command DTOs handled by the mediator.
-    /// </summary>
-    public interface ICommand { }
+    // Tags a message type as something the mediator can route to exactly one handler.
+    public interface ICommand;
 }

@@ -8,71 +8,50 @@ using Serilog;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Handlers
 {
-    /// <summary>
-    /// Handles the execution of the <see cref="ApplyBlackoutOverlayCommand"/>.
-    /// This class contains the business logic for applying the blackout effect to a monitor,
-    /// which includes showing a software overlay and, when the command asks for it, setting the hardware
-    /// brightness to zero if supported.
-    /// </summary>
-    public class ApplyBlackoutOverlayCommandHandler : ICommandHandler<ApplyBlackoutOverlayCommand>
+    // Puts the overlay up and, when asked and the panel speaks DDC/CI, turns the backlight to zero at the
+    // same time. Never throws: a failed blackout is logged and the screen simply stays as it was.
+    public class ApplyBlackoutOverlayCommandHandler(IMonitorInfoManager screens, IMonitorBlackoutService overlays, IMonitorDimmingService dimmer)
+        : ICommandHandler<ApplyBlackoutOverlayCommand>
     {
-        private readonly IMonitorInfoManager _monitorInfoManager;
-        private readonly IMonitorBlackoutService _monitorBlackoutService;
-        private readonly IMonitorDimmingService _monitorDimmingService;
-
-        public ApplyBlackoutOverlayCommandHandler(
-            IMonitorInfoManager monitorInfoManager,
-            IMonitorBlackoutService monitorBlackoutService,
-            IMonitorDimmingService monitorDimmingService)
-        {
-            _monitorInfoManager = monitorInfoManager;
-            _monitorBlackoutService = monitorBlackoutService;
-            _monitorDimmingService = monitorDimmingService;
-        }
-
-        /// <summary>
-        /// Executes the blackout logic asynchronously based on the command's data.
-        /// It shows a blackout overlay and, if the command asks for it and the monitor supports DDC/CI,
-        /// it simultaneously dims the monitor's brightness to 0.
-        /// Exceptions are caught and logged to avoid silent failures.
-        /// </summary>
-        /// <param name="command">The command containing the details of the monitor to black out.</param>
         public async Task HandleAsync(ApplyBlackoutOverlayCommand command)
         {
             try
             {
-                Log.Information("Executing ApplyBlackoutCommand for monitor {HardwareId}.", command.HardwareId);
-
-                var monitors = await _monitorInfoManager.GetCurrentMonitorsAsync();
-                var monitorInfo = monitors.FirstOrDefault(m => m.HardwareId == command.HardwareId);
-                if (monitorInfo?.HardwareId == null)
+                MonitorInfo? target = await FindMonitorAsync(command.HardwareId);
+                if (target is null)
                 {
-                    Log.Warning("Cannot apply blackout: no monitor found with HardwareId {HardwareId}.", command.HardwareId);
+                    Log.Warning("Blackout skipped: screen {HardwareId} is not connected (any more).", command.HardwareId);
                     return;
                 }
 
-                var showOverlayTask = _monitorBlackoutService.ShowBlackoutOverlayAsync(monitorInfo.HardwareId, monitorInfo.Bounds, command.Scene);
-
-                if (!command.LowerBrightness)
-                {
-                    Log.Information("Blackout for monitor {HardwareId} leaves hardware brightness untouched by user setting.", monitorInfo.HardwareId);
-                    await showOverlayTask;
-                }
-                else if (monitorInfo.Capabilities?.IsSupported == true)
-                {
-                    Log.Information("Monitor {HardwareId} supports DDC/CI. Setting brightness to 0 for blackout.", monitorInfo.HardwareId);
-                    var dimTask = _monitorDimmingService.DimMonitorAsync(monitorInfo.HardwareId, 0);
-
-                    await Task.WhenAll(showOverlayTask, dimTask);
-                }
-                else
-                {
-                    await showOverlayTask;
-                }
+                Log.Information("Blacking out screen {HardwareId} (scene {Scene}).", target.HardwareId, command.Scene);
+                await Task.WhenAll(StartWork(target, command));
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Failed to apply blackout for monitor {HardwareId}.", command.HardwareId);
+                Log.Error(ex, "Blackout of screen {HardwareId} failed.", command.HardwareId);
+            }
+        }
+
+        private async Task<MonitorInfo?> FindMonitorAsync(string hardwareId)
+        {
+            var connected = await screens.GetCurrentMonitorsAsync();
+            return connected.FirstOrDefault(m => m.HardwareId == hardwareId);
+        }
+
+        // The overlay always goes up; the backlight only follows when that was asked for and is possible.
+        private IEnumerable<Task> StartWork(MonitorInfo target, ApplyBlackoutOverlayCommand command)
+        {
+            yield return overlays.ShowBlackoutOverlayAsync(target.HardwareId, target.Bounds, command.Scene);
+
+            bool canDim = target.Capabilities?.IsSupported == true;
+            if (command.LowerBrightness && canDim)
+            {
+                yield return dimmer.DimMonitorAsync(target.HardwareId, 0);
+            }
+            else if (command.LowerBrightness)
+            {
+                Log.Debug("Screen {HardwareId} has no DDC/CI; keeping its brightness during blackout.", target.HardwareId);
             }
         }
     }

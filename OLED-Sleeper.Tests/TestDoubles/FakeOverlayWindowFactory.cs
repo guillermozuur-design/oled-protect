@@ -3,49 +3,27 @@ using OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.TestDoubles
 {
-    /// <summary>
-    /// An <see cref="IOverlayWindowFactory"/> that hands out <see cref="FakeOverlayWindow"/> instances
-    /// and keeps every one it created.
-    /// </summary>
-    public class FakeOverlayWindowFactory : IOverlayWindowFactory
+    // Hands out fake overlays with predictable handles (start, start+1, ...) and keeps them all for
+    // inspection. Starting at zero gives overlays that never get a handle.
+    public sealed class FakeOverlayWindowFactory(nint firstHandle) : IOverlayWindowFactory
     {
-        /// <summary>
-        /// The handle the first overlay reports when the caller does not pick one. Any non-zero value
-        /// works; zero is the "no handle" sentinel and would leave every overlay untracked.
-        /// </summary>
-        private const int DefaultFirstHandle = 1000;
+        private int _issued;
 
-        private nint _nextHandle;
-
-        public FakeOverlayWindowFactory() : this(DefaultFirstHandle)
+        public FakeOverlayWindowFactory() : this(0x4000)
         {
         }
 
-        /// <param name="firstHandle">The handle the first overlay reports once shown; later overlays
-        /// count up from it. Zero makes every overlay report no handle at all.</param>
-        public FakeOverlayWindowFactory(nint firstHandle)
-        {
-            _nextHandle = firstHandle;
-        }
+        public List<FakeOverlayWindow> Created { get; } = [];
 
-        /// <summary>
-        /// Every overlay created so far, in creation order.
-        /// </summary>
-        public List<FakeOverlayWindow> Created { get; } = new();
+        public List<OverlayScene> RequestedScenes { get; } = [];
 
-        /// <inheritdoc />
         public IOverlayWindow Create(OverlayScene scene = OverlayScene.Black)
         {
-            var overlay = new FakeOverlayWindow(_nextHandle);
-
-            // A factory built with zero keeps handing out zero instead of moving off the sentinel.
-            if (_nextHandle != nint.Zero)
-            {
-                _nextHandle++;
-            }
-
-            Created.Add(overlay);
-            return overlay;
+            nint handle = firstHandle == nint.Zero ? nint.Zero : firstHandle + _issued++;
+            var window = new FakeOverlayWindow(handle);
+            Created.Add(window);
+            RequestedScenes.Add(scene);
+            return window;
         }
     }
 }

@@ -1,15 +1,11 @@
 using OLED_Sleeper.Features.MonitorBlackout.Models;
+
 namespace OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for creating blackout overlay windows.
-    /// </summary>
+    // Seam so the blackout service can be tested without real windows. UI thread only.
     public interface IOverlayWindowFactory
     {
-        /// <summary>
-        /// Creates an overlay that has not been shown yet. Must be called on the UI thread.
-        /// </summary>
-        /// <returns>The new overlay.</returns>
+        // Returns an overlay that is not on screen yet.
         IOverlayWindow Create(OverlayScene scene = OverlayScene.Black);
     }
 }

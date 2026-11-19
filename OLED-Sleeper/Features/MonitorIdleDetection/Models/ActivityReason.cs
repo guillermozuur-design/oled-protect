@@ -1,30 +1,12 @@
 namespace OLED_Sleeper.Features.MonitorIdleDetection.Models
 {
-    /// <summary>
-    /// Defines the specific reason why a monitor is considered active during idle detection.
-    /// Used to communicate the trigger for a monitor's state change.
-    /// </summary>
+    // Why a screen counts as in use right now; the first condition that holds wins.
     public enum ActivityReason
     {
-        /// <summary>
-        /// No activity detected; monitor is considered idle.
-        /// </summary>
-        None,
-
-        /// <summary>
-        /// Mouse cursor is within the monitor's bounds.
-        /// </summary>
-        MousePosition,
-
-        /// <summary>
-        /// The monitor contains the active (foreground) window.
-        /// </summary>
-        ActiveWindow,
-
-        /// <summary>
-        /// System input (keyboard or mouse activity) was detected.
-        /// </summary>
-        SystemInput,
+        None,          // nothing keeps it awake
+        MousePosition, // the pointer is on it
+        ActiveWindow,  // the focused window overlaps it
+        SystemInput,   // keyboard or mouse was used recently, anywhere
 
         /// <summary>An app the user chose ("apps die het scherm aan houden") is open on this screen or everywhere.</summary>
         KeepAwakeApp
