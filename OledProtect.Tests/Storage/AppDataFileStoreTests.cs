@@ -1,105 +1,163 @@
 using OledProtect.Storage;
+using OledProtect.Storage.Interfaces;
 using OledProtect.Tests.TestDoubles;
 
 namespace OledProtect.Tests.Storage
 {
     public class AppDataFileStoreTests
     {
-        private const string Name = "state.json";
-        private const string Main = @"C:\FakeAppData\OledProtect\state.json";
-        private const string Bak = Main + ".bak";
-        private const string Tmp = Main + ".tmp";
+        // Payload shape used throughout; any JSON-friendly type would do.
+        public sealed record Counter(string Label, int Count);
 
-        private const string Good = """{ "A": 40 }""";
-        private const string Broken = """{ "A": """;
+        private const string Folder = @"C:\FakeAppData\OledProtect";
+        private const string FileName = "counter.json";
+        private const string Live = Folder + @"\" + FileName;
+        private const string Previous = Live + ".bak";
+        private const string Staging = Live + ".tmp";
 
-        private readonly FakeFileSystem _disk = new();
-        private readonly AppDataFileStore _sut;
+        private const string SevenJson = """{"Label":"seven","Count":7}""";
+        private const string Truncated = """{"Label":"sev""";
 
-        public AppDataFileStoreTests() => _sut = new AppDataFileStore(_disk, new StorageRoot(_disk, false));
+        private static (FakeFileSystem Disk, AppDataFileStore Store) Fresh(bool portable = false)
+        {
+            var disk = new FakeFileSystem();
+            return (disk, new AppDataFileStore(disk, new StorageRoot(disk, portable)));
+        }
 
-        private uint? ReadA() => _sut.Read<Dictionary<string, uint>>(Name)?["A"];
-
-        private bool WriteA(uint value) => _sut.TryWrite(Name, new Dictionary<string, uint> { ["A"] = value });
-
-        // ---- reading ----
+        public static TheoryData<string?, string?, int?> LoadCases => new()
+        {
+            { SevenJson, null, 7 },
+            { SevenJson, """{"Label":"old","Count":3}""", 7 },
+            { null, SevenJson, 7 },
+            { Truncated, SevenJson, 7 },
+            { "[1, 2]", SevenJson, 7 },
+            { Truncated, Truncated, null },
+            { null, null, null },
+        };
 
         [Theory]
-        [InlineData(Good, null, 40u)]       // normal case
-        [InlineData(null, Good, 40u)]       // main missing -> backup
-        [InlineData(Broken, Good, 40u)]     // main truncated -> backup
-        [InlineData(Broken, Broken, null)]  // nothing usable
-        [InlineData(null, null, null)]      // first run
-        [InlineData("null", Good, null)]    // a literal null is a valid read, not a reason to fall back
-        public void Read_prefers_main_file_and_falls_back_to_backup(string? main, string? bak, uint? expected)
+        [MemberData(nameof(LoadCases))]
+        public void Loading_uses_the_live_file_and_otherwise_the_previous_copy(string? live, string? previous, int? expectedCount)
         {
-            if (main is not null) _disk.Seed(Main, main);
-            if (bak is not null) _disk.Seed(Bak, bak);
+            var (disk, store) = Fresh();
+            if (live != null) disk.With(Live, live);
+            if (previous != null) disk.With(Previous, previous);
 
-            Assert.Equal(expected, ReadA());
+            Counter? loaded = store.Read<Counter>(FileName);
+
+            Assert.Equal(expectedCount, loaded?.Count);
         }
 
         [Fact]
-        public void Read_returns_default_when_the_disk_errors()
+        public void A_live_file_holding_json_null_counts_as_loaded()
         {
-            _disk.Seed(Main, Good);
-            _disk.Seed(Bak, Good);
-            _disk.Faults = FakeDiskFault.Read;
+            var (disk, store) = Fresh();
+            disk.With(Live, "null").With(Previous, SevenJson);
 
-            Assert.Null(ReadA());
-        }
-
-        // ---- writing ----
-
-        [Fact]
-        public void First_write_creates_the_file_without_backup_or_leftovers()
-        {
-            Assert.True(WriteA(40));
-
-            Assert.Contains("\"A\": 40", _disk.Peek(Main));
-            Assert.False(_disk.FileExists(Bak));
-            Assert.False(_disk.FileExists(Tmp));
+            Assert.Null(store.Read<Counter>(FileName));
         }
 
         [Fact]
-        public void Overwrite_keeps_previous_version_as_backup()
+        public void An_unreadable_disk_yields_the_default_instead_of_throwing()
         {
-            _disk.Seed(Main, Good);
+            var (disk, store) = Fresh();
+            disk.With(Live, SevenJson).With(Previous, SevenJson).BreakOn(nameof(IFileSystem.ReadAllText));
 
-            Assert.True(WriteA(5));
-
-            Assert.Contains("\"A\": 5", _disk.Peek(Main));
-            Assert.Equal(Good, _disk.Peek(Bak));
-            Assert.False(_disk.FileExists(Tmp));
+            Assert.Null(store.Read<Counter>(FileName));
         }
 
         [Fact]
-        public void Output_is_indented_json()
+        public void Portable_builds_read_from_the_data_folder_beside_the_exe()
         {
-            WriteA(1);
+            var (disk, store) = Fresh(portable: true);
+            disk.With(@"C:\FakeApp\Data\" + FileName, SevenJson);
 
-            Assert.Contains(Environment.NewLine, _disk.Peek(Main));
+            Assert.Equal(new Counter("seven", 7), store.Read<Counter>(FileName));
+        }
+
+        [Fact]
+        public void First_save_leaves_exactly_one_file_behind()
+        {
+            var (disk, store) = Fresh();
+
+            bool saved = store.TryWrite(FileName, new Counter("a", 1));
+
+            Assert.True(saved);
+            Assert.Equal([Live], disk.AllFiles);
+        }
+
+        [Fact]
+        public void Saving_over_an_existing_file_moves_the_old_text_to_bak()
+        {
+            var (disk, store) = Fresh();
+            disk.With(Live, SevenJson);
+
+            Assert.True(store.TryWrite(FileName, new Counter("eight", 8)));
+
+            Assert.Equal(SevenJson, disk.ContentOf(Previous));
+            Assert.Equal(new Counter("eight", 8), store.Read<Counter>(FileName));
+            Assert.DoesNotContain(Staging, disk.AllFiles);
+        }
+
+        [Fact]
+        public void Saved_json_is_spread_over_several_lines()
+        {
+            var (disk, store) = Fresh();
+
+            store.TryWrite(FileName, new Counter("x", 2));
+
+            string text = disk.ContentOf(Live)!;
+            Assert.True(text.Split('\n').Length > 2, text);
+            Assert.Contains("\"Count\": 2", text);
+        }
+
+        [Fact]
+        public void Repeated_saves_end_with_the_newest_value()
+        {
+            var (_, store) = Fresh();
+
+            for (int n = 1; n <= 3; n++)
+                store.TryWrite(FileName, new Counter("loop", n));
+
+            Assert.Equal(3, store.Read<Counter>(FileName)!.Count);
         }
 
         [Theory]
-        [InlineData(FakeDiskFault.Write)]
-        [InlineData(FakeDiskFault.Replace)]
-        public void Failed_write_reports_false_and_leaves_main_file_untouched(FakeDiskFault fault)
+        [InlineData(nameof(IFileSystem.WriteAllText))]
+        [InlineData(nameof(IFileSystem.Replace))]
+        public void A_failing_save_returns_false_and_keeps_the_live_file(string brokenCall)
         {
-            _disk.Seed(Main, Good);
-            _disk.Faults = fault;
+            var (disk, store) = Fresh();
+            disk.With(Live, SevenJson).BreakOn(brokenCall);
 
-            Assert.False(WriteA(5));
-            Assert.Equal(Good, _disk.Peek(Main));
+            Assert.False(store.TryWrite(FileName, new Counter("lost", 0)));
+            Assert.Equal(SevenJson, disk.ContentOf(Live));
         }
 
         [Fact]
-        public void Written_value_reads_back_unchanged()
+        public void A_failing_first_rename_returns_false_without_creating_the_file()
         {
-            WriteA(40);
-            WriteA(41);
+            var (disk, store) = Fresh();
+            disk.BreakOn(nameof(IFileSystem.Move));
 
-            Assert.Equal(41u, ReadA());
+            Assert.False(store.TryWrite(FileName, new Counter("lost", 0)));
+            Assert.Null(disk.ContentOf(Live));
+        }
+
+        private sealed class Loop
+        {
+            public Loop? Self { get; set; }
+        }
+
+        [Fact]
+        public void A_value_that_cannot_be_serialized_is_reported_not_thrown()
+        {
+            var (disk, store) = Fresh();
+            var loop = new Loop();
+            loop.Self = loop;
+
+            Assert.False(store.TryWrite(FileName, loop));
+            Assert.Empty(disk.AllFiles);
         }
     }
 }

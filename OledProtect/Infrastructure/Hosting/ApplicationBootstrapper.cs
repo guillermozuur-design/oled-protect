@@ -12,147 +12,160 @@ using Serilog;
 
 namespace OledProtect.Infrastructure.Hosting
 {
-    // Owns the app's lifetime so App.xaml.cs only has to forward WPF events. Startup runs in a strict order:
-    // storage (logging writes there) -> logging -> single-instance check -> DI -> services -> window/tray.
+    // The whole lifetime of the tray app in one place; App.xaml.cs just calls in. Starting is a table of
+    // stages run top to bottom, each of which may end the start-up (bad storage folder, second copy).
     public sealed class ApplicationBootstrapper(string[] args) : IDisposable
     {
-        private const string DialogTitle = "OLED Protect";
+        private const string AppTitle = "OLED Protect";
 
-        // Upper bound on how long exit waits for monitors to return to normal brightness. If it runs out the
-        // saved brightness state stays on disk and the next start finishes the job.
-        private static readonly TimeSpan RestoreBudget = TimeSpan.FromSeconds(10);
+        // How long quitting may block on bringing the screens back. Whatever is left over is picked up
+        // from the stored brightness state on the next launch.
+        private static readonly TimeSpan ScreenRestoreLimit = TimeSpan.FromSeconds(10);
+
+        private static readonly string ParagraphBreak = Environment.NewLine + Environment.NewLine;
 
         private readonly ApplicationOptions _options = CommandLineHelper.ParseArguments(args);
 
-        // Built by hand instead of resolved: both are needed before the container exists and after it is gone.
-        private readonly IApplicationShutdown _shutdown = new ApplicationShutdown();
-        private readonly IDispatcher _uiThread = new ApplicationDispatcher();
+        // Not taken from DI: these must work before the container is built and after it is disposed.
+        private readonly IApplicationShutdown _process = new ApplicationShutdown();
+        private readonly IDispatcher _ui = new ApplicationDispatcher();
 
-        private IServiceProvider? _container;
-        private IApplicationInstanceManager? _singleInstance;
-        private IApplicationOrchestrator? _monitorServices;
-        private IMainWindowService? _window;
-        private ITrayIconService? _tray;
-        private IUnsavedSettingsService? _unsaved;
-        private bool _shuttingDown;
+        private IStorageRoot? _root;
+        private IApplicationInstanceManager? _gate;
+        private IServiceProvider? _services;
+        private IApplicationOrchestrator? _engine;
+        private IMainWindowService? _mainWindow;
+        private IUnsavedSettingsService? _pendingEdits;
+        private ITrayIconService? _trayIcon;
+        private int _stopping;
 
         public void Initialize()
         {
-            var storage = PrepareStorageOrQuit();
-            if (storage is null)
-                return;
+            Func<bool>[] stages =
+            [
+                OpenStorageFolder,
+                Continue(() => LoggingConfigurator.Configure(_root!.DirectoryPath)),
+                ClaimSingleInstance,
+                Continue(() => _services = ServiceConfigurator.ConfigureServices(_options, _root!)),
+                Continue(() => (_engine = Resolve<IApplicationOrchestrator>()).Start()),
+                Continue(() => (_mainWindow = Resolve<IMainWindowService>()).SetupMainWindow()),
+                Continue(AttachTrayIcon),
+                Continue(() => Resolve<TaskbarDimmer>().Start()), // does nothing while the option is off
+                Continue(() => _gate!.SetShowMainWindowAction(BringUpMainWindow)),
+            ];
 
-            LoggingConfigurator.Configure(storage.DirectoryPath);
-
-            _singleInstance = new ApplicationInstanceManager(_uiThread, _shutdown);
-            _singleInstance.Initialize();
-            if (!_singleInstance.IsFirstInstance)
+            foreach (var stage in stages)
             {
-                Log.Information("Already running elsewhere; asked that copy to show itself and quitting.");
-                return;
+                if (!stage())
+                    break;
             }
-
-            _container = ServiceConfigurator.ConfigureServices(_options, storage);
-            StartServices(_container);
         }
 
-        private void StartServices(IServiceProvider services)
-        {
-            _monitorServices = services.GetRequiredService<IApplicationOrchestrator>();
-            _monitorServices.Start();
-
-            _window = services.GetRequiredService<IMainWindowService>();
-            _window.SetupMainWindow();
-
-            _unsaved = services.GetRequiredService<IUnsavedSettingsService>();
-            _tray = services.GetRequiredService<ITrayIconService>();
-            _tray.Initialize(ShowWindow, OnTrayExit);
-
-            // No-op unless taskbar dimming is switched on in the Algemeen tab.
-            services.GetRequiredService<TaskbarDimmer>().Start();
-
-            _singleInstance!.SetShowMainWindowAction(ShowWindow);
-        }
-
-        private void ShowWindow() => _window?.ShowMainWindow();
-
-        // Returns null after telling the user what is wrong; the app is already shutting down then.
-        private IStorageRoot? PrepareStorageOrQuit()
-        {
-            var disk = new FileSystem();
-            var root = new StorageRoot(disk, BuildMode.IsPortable);
-
-            if (new StorageRootPreparer(disk, root).TryPrepare(out string? problem))
-                return root;
-
-            string hint = BuildMode.IsPortable
-                ? "Zet de map van OLED Protect op een plek waar je mag schrijven (bijvoorbeeld je Bureaublad) en start opnieuw."
-                : "Controleer of je gebruikersprofiel bereikbaar is en start OLED Protect opnieuw.";
-            string nl = Environment.NewLine;
-
-            new MessageBoxDialogService(new MainWindowAccessor()).ShowError(problem + nl + nl + hint, DialogTitle);
-            _shutdown.Shutdown();
-            return null;
-        }
-
-        // Deferred to after pending input so the click on "Exit" cannot also answer the unsaved-changes prompt.
-        private void OnTrayExit() => _ = _uiThread.InvokeAfterInputAsync(ExitUnlessCancelled);
-
-        // Only the tray route asks about unsaved edits; Windows logoff and OnExit go straight to ShutdownApp.
-        private void ExitUnlessCancelled()
-        {
-            if (_unsaved is not null && !_unsaved.ConfirmExit())
-            {
-                Log.Information("User kept the app open because of unsaved settings.");
-                return;
-            }
-
-            ShutdownApp();
-        }
-
-        // Safe to call more than once (tray exit, session end and OnExit can all arrive).
+        // Safe to call more than once: tray exit, session end and OnExit can all arrive.
         public void ShutdownApp()
         {
-            if (_shuttingDown)
+            if (Interlocked.Exchange(ref _stopping, 1) == 1)
                 return;
-            _shuttingDown = true;
 
-            _window?.PrepareForShutdown();
-            RestoreMonitorsBeforeExit();
-            _tray?.Dispose();
-            _singleInstance?.Dispose();
+            _mainWindow?.PrepareForShutdown();
+            BringScreensBack();
+            ReleaseShell();
 
-            Log.Information("=== OLED Protect stopped ===");
+            Log.Information("OLED Protect has exited.");
             Log.CloseAndFlush();
-
-            _shutdown.Shutdown();
-        }
-
-        // Runs on the thread pool because during OnExit the UI dispatcher no longer pumps, so awaiting
-        // here directly could deadlock. A second instance never started an orchestrator.
-        private void RestoreMonitorsBeforeExit()
-        {
-            if (_monitorServices is not { } orchestrator)
-                return;
-
-            Log.Information("Exiting: putting all monitors back to normal.");
-            try
-            {
-                bool finished = Task.Run(orchestrator.StopAsync).Wait(RestoreBudget);
-                if (!finished)
-                    Log.Warning("Monitor restore still busy after {Budget}; exiting regardless.", RestoreBudget);
-            }
-            catch (Exception failure)
-            {
-                Log.Error(failure, "Stopping the monitor services threw during exit.");
-            }
+            _process.Shutdown();
         }
 
         public void Dispose()
         {
-            _tray?.Dispose();
-            _singleInstance?.Dispose();
-            (_container as IDisposable)?.Dispose();
+            ReleaseShell();
+            (_services as IDisposable)?.Dispose();
+        }
+
+        private static Func<bool> Continue(Action stage) => () =>
+        {
+            stage();
+            return true;
+        };
+
+        private T Resolve<T>() where T : notnull => _services!.GetRequiredService<T>();
+
+        // Runs before logging exists (the log file lives in this folder), so trouble goes straight to a dialog.
+        private bool OpenStorageFolder()
+        {
+            var disk = new FileSystem();
+            var root = new StorageRoot(disk, BuildMode.IsPortable);
+
+            if (!new StorageRootPreparer(disk, root).TryPrepare(out string? reason))
+            {
+                string advice = BuildMode.IsPortable
+                    ? "Verplaats de map van OLED Protect naar een plek met schrijfrechten, zoals Documenten, en open het programma daarna opnieuw."
+                    : "Kijk of je Windows-profiel (de map AppData) beschikbaar is en open OLED Protect daarna opnieuw.";
+
+                new MessageBoxDialogService(new MainWindowAccessor()).ShowError(reason + ParagraphBreak + advice, AppTitle);
+                _process.Shutdown();
+                return false;
+            }
+
+            _root = root;
+            return true;
+        }
+
+        private bool ClaimSingleInstance()
+        {
+            _gate = new ApplicationInstanceManager(_ui, _process);
+            _gate.Initialize();
+
+            if (_gate.IsFirstInstance)
+                return true;
+
+            Log.Information("Second copy started: the running one was asked to come forward, this one stops here.");
+            return false;
+        }
+
+        private void AttachTrayIcon()
+        {
+            _pendingEdits = Resolve<IUnsavedSettingsService>();
+            _trayIcon = Resolve<ITrayIconService>();
+            _trayIcon.Initialize(BringUpMainWindow, () => _ = _ui.InvokeAfterInputAsync(QuitFromTray));
+        }
+
+        private void BringUpMainWindow() => _mainWindow?.ShowMainWindow();
+
+        // Queued behind pending input (see AttachTrayIcon) so the menu click cannot also answer the prompt.
+        // Only this route asks about unsaved edits; logoff and OnExit quit without asking.
+        private void QuitFromTray()
+        {
+            bool mayQuit = _pendingEdits?.ConfirmExit() ?? true;
+            if (mayQuit)
+                ShutdownApp();
+            else
+                Log.Information("Quit from tray cancelled; there are unsaved edits.");
+        }
+
+        // The restore is pushed onto the thread pool: by the time OnExit runs, the UI dispatcher no longer
+        // pumps messages, so waiting for it on this thread could hang. A second copy never had an engine.
+        private void BringScreensBack()
+        {
+            if (_engine is null)
+                return;
+
+            Log.Information("Quitting; returning every screen to its normal state.");
+            Task restore = Task.Run(_engine.StopAsync);
+            Task winner = Task.WhenAny(restore, Task.Delay(ScreenRestoreLimit)).GetAwaiter().GetResult();
+
+            if (winner != restore)
+                Log.Warning("Screens not fully restored within {Limit}; quitting anyway.", ScreenRestoreLimit);
+            else if (restore.Exception is { } trouble)
+                Log.Error(trouble.GetBaseException(), "Restoring the screens failed while quitting.");
+            else if (restore.IsCanceled)
+                Log.Warning("Restoring the screens was cancelled while quitting.");
+        }
+
+        private void ReleaseShell()
+        {
+            _trayIcon?.Dispose();
+            _gate?.Dispose();
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿using Moq;
-using OledProtect.Features.UserSettings.Models;
+﻿using OledProtect.Features.UserSettings.Models;
 using OledProtect.Features.UserSettings.Services;
 using OledProtect.Storage.Interfaces;
 
@@ -7,146 +6,171 @@ namespace OledProtect.Tests.Features.UserSettings.Services
 {
     public class MonitorSettingsFileServiceTests
     {
-        private const string File = "settings.json";
-        private const int Schema = 1;
+        private const int CurrentSchema = 1;
 
-        private readonly Mock<IAppDataFileStore> _store = new();
-        private readonly MonitorSettingsFileService _sut;
-        private readonly List<MonitorSettingsDocument> _writes = [];
-
-        public MonitorSettingsFileServiceTests()
+        // Keeps the last saved object per file name; can refuse saves or blow up on reads.
+        private sealed class MemoryStore : IAppDataFileStore
         {
-            _store.Setup(s => s.TryWrite(File, It.IsAny<MonitorSettingsDocument>()))
-                  .Callback<string, MonitorSettingsDocument>((_, doc) => _writes.Add(doc))
-                  .Returns(true);
-            _sut = new MonitorSettingsFileService(_store.Object);
+            public Dictionary<string, object?> Files { get; } = [];
+            public List<(string Name, object? Value)> Saves { get; } = [];
+            public bool RefuseSaves { get; set; }
+            public Exception? ReadFailure { get; set; }
+
+            public T? Read<T>(string fileName)
+            {
+                if (ReadFailure != null)
+                    throw ReadFailure;
+                return Files.TryGetValue(fileName, out var stored) ? (T?)stored : default;
+            }
+
+            public bool TryWrite<T>(string fileName, T value)
+            {
+                Saves.Add((fileName, value));
+                if (RefuseSaves)
+                    return false;
+                Files[fileName] = value;
+                return true;
+            }
         }
 
-        private static MonitorSettings Monitor(string id, double dim = 15) => new() { HardwareId = id, DimLevel = dim };
+        private readonly MemoryStore _store = new();
 
-        private void OnDisk(int version, params MonitorSettings[] monitors) =>
-            _store.Setup(s => s.Read<MonitorSettingsDocument>(File))
-                  .Returns(new MonitorSettingsDocument { SchemaVersion = version, Monitors = [.. monitors] });
+        private MonitorSettingsFileService NewService() => new(_store);
 
-        private MonitorSettingsDocument SingleWrite() => Assert.Single(_writes);
+        private static MonitorSettings Screen(string id, double dimLevel = 15) => new() { HardwareId = id, DimLevel = dimLevel };
 
-        // ---- loading ----
+        private void Stored(int schema, List<MonitorSettings> monitors) =>
+            _store.Files["settings.json"] = new MonitorSettingsDocument { SchemaVersion = schema, Monitors = monitors };
 
-        [Fact]
-        public void Load_returns_stored_monitors_for_the_current_schema()
+        private MonitorSettingsDocument OnlySavedDocument()
         {
-            OnDisk(Schema, Monitor("A"));
-
-            Assert.Equal("A", Assert.Single(_sut.LoadSettings()).HardwareId);
+            var (name, value) = Assert.Single(_store.Saves);
+            Assert.Equal("settings.json", name);
+            return Assert.IsType<MonitorSettingsDocument>(value);
         }
 
         [Fact]
-        public void Load_without_a_file_gives_an_empty_list()
+        public void Loading_returns_what_settings_json_holds()
         {
-            Assert.Empty(_sut.LoadSettings());
+            Stored(CurrentSchema, [Screen("DEL01"), Screen("LG02")]);
+
+            var loaded = NewService().LoadSettings();
+
+            Assert.Equal(new[] { "DEL01", "LG02" }, loaded.Select(m => m.HardwareId));
+        }
+
+        [Fact]
+        public void Loading_with_nothing_stored_gives_no_monitors()
+        {
+            Assert.Empty(NewService().LoadSettings());
         }
 
         [Theory]
-        [InlineData(0)]          // file from before versioning (key absent)
-        [InlineData(-1)]         // garbage
-        [InlineData(Schema + 1)] // written by a newer build
-        public void Load_discards_other_schema_versions(int version)
+        [InlineData(0)]
+        [InlineData(-7)]
+        [InlineData(CurrentSchema + 1)]
+        public void Loading_ignores_a_file_with_a_foreign_schema_number(int schema)
         {
-            OnDisk(version, Monitor("A"));
+            Stored(schema, [Screen("DEL01")]);
 
-            Assert.Empty(_sut.LoadSettings());
+            Assert.Empty(NewService().LoadSettings());
         }
 
         [Fact]
-        public void Load_survives_a_null_monitor_list()
+        public void Loading_copes_with_a_monitors_list_set_to_null()
         {
-            _store.Setup(s => s.Read<MonitorSettingsDocument>(File))
-                  .Returns(new MonitorSettingsDocument { SchemaVersion = Schema, Monitors = null! });
+            Stored(CurrentSchema, null!);
 
-            Assert.Empty(_sut.LoadSettings());
-        }
-
-        // ---- saving ----
-
-        [Fact]
-        public void Save_on_a_fresh_install_writes_just_the_given_monitors_with_the_schema()
-        {
-            _sut.SaveSettings([Monitor("A")]);
-
-            var doc = SingleWrite();
-            Assert.Equal(Schema, doc.SchemaVersion);
-            Assert.Equal("A", Assert.Single(doc.Monitors).HardwareId);
+            Assert.Empty(NewService().LoadSettings());
         }
 
         [Fact]
-        public void Save_keeps_entries_of_monitors_that_were_not_passed_in()
+        public void Saving_on_a_clean_install_stores_the_given_screens_with_the_schema_number()
         {
-            OnDisk(Schema, Monitor("A"), Monitor("B"));
+            NewService().SaveSettings([Screen("DEL01")]);
 
-            _sut.SaveSettings([Monitor("A")]);
-
-            Assert.Equal(["A", "B"], SingleWrite().Monitors.Select(m => m.HardwareId));
+            var saved = OnlySavedDocument();
+            Assert.Equal(CurrentSchema, saved.SchemaVersion);
+            Assert.Equal("DEL01", Assert.Single(saved.Monitors).HardwareId);
         }
 
         [Fact]
-        public void Save_replaces_the_stored_entry_of_a_passed_monitor()
+        public void Saving_keeps_stored_screens_that_are_not_connected_now()
         {
-            OnDisk(Schema, Monitor("A", dim: 15));
+            Stored(CurrentSchema, [Screen("DEL01"), Screen("unplugged")]);
 
-            _sut.SaveSettings([Monitor("A", dim: 50)]);
+            NewService().SaveSettings([Screen("DEL01")]);
 
-            Assert.Equal(50, Assert.Single(SingleWrite().Monitors).DimLevel);
+            Assert.Equal(new[] { "DEL01", "unplugged" }, OnlySavedDocument().Monitors.Select(m => m.HardwareId));
         }
 
         [Fact]
-        public void Save_ignores_stored_entries_from_another_schema()
+        public void Saving_overrides_the_stored_entry_of_a_screen_that_is_passed_in()
         {
-            OnDisk(Schema - 1, Monitor("Old"));
+            Stored(CurrentSchema, [Screen("DEL01", dimLevel: 15)]);
 
-            _sut.SaveSettings([Monitor("A")]);
+            NewService().SaveSettings([Screen("DEL01", dimLevel: 64)]);
 
-            Assert.Equal("A", Assert.Single(SingleWrite().Monitors).HardwareId);
+            Assert.Equal(64, Assert.Single(OnlySavedDocument().Monitors).DimLevel);
         }
 
         [Fact]
-        public void Successful_save_raises_SettingsChanged_with_the_callers_list()
+        public void Saving_drops_stored_screens_from_an_outdated_schema()
         {
-            OnDisk(Schema, Monitor("A"), Monitor("B"));
-            List<MonitorSettings> given = [Monitor("A")];
-            List<MonitorSettings>? received = null;
-            _sut.SettingsChanged += list => received = list;
+            Stored(CurrentSchema - 1, [Screen("ancient")]);
 
-            _sut.SaveSettings(given);
+            NewService().SaveSettings([Screen("DEL01")]);
 
-            Assert.Same(given, received);
+            Assert.Equal("DEL01", Assert.Single(OnlySavedDocument().Monitors).HardwareId);
         }
 
         [Fact]
-        public void Failed_write_does_not_raise_SettingsChanged()
+        public void Listeners_hear_about_a_save_with_exactly_the_list_that_was_passed()
         {
-            _store.Setup(s => s.TryWrite(File, It.IsAny<MonitorSettingsDocument>())).Returns(false);
-            int raised = 0;
-            _sut.SettingsChanged += _ => raised++;
+            Stored(CurrentSchema, [Screen("DEL01"), Screen("other")]);
+            var service = NewService();
+            var notifications = new List<List<MonitorSettings>>();
+            service.SettingsChanged += notifications.Add;
+            List<MonitorSettings> edited = [Screen("DEL01")];
 
-            _sut.SaveSettings([Monitor("A")]);
+            service.SaveSettings(edited);
 
-            Assert.Equal(0, raised);
+            Assert.Same(edited, Assert.Single(notifications));
         }
 
         [Fact]
-        public void Throwing_subscriber_is_contained()
+        public void Listeners_hear_nothing_when_the_store_refuses_the_save()
         {
-            _sut.SettingsChanged += _ => throw new InvalidOperationException("boom");
+            _store.RefuseSaves = true;
+            var service = NewService();
+            bool notified = false;
+            service.SettingsChanged += _ => notified = true;
 
-            Assert.Null(Record.Exception(() => _sut.SaveSettings([Monitor("A")])));
+            service.SaveSettings([Screen("DEL01")]);
+
+            Assert.False(notified);
         }
 
         [Fact]
-        public void Throwing_store_is_contained()
+        public void A_listener_that_throws_does_not_escape_SaveSettings()
         {
-            _store.Setup(s => s.Read<MonitorSettingsDocument>(File)).Throws(new System.IO.IOException("disk gone"));
+            var service = NewService();
+            service.SettingsChanged += _ => throw new InvalidOperationException("listener broke");
 
-            Assert.Null(Record.Exception(() => _sut.SaveSettings([Monitor("A")])));
+            var thrown = Record.Exception(() => service.SaveSettings([Screen("DEL01")]));
+
+            Assert.Null(thrown);
+        }
+
+        [Fact]
+        public void A_store_that_throws_does_not_escape_SaveSettings()
+        {
+            _store.ReadFailure = new System.IO.IOException("drive vanished");
+
+            var thrown = Record.Exception(() => NewService().SaveSettings([Screen("DEL01")]));
+
+            Assert.Null(thrown);
+            Assert.Empty(_store.Saves);
         }
     }
 }
