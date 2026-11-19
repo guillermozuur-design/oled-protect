@@ -212,40 +212,23 @@
                                 <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
                                     <Grid>
                                         <sky:SkyView x:Name="SkyPreview" />
-                                        <TextBlock Text="De hemel van vandaag boven Nederland" Margin="16,12,0,0" FontSize="12" Foreground="#6E7486" />
+                                        <TextBlock Text="Live: de hemel van vandaag boven Nederland" Margin="16,12,0,0" FontSize="12" Foreground="#8B91A1" />
                                     </Grid>
                                 </Border>
 
                                 <Border Style="{StaticResource Card}">
                                     <DockPanel>
-                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op dit scherm" Click="PreviewSky_Click" VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op alle schermen" Click="PreviewSky_Click" VerticalAlignment="Center" />
                                         <StackPanel>
                                             <TextBlock Text="Sterrenhemel als screensaver" Style="{StaticResource CardTitle}" />
                                             <TextBlock Style="{StaticResource CardText}"
-                                                       Text="Kies bij een scherm 'Sterren' als gedrag. Echte sterren, sterrenbeelden, planeten en de maan van vandaag; alles beweegt langzaam, dus er kan niets inbranden. Muis bewegen of een toets indrukken stopt het voorbeeld." />
+                                                       Text="Kies bij een scherm 'Sterren' als gedrag. De echte sterrenhemel van vandaag: sterren, sterrenbeelden, planeten en de maan. Alles beweegt heel langzaam, dus er kan niets inbranden. Muis bewegen of een toets stopt het voorbeeld." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
 
-                                <Border Style="{StaticResource Card}">
-                                    <StackPanel>
-                                        <DockPanel>
-                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBox x:Name="GapBox" Style="{StaticResource Field}" Width="64"
-                                                         LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
-                                                         ToolTip="De afstand tussen het beeld van het ene en het andere scherm (beide randen samen)." />
-                                                <TextBlock Text="cm" Margin="8,0,14,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
-                                                <Button Content="Kalibreren" Style="{StaticResource SubtleButton}" Click="Calibrate_Click"
-                                                        ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
-                                            </StackPanel>
-                                            <StackPanel>
-                                                <TextBlock Text="Ruimte tussen de schermen" Style="{StaticResource CardTitle}" />
-                                                <TextBlock x:Name="GapStatus" Style="{StaticResource CardText}"
-                                                           Text="Zo lopen sterren en vallende sterren 'achter de rand langs' van het ene naar het andere scherm." />
-                                            </StackPanel>
-                                        </DockPanel>
-                                    </StackPanel>
-                                </Border>
+                                <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Sterrendata: d3-celestial (© Olaf Frohn). De sterrenhemel wordt helemaal op deze pc berekend; er gaat niets naar internet." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
@@ -257,7 +240,7 @@
                                 <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
                                     <Grid>
                                         <ContentControl x:Name="FlightsPreviewHost" />
-                                        <TextBlock x:Name="FlightsPreviewCaption" Margin="16,12,0,0" FontSize="12" Foreground="#6E7486" />
+                                        <TextBlock x:Name="FlightsPreviewCaption" Margin="16,12,0,0" FontSize="12" Foreground="#8B91A1" />
                                     </Grid>
                                 </Border>
 
@@ -267,7 +250,7 @@
                                         <StackPanel>
                                             <TextBlock Text="Vliegtuigen als screensaver" Style="{StaticResource CardTitle}" />
                                             <TextBlock Style="{StaticResource CardText}"
-                                                       Text="Kies bij een scherm 'Vliegtuigen' als gedrag. Een donkere kaart met wegen, water en plaatsen, en de echte vliegtuigen van dit moment erboven. De kaart drijft, draait en zoomt heel langzaam en start elke keer ergens anders, dus er kan niets inbranden." />
+                                                       Text="Kies bij een scherm 'Vliegtuigen' als gedrag. Een donkere kaart met de echte vliegtuigen van dit moment erboven. Alles beweegt heel langzaam, dus er kan niets inbranden. Muis bewegen of een toets stopt het voorbeeld." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
@@ -477,6 +460,26 @@
                                         </WrapPanel>
                                         <TextBlock Text="{Binding Error}" Foreground="{StaticResource DestructiveColorBrush}" FontSize="12" Margin="0,4,0,0" />
                                         <TextBlock Text="{Binding Status}" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="GapBox" Style="{StaticResource Field}" Width="64"
+                                                         LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
+                                                         ToolTip="De afstand tussen het beeld van het ene en het andere scherm (beide randen samen)." />
+                                                <TextBlock Text="cm" Margin="8,0,14,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                <Button Content="Kalibreren" Style="{StaticResource SubtleButton}" Click="Calibrate_Click"
+                                                        ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Ruimte tussen de schermen" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="GapStatus" Style="{StaticResource CardText}"
+                                                           Text="Voor de sterren en de vliegtuigen over twee schermen: zo loopt het beeld 'achter de rand langs' van het ene naar het andere scherm, zonder sprong." />
+                                            </StackPanel>
+                                        </DockPanel>
                                     </StackPanel>
                                 </Border>
 

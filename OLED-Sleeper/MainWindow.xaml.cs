@@ -182,7 +182,7 @@ namespace OLED_Sleeper
 
         // ================= Sterrenhemel tab =================
 
-        private void PreviewSky_Click(object sender, RoutedEventArgs e) => _preview.Show();
+        private void PreviewSky_Click(object sender, RoutedEventArgs e) => _preview.Show(allScreens: true);
 
         private void GapBox_KeyDown(object sender, KeyEventArgs e)
         {
@@ -197,7 +197,7 @@ namespace OLED_Sleeper
             if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var cm) && cm >= 0 && cm <= 10)
             {
                 _panorama.GapCm = cm;
-                GapStatus.Text = "Opgeslagen ✓ — geldt vanaf de volgende keer dat de sterren verschijnen.";
+                GapStatus.Text = "Opgeslagen ✓ — geldt vanaf de volgende keer dat de sterren of vliegtuigen verschijnen.";
             }
             else
             {
