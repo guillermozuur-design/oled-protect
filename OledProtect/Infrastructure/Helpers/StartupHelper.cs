@@ -22,8 +22,9 @@ namespace OledProtect.Infrastructure.Helpers
         // Called once at start by the installed build: replaces an autostart entry left by the former name.
         public static void TakeOverFormerEntry()
         {
-            if (BuildMode.IsPortable)
-                return;
+#if PORTABLE
+            return;
+#else
             try
             {
                 using var run = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
@@ -37,6 +38,7 @@ namespace OledProtect.Infrastructure.Helpers
             {
                 // Not allowed right now: the old entry simply stays until the next start.
             }
+#endif
         }
 
         public static void SetRunAtStartup(bool enable)

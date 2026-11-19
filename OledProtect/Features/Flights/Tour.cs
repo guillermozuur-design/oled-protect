@@ -410,6 +410,10 @@ namespace OledProtect.Features.Flights
     public static class FlightTour
     {
         public const double AirportRadiusKm = 22;
+
+        /// <summary>An airport with hardly any planes in the open data (few receivers there, e.g. on islands)
+        /// is shown from further away, so the planes around it are in view.</summary>
+        public const double QuietAirportRadiusKm = 60;
         public const double FollowRadiusKm = 16;
         public const double FadeSeconds = 1.2;
         private static readonly TimeSpan PrepareAhead = TimeSpan.FromSeconds(8);
@@ -586,7 +590,17 @@ namespace OledProtect.Features.Flights
             // Another airport of the same country or place; none (Tenerife, both quiet): show it anyway.
             var other = Planner.Alternative(Groups(s), next.Airport);
             Serilog.Log.Debug("Tour: {Code} is quiet ({Flying} in the air), {Action}.", next.Airport.Code, flying, other != null ? $"taking {other.Code}" : "showing it anyway");
-            if (other == null) { _nextChecked = true; return; }
+            if (other == null)
+            {
+                // Nothing busier in that place: show it from further away instead (more planes in view).
+                _nextChecked = true;
+                if (next.RadiusKm < QuietAirportRadiusKm)
+                {
+                    _next = next with { RadiusKm = QuietAirportRadiusKm };
+                    Prepare(_next, s);
+                }
+                return;
+            }
             _swaps++;
             _next = AirportSceneAt(next.Number, next.StartUtc, s, other);
             Prepare(_next, s);
