@@ -23,11 +23,12 @@ namespace OledProtect.UI.Views
     [ExcludeFromCodeCoverage]
     public partial class QuickPanelWindow : Window
     {
-        public static readonly TimeSpan TimedWorkMode = TimeSpan.FromHours(1);
         private static readonly TimeSpan Linger = TimeSpan.FromSeconds(3.5);
         private static readonly TimeSpan CloseAfterChoice = TimeSpan.FromSeconds(0.9);
 
-        private sealed record Option(string Icon, string Title, string Subtitle, bool IsActive, Action Run, bool IsBrightness = false);
+        private sealed record Option(string Icon, string Title, bool IsActive, Action Run, string? Detail = null, bool IsBrightness = false);
+
+        private const int ModeCount = 2; // the first rows switch the mode; the rest are actions
 
         private const int VK_ESCAPE = 0x1B;
         private const int GWL_EXSTYLE = -20;
@@ -39,7 +40,8 @@ namespace OledProtect.UI.Views
         private readonly Action _previewScreensaver;
         private readonly Action _previewFlights;
         private readonly ManualBrightnessService? _brightness;
-        private TextBlock? _brightnessTitle;
+        private TextBlock? _brightnessValue;
+        private Border? _brightnessFill;
         private MouseHook? _mouseHook;
         private int _wheelRest;
         private readonly Rect _monitorBounds;
@@ -92,55 +94,65 @@ namespace OledProtect.UI.Views
             var until = _workMode.EnabledUntil;
             _options = new List<Option>
             {
-                new("", "Bescherming aan", "Stilstaande schermen op zwart, gedimd, sterren of vliegtuigen", !on, () => _workMode.SetEnabled(false)),
-                new("", "Werkmodus", "Alle schermen blijven aan", on && until == null, () => _workMode.SetEnabled(true)),
-                new("", until != null ? $"Werkmodus tot {until.Value.ToLocalTime():HH:mm}" : "Werkmodus 1 uur",
-                    "Daarna gaat de bescherming vanzelf weer aan", on && until != null, () => _workMode.EnableFor(TimedWorkMode)),
-                new("", "Sterren bekijken", "Op alle schermen; muis bewegen of een toets = stoppen", false, _previewScreensaver),
-                new("", "Vliegtuigen bekijken", "Live kaart op alle schermen; muis of toets = stoppen", false, _previewFlights),
-                new("", "App openen", "Instellingen per scherm", false, _openApp),
+                new("", "Bescherming", !on, () => _workMode.SetEnabled(false)),
+                new("", "Werkmodus", on, () => _workMode.SetEnabled(true),
+                    Detail: on && until != null ? $"tot {until.Value.ToLocalTime():HH:mm}" : null),
+                new("", "Sterren", false, _previewScreensaver),
+                new("", "Vliegtuigen", false, _previewFlights),
             };
             if (_brightness != null)
-                _options.Insert(_options.Count - 1, new("", BrightnessTitle(), "Scroll met het muiswiel om aan te passen (alle schermen)", false, () => { }, IsBrightness: true));
+                _options.Add(new("", "Helderheid", false, () => { }, IsBrightness: true));
+            _options.Add(new("", "Instellingen", false, _openApp));
+
+            var accent = (Brush)FindResource("AccentColorBrush");
+            var text = (Brush)FindResource("PrimaryForegroundColor");
+            var muted = (Brush)FindResource("SecondaryForegroundColor");
 
             Rows.Children.Clear();
             _rows.Clear();
             for (int i = 0; i < _options.Count; i++)
             {
-                if (i == 3)
-                    Rows.Children.Add(new Border { Height = 1, Margin = new Thickness(8, 4, 8, 8), Background = (Brush)FindResource("SeparatorColorBrush") });
-
                 var option = _options[i];
+                if (i == ModeCount || option.IsBrightness)
+                    Rows.Children.Add(new Border { Height = 1, Margin = new Thickness(10, 4, 10, 4), Background = (Brush)FindResource("SeparatorColorBrush") });
+
                 var row = new Border { Style = (Style)FindResource("Row") };
-                var grid = new DockPanel();
+                var line = new DockPanel { LastChildFill = true };
 
                 var icon = new TextBlock
                 {
                     Text = option.Icon,
                     FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                    FontSize = 18,
-                    Width = 30,
+                    FontSize = 15,
+                    Width = 28,
                     VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = option.IsActive ? (Brush)FindResource("AccentColorBrush") : (Brush)FindResource("PrimaryForegroundColor")
+                    Foreground = option.IsActive ? accent : muted,
                 };
                 DockPanel.SetDock(icon, Dock.Left);
-                grid.Children.Add(icon);
+                line.Children.Add(icon);
 
-                if (option.IsActive)
+                if (option.IsBrightness)
+                    line.Children.Add(BrightnessMeter(muted, accent));
+                else if (option.Detail != null || option.IsActive)
                 {
-                    var badge = new TextBlock { Text = "actief", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)) };
-                    DockPanel.SetDock(badge, Dock.Right);
-                    grid.Children.Add(badge);
+                    var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                    if (option.Detail != null)
+                        right.Children.Add(new TextBlock { Text = option.Detail, FontSize = 11.5, Margin = new Thickness(0, 0, 8, 0), Foreground = muted, VerticalAlignment = VerticalAlignment.Center });
+                    if (option.IsActive)
+                        right.Children.Add(new System.Windows.Shapes.Ellipse { Width = 6, Height = 6, Fill = accent, VerticalAlignment = VerticalAlignment.Center });
+                    DockPanel.SetDock(right, Dock.Right);
+                    line.Children.Add(right);
                 }
 
-                var texts = new StackPanel { Margin = new Thickness(6, 0, 0, 0) };
-                var title = new TextBlock { Text = option.Title, FontSize = 14.5, Foreground = (Brush)FindResource("PrimaryForegroundColor") };
-                if (option.IsBrightness) _brightnessTitle = title;
-                texts.Children.Add(title);
-                texts.Children.Add(new TextBlock { Text = option.Subtitle, FontSize = 11, Margin = new Thickness(0, 1, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("SecondaryForegroundColor") });
-                grid.Children.Add(texts);
+                line.Children.Add(new TextBlock
+                {
+                    Text = option.Title,
+                    FontSize = 13.5,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = option.IsActive ? accent : text,
+                });
 
-                row.Child = grid;
+                row.Child = line;
                 int index = i;
                 row.MouseEnter += (_, _) => { _index = index; Highlight(); };
                 row.MouseLeftButtonUp += (_, _) => Choose(index);
@@ -149,7 +161,32 @@ namespace OledProtect.UI.Views
             }
         }
 
-        private string BrightnessTitle() => $"Helderheid {_brightness?.Current ?? 100}%";
+        /// <summary>The brightness row's right side: a thin bar and the percentage.</summary>
+        private FrameworkElement BrightnessMeter(Brush muted, Brush accent)
+        {
+            _brightnessValue = new TextBlock { FontSize = 11.5, Width = 34, TextAlignment = TextAlignment.Right, Foreground = muted, VerticalAlignment = VerticalAlignment.Center };
+            _brightnessFill = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Background = accent, HorizontalAlignment = HorizontalAlignment.Left };
+            var track = new Border
+            {
+                Width = 64,
+                Height = 3,
+                CornerRadius = new CornerRadius(1.5),
+                Background = (Brush)FindResource("SeparatorColorBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = _brightnessFill,
+            };
+            var meter = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { track, _brightnessValue } };
+            DockPanel.SetDock(meter, Dock.Right);
+            ShowBrightness();
+            return meter;
+        }
+
+        private void ShowBrightness()
+        {
+            int value = _brightness?.Current ?? 100;
+            if (_brightnessValue != null) _brightnessValue.Text = $"{value}%";
+            if (_brightnessFill != null) _brightnessFill.Width = 64 * Math.Clamp(value, 0, 100) / 100.0;
+        }
 
         /// <summary>A wheel turn anywhere: on the brightness row it changes the brightness (and goes no further).</summary>
         private bool OnWheel(int delta)
@@ -160,7 +197,7 @@ namespace OledProtect.UI.Views
             if (notches == 0) return true;
             _wheelRest -= notches * 120;
             _brightness.Turn(notches);
-            if (_brightnessTitle != null) _brightnessTitle.Text = BrightnessTitle();
+            ShowBrightness();
             if (!_holding) _closeAt = DateTime.UtcNow + Linger;
             return true;
         }
@@ -213,7 +250,7 @@ namespace OledProtect.UI.Views
 
             if (option.IsActive) { CloseNow(); return; }
 
-            bool isMode = index <= 2;
+            bool isMode = index < ModeCount;
             if (!isMode)
             {
                 CloseNow();

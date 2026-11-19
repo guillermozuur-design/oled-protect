@@ -180,7 +180,7 @@ namespace OledProtect.UI.Services
             int split = hotkey.LastIndexOf('+');
             string hold = split < 0 ? hotkey : hotkey[..split];
             string tap = hotkey[(split + 1)..];
-            return $"{hold} vasthouden + {tap} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten";
+            return $"{hold} vasthouden, {tap} = volgende · Esc = sluiten";
         }
 
         // ---- work mode feedback ----
