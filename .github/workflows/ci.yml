@@ -1,13 +1,17 @@
-name: CI
+﻿name: CI
 
+# Every pull request into develop or master must build, pass the tests and be formatted.
 on:
   pull_request:
     branches: [develop, master]
 
-# A newer push to the same pull request makes the running check pointless.
+# Only the latest push of a pull request is worth checking.
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
+
+env:
+  SOLUTION: OledProtect.sln
 
 jobs:
   verify:
@@ -18,19 +22,21 @@ jobs:
         shell: pwsh
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout with tags
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # full history and tags, MinVer needs them for the version
+          fetch-depth: 0 # the version comes from the latest v* tag (MinVer)
 
-      - uses: actions/setup-dotnet@v6
+      - name: .NET 8 SDK
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
-      - name: Build (Release)
-        run: dotnet build OledProtect.sln --configuration Release
+      - name: Compile
+        run: dotnet build $env:SOLUTION -c Release
 
-      - name: Unit tests
-        run: dotnet test OledProtect.sln --configuration Release --no-build
+      - name: Tests
+        run: dotnet test $env:SOLUTION -c Release --no-build
 
-      - name: Formatting matches .editorconfig
-        run: dotnet format OledProtect.sln --verify-no-changes --no-restore
+      - name: Code style
+        run: dotnet format $env:SOLUTION --verify-no-changes --no-restore

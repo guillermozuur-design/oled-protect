@@ -1,29 +1,35 @@
-<#
+﻿<#
 .SYNOPSIS
-    Produces the OLED Protect release files.
+    Packages OLED Protect for distribution.
 
 .DESCRIPTION
-    Output (all named OledProtect-<version>-...):
-      Setup.exe             per-user installer with x64 and x86 framework-dependent payloads
-      Portable-x64.zip      self-contained build in its own folder
-      Portable.exe          self-contained build packed into a single exe
-      SHA256SUMS.txt        checksums of the files above
+    Every run starts from an empty output folder and ends with these files, all prefixed with
+    OledProtect-<version>-:
 
-    The version comes from MinVer (nearest v* tag). The release workflow runs this same script, so a
-    local build and a CI build produce the same thing. When GITHUB_OUTPUT is set, the version is also
-    written there as 'version'.
+        Setup.exe          installer (current user, no admin), x64 and x86 inside
+        Portable-x64.zip   self-contained x64 build, unpacks into an OledProtect folder
+        Portable.exe       the same self-contained build as one executable
+        SHA256SUMS.txt     sha256sum-compatible list for the .exe and .zip files
+
+    <version> is computed by MinVer from the latest v* tag. Inside GitHub Actions (GITHUB_OUTPUT set)
+    the script also publishes it as the step output 'version'. The release workflow calls this script
+    as well, so there is only one recipe.
 
 .PARAMETER OutputDirectory
-    Folder for the finished files. Default: <repo>\artifacts.
+    Where the files land. Defaults to the 'artifacts' folder next to this script.
 
 .PARAMETER IsccPath
-    ISCC.exe to use when Inno Setup 6 is not on PATH or in a standard install folder.
+    Explicit location of the Inno Setup 6 compiler (ISCC.exe), for when it cannot be found by itself.
 
 .PARAMETER SkipPortable
-    Only build the installer (quicker when working on the .iss).
+    Leave out the zip and the single executable; handy while editing the installer script.
 
 .EXAMPLE
-    .\build.ps1 -SkipPortable
+    .\build.ps1
+    Full build into .\artifacts.
+
+.EXAMPLE
+    .\build.ps1 -SkipPortable -IsccPath 'D:\Tools\Inno Setup 6\ISCC.exe'
 #>
 [CmdletBinding()]
 param(
@@ -32,142 +38,149 @@ param(
     [switch] $SkipPortable
 )
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = [Management.Automation.ActionPreference]::Stop
+Set-StrictMode -Version 3.0
 
-$AppProject = Join-Path $PSScriptRoot 'OledProtect\OledProtect.csproj'
-$SetupScript = Join-Path $PSScriptRoot 'installer\OledProtect.iss'
+$Csproj = Join-Path $PSScriptRoot 'OledProtect\OledProtect.csproj'
+$IssFile = Join-Path $PSScriptRoot 'installer\OledProtect.iss'
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
-# Intermediate publish folders; the .iss reads its payload from <output>\publish\x64 and \x86.
-$PublishRoot = Join-Path $OutputDirectory 'publish'
+# Scratch area for dotnet publish. OledProtect.iss expects its payloads in publish\x64 and publish\x86.
+$Staging = Join-Path $OutputDirectory 'publish'
 
-function Show-Stage([string] $Text) {
-    Write-Host "`n--- $Text" -ForegroundColor Cyan
+# ---- publish profiles ---------------------------------------------------------------------------
+# Folder (below $Staging) -> how to publish into it. 'Portable' builds define PORTABLE, which keeps
+# the settings in a Data folder beside the exe; installed copies use %APPDATA% instead.
+$Profiles = @{
+    'x64'                  = @{ Rid = 'win-x64'; Portable = $false }
+    'x86'                  = @{ Rid = 'win-x86'; Portable = $false }
+    'portable\OledProtect' = @{ Rid = 'win-x64'; Portable = $true; PackNative = $false }
+    'onefile'              = @{ Rid = 'win-x64'; Portable = $true; PackNative = $true }
 }
 
-# Runs an external tool and turns a non-zero exit code into an error. Its output goes straight to the
-# console so it never leaks into a function's return value.
-function Invoke-Tool([string] $Tool, [string[]] $Arguments, [string] $FailureText) {
-    & $Tool @Arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "$FailureText (exit code $LASTEXITCODE)" }
-}
-
-function Find-InnoCompiler([string] $Requested) {
-    if ($Requested) {
-        if (-not (Test-Path -LiteralPath $Requested -PathType Leaf)) { throw "No ISCC.exe at '$Requested'." }
-        return (Resolve-Path -LiteralPath $Requested).Path
+# ---- deliverables -------------------------------------------------------------------------------
+# Suffix: part of the file name after 'OledProtect-<version>-'. Uses: publish profiles it needs.
+# Make: produces the file; receives the full target path.
+$Deliverables = @(
+    @{
+        Suffix   = 'Setup.exe'
+        Optional = $false
+        Uses     = @('x64', 'x86')
+        Make     = {
+            param($Target)
+            # ISCC names the file itself (OutputBaseFilename); we only check it afterwards.
+            Exec $InnoCompiler "/DAppVersion=$Version" "/DArtifactsDir=$OutputDirectory" $IssFile
+        }
     }
-
-    $fromPath = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
-    if ($fromPath) { return $fromPath.Source }
-
-    $standardFolders = @(${env:ProgramFiles(x86)}, $env:ProgramFiles, (Join-Path $env:LOCALAPPDATA 'Programs')) |
-        Where-Object { $_ }
-    foreach ($folder in $standardFolders) {
-        $candidate = Join-Path $folder 'Inno Setup 6\ISCC.exe'
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    @{
+        Suffix   = 'Portable-x64.zip'
+        Optional = $true
+        Uses     = @('portable\OledProtect')
+        # Zipping the folder itself gives the archive a single top-level OledProtect directory.
+        Make     = { param($Target) Compress-Archive -Path (Join-Path $Staging 'portable\OledProtect') -DestinationPath $Target -Force }
     }
-
-    throw ("Inno Setup 6 (ISCC.exe) is needed to build the installer but was not found.`n" +
-        "Install it (for example: winget install JRSoftware.InnoSetup) or point to it with -IsccPath.")
-}
-
-function Get-MinVerVersion {
-    # The MinVer target only exists after a restore, which a fresh clone has not had yet.
-    Invoke-Tool 'dotnet' @('restore', $AppProject, '--nologo', '-v', 'quiet') 'dotnet restore failed'
-    $reported = & dotnet msbuild $AppProject -nologo -v:quiet -t:MinVer -getProperty:Version
-    if ($LASTEXITCODE -ne 0) { throw 'MinVer could not determine the version.' }
-    $text = "$reported".Trim()
-    if ([string]::IsNullOrWhiteSpace($text)) { throw 'MinVer returned an empty version.' }
-    return $text
-}
-
-# Framework-dependent build for the installer. Never PORTABLE: an installed copy keeps its data in
-# %APPDATA%, not next to the exe in a folder it may not write to.
-function Publish-ForInstaller([string] $Rid) {
-    $target = Join-Path $PublishRoot ($Rid -replace '^win-', '')
-    Reset-Folder $target
-    Invoke-Tool 'dotnet' @(
-        'publish', $AppProject, '--nologo', '-c', 'Release', '-r', $Rid, '-o', $target,
-        '--self-contained', 'false'
-    ) "Publishing $Rid for the installer failed"
-}
-
-# Self-contained single-file build with PORTABLE defined (data lives in a Data folder beside the exe).
-# Without -Bundled the WPF native libraries stay next to the exe; with it they are packed inside too.
-function Publish-Portable([string] $Target, [switch] $Bundled) {
-    Reset-Folder $Target
-    $msbuildProps = [ordered]@{
-        Portable                           = 'true'
-        PublishSingleFile                  = 'true'
-        EnableCompressionInSingleFile      = 'true'
-        IncludeNativeLibrariesForSelfExtract = "$([bool]$Bundled)".ToLowerInvariant()
-        DebugType                          = 'none'   # no .pdb next to the exe
+    @{
+        Suffix   = 'Portable.exe'
+        Optional = $true
+        Uses     = @('onefile')
+        Make     = { param($Target) Copy-Item -LiteralPath (Join-Path $Staging 'onefile\OledProtect.exe') -Destination $Target -Force }
     }
-    $publishArgs = @('publish', $AppProject, '--nologo', '-c', 'Release', '-r', 'win-x64', '-o', $Target, '--self-contained', 'true')
-    $publishArgs += $msbuildProps.GetEnumerator() | ForEach-Object { "-p:$($_.Key)=$($_.Value)" }
-    Invoke-Tool 'dotnet' $publishArgs 'Publishing the portable build failed'
+)
+
+# ---- helpers ------------------------------------------------------------------------------------
+
+function Say([string] $What) { Write-Host "`n>> $What" -ForegroundColor Cyan }
+
+# Runs a program with the console as its output and stops the build on a non-zero exit code.
+function Exec {
+    $program, $rest = $args
+    & $program @rest | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "'$(Split-Path $program -Leaf) $($rest -join ' ')' exited with $LASTEXITCODE" }
 }
 
-function Reset-Folder([string] $Folder) {
-    if (Test-Path -LiteralPath $Folder) { Remove-Item -LiteralPath $Folder -Recurse -Force }
-}
-
-function Write-Checksums([string] $Destination) {
-    $entries = foreach ($file in Get-ChildItem -LiteralPath $OutputDirectory -File | Sort-Object Name) {
-        if ($file.Extension -notin '.exe', '.zip') { continue }
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        # Two spaces: the format sha256sum -c expects.
-        '{0}  {1}' -f $hash, $file.Name
+function Get-InnoCompiler {
+    if ($IsccPath) {
+        if (Test-Path -LiteralPath $IsccPath -PathType Leaf) { return (Resolve-Path -LiteralPath $IsccPath).Path }
+        throw "-IsccPath does not point to a file: $IsccPath"
     }
-    Set-Content -LiteralPath $Destination -Value $entries -Encoding utf8
+    $command = Get-Command -Name 'ISCC.exe' -CommandType Application -ErrorAction Ignore | Select-Object -First 1
+    if ($null -ne $command) { return $command.Path }
+
+    $found = @(${env:ProgramFiles(x86)}, $env:ProgramFiles, "$env:LOCALAPPDATA\Programs") |
+        Where-Object { $_ } |
+        ForEach-Object { Join-Path $_ 'Inno Setup 6\ISCC.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+    if ($found) { return $found }
+
+    throw "ISCC.exe (Inno Setup 6) not found on PATH or in Program Files / LocalAppData\Programs.`n" +
+        'Install Inno Setup 6 (winget install JRSoftware.InnoSetup) or pass -IsccPath.'
 }
 
-# ---- main ----------------------------------------------------------------------------------------
+function Get-Version {
+    # MinVer's target is only available once the package is restored (a fresh clone has nothing yet).
+    Exec 'dotnet' 'restore' $Csproj '--nologo' '-v' 'quiet'
+    $raw = & dotnet msbuild $Csproj -t:MinVer -getProperty:Version -nologo -v:quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Reading the MinVer version failed.' }
+    $value = ($raw | Out-String).Trim()
+    if (-not $value) { throw 'MinVer gave no version.' }
+    $value
+}
 
-$innoCompiler = Find-InnoCompiler $IsccPath
+function Publish-Profile([string] $Folder) {
+    $spec = $Profiles[$Folder]
+    $into = Join-Path $Staging $Folder
+    if (Test-Path -LiteralPath $into) { Remove-Item -LiteralPath $into -Recurse -Force }
 
-Show-Stage 'Determining the version'
-$version = Get-MinVerVersion
-Write-Host "Building $version"
-if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$version" -Encoding utf8 }
-$prefix = "OledProtect-$version"
+    $cli = @('publish', $Csproj, '-c', 'Release', '-r', $spec.Rid, '-o', $into, '--nologo')
+    if ($spec.Portable) {
+        $cli += '--self-contained', 'true', '-p:Portable=true', '-p:PublishSingleFile=true',
+            '-p:EnableCompressionInSingleFile=true', '-p:DebugType=none'
+        # Normally the WPF native DLLs sit beside the exe; packing them in makes a true one-file app.
+        if ($spec.PackNative) { $cli += '-p:IncludeNativeLibrariesForSelfExtract=true' }
+    }
+    else {
+        # The installer brings the .NET 8 Desktop Runtime, so its payloads stay framework-dependent.
+        $cli += '--self-contained', 'false'
+    }
+    Exec 'dotnet' @cli
+}
 
-Show-Stage 'Removing files from a previous build'
-# Leftovers would end up in this build's checksum list.
+# ---- run ----------------------------------------------------------------------------------------
+
+$InnoCompiler = Get-InnoCompiler
+
+Say 'Version'
+$Version = Get-Version
+Write-Host $Version
+if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$Version" -Encoding utf8 }
+$Prefix = "OledProtect-$Version"
+
+# Old top-level files would otherwise slip into this run's checksum list.
+Say "Emptying $OutputDirectory"
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-foreach ($stale in Get-ChildItem -LiteralPath $OutputDirectory -File) { Remove-Item -LiteralPath $stale.FullName -Force }
+Get-ChildItem -LiteralPath $OutputDirectory -File | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
 
-Show-Stage 'Publishing the installer payloads (x64, x86)'
-Publish-ForInstaller 'win-x64'
-Publish-ForInstaller 'win-x86'
-
-Show-Stage 'Compiling the installer'
-Invoke-Tool $innoCompiler @("/DAppVersion=$version", "/DArtifactsDir=$OutputDirectory", $SetupScript) 'ISCC failed'
-$setupExe = Join-Path $OutputDirectory "$prefix-Setup.exe"
-if (-not (Test-Path -LiteralPath $setupExe -PathType Leaf)) { throw "Expected installer missing: $setupExe" }
-
-if ($SkipPortable) {
-    Write-Host 'Portable builds skipped (-SkipPortable).'
-}
-else {
-    Show-Stage 'Building the portable zip'
-    # The zip holds a top-level OledProtect folder so unpacking it stays tidy.
-    $zipSource = Join-Path $PublishRoot 'portable\OledProtect'
-    Publish-Portable $zipSource
-    $zipFile = Join-Path $OutputDirectory "$prefix-Portable-x64.zip"
-    Compress-Archive -Path $zipSource -DestinationPath $zipFile -Force
-
-    Show-Stage 'Building the single-file portable exe'
-    $singleFolder = Join-Path $PublishRoot 'onefile'
-    Publish-Portable $singleFolder -Bundled
-    Copy-Item -LiteralPath (Join-Path $singleFolder 'OledProtect.exe') -Destination (Join-Path $OutputDirectory "$prefix-Portable.exe") -Force
+foreach ($item in $Deliverables) {
+    $file = "$Prefix-$($item.Suffix)"
+    if ($item.Optional -and $SkipPortable) {
+        Write-Host "(skipped $file because of -SkipPortable)"
+        continue
+    }
+    Say $file
+    foreach ($folder in $item.Uses) { Publish-Profile $folder }
+    $target = Join-Path $OutputDirectory $file
+    & $item.Make $target
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "$file was not created." }
 }
 
-Show-Stage 'Writing SHA-256 checksums'
-Write-Checksums (Join-Path $OutputDirectory "$prefix-SHA256SUMS.txt")
+Say "$Prefix-SHA256SUMS.txt"
+$sums = Get-ChildItem -LiteralPath $OutputDirectory -File |
+    Where-Object Extension -In '.exe', '.zip' |
+    Sort-Object Name |
+    ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+Set-Content -LiteralPath (Join-Path $OutputDirectory "$Prefix-SHA256SUMS.txt") -Value $sums -Encoding utf8
 
-Show-Stage "Finished: $OutputDirectory"
-Get-ChildItem -LiteralPath $OutputDirectory -File | Sort-Object Name | ForEach-Object {
-    '  {0,-50} {1,9:N1} MB' -f $_.Name, ($_.Length / 1MB)
-} | Write-Host
+Say 'Result'
+foreach ($f in Get-ChildItem -LiteralPath $OutputDirectory -File | Sort-Object Name) {
+    Write-Host ('  {0,-52}{1,10:N1} MB' -f $f.Name, ($f.Length / 1MB))
+}

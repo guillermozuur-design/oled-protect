@@ -1,75 +1,69 @@
 name: Release
 
-# A v* tag on master produces a draft GitHub release. Starting the workflow by hand only builds the
-# files and attaches them to the run, so the installer can be tried without releasing anything.
+# Pushing a v* tag (on master) builds everything and opens a draft release to review and publish.
+# A manual run is a trial: the files are only stored as a workflow artifact, nothing is released.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Test build only (a manual run never publishes a release)'
+        description: 'Trial build (manual runs never create a release)'
         type: boolean
         default: true
 
 jobs:
-  package:
-    name: Package and draft release
+  ship:
+    name: Build and draft
     runs-on: windows-latest
     permissions:
-      contents: write # gh release create
+      contents: write # needed by gh release create
     defaults:
       run:
         shell: pwsh
     env:
-      # Empty until code signing is arranged (.claude/docs/code-signing.md); the signing step then stays off.
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+      TAGGED: ${{ startsWith(github.ref, 'refs/tags/') }}
+      MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout with tags
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # MinVer reads the version from the tags
+          fetch-depth: 0 # MinVer needs the tags to compute the version
 
-      - name: Refuse tags that are not on master
-        if: env.IS_TAG == 'true'
+      - name: Tag must be on master
+        if: env.TAGGED == 'true'
         run: |
           git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
           git merge-base --is-ancestor "$env:GITHUB_SHA" origin/master
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Tag $env:GITHUB_REF_NAME points at a master commit."
-            exit 0
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::$env:GITHUB_REF_NAME does not point into master. Tag a commit on master (after merging develop)."
+            exit 1
           }
-          Write-Host "::error::Tag $env:GITHUB_REF_NAME is not on master. Merge develop into master first and tag the merge."
-          exit 1
+          Write-Host "OK: $env:GITHUB_REF_NAME is part of master."
 
-      - uses: actions/setup-dotnet@v6
+      - name: .NET 8 SDK
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
-      - name: Install Inno Setup 6
+      - name: Inno Setup 6
         run: choco install innosetup --yes --no-progress
 
-      - name: Label manual builds with their commit
-        if: github.event_name == 'workflow_dispatch'
+      - name: Add commit to trial version
+        if: env.MANUAL == 'true'
         run: |
-          # MinVer picks this property up from the environment: an untagged test build then carries
-          # +<sha> in its version and cannot pass for a real release.
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MinVerBuildMetadata=$(git rev-parse --short HEAD)"
+          # MinVer reads MinVerBuildMetadata from the environment, so a trial build gets a +<sha>
+          # suffix and is easy to tell apart from a tagged release.
+          $sha = git rev-parse --short HEAD
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MinVerBuildMetadata=$sha"
 
-      - name: Build installer, portable builds and checksums
-        id: build # build.ps1 writes 'version' to GITHUB_OUTPUT
+      - name: Run build.ps1
+        id: build # build.ps1 sets the 'version' output
         run: ./build.ps1
 
-      # Placeholder until the SignPath Foundation application is approved and the secret exists.
-      - name: Sign
-        if: env.SIGNPATH_API_TOKEN != ''
-        run: |
-          Write-Host '::error::SIGNPATH_API_TOKEN is set but signing is not wired up yet (.claude/docs/code-signing.md).'
-          exit 1
-
-      - name: Attach test build to the run
-        if: github.event_name == 'workflow_dispatch'
+      - name: Keep trial build
+        if: env.MANUAL == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: oled-protect-${{ steps.build.outputs.version }}
@@ -78,35 +72,35 @@ jobs:
             !artifacts/publish
           if-no-files-found: error
 
-      - name: Create draft release
-        if: env.IS_TAG == 'true'
+      - name: Draft GitHub release
+        if: env.TAGGED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.build.outputs.version }}
         run: |
           $v = $env:VERSION
-          $downloads = @"
+          $intro = @"
           ## 💾 Welke download? / Which download?
 
           | Bestand | Grootte | Installeren? | Instellingen staan in |
           |---|---|---|---|
-          | **``OledProtect-$v-Setup.exe``** | ~3 MB | Ja (haalt zo nodig de .NET 8 Desktop Runtime op) | ``%APPDATA%\OledProtect`` |
-          | **``OledProtect-$v-Portable.exe``** | ~70 MB | Nee — één bestand, dubbelklikken en klaar | ``Data\`` naast de exe |
-          | **``OledProtect-$v-Portable-x64.zip``** | ~64 MB | Nee — uitpakken en starten | ``Data\`` naast de exe |
+          | **``OledProtect-$v-Setup.exe``** | ~3 MB | Ja, installeert zo nodig ook de .NET 8 Desktop Runtime | ``%APPDATA%\OledProtect`` |
+          | **``OledProtect-$v-Portable.exe``** | ~70 MB | Nee, één bestand dat je zo start | ``Data\`` naast de exe |
+          | **``OledProtect-$v-Portable-x64.zip``** | ~64 MB | Nee, uitpakken en starten | ``Data\`` naast de exe |
 
-          Controleer een download met ``OledProtect-$v-SHA256SUMS.txt``.
+          De SHA-256-sommen staan in ``OledProtect-$v-SHA256SUMS.txt``.
 
-          **Windows SmartScreen:** de bestanden zijn niet digitaal ondertekend. Zie je *"Windows heeft uw pc beschermd"*, kies dan **Meer info → Toch uitvoeren**.
+          **Windows SmartScreen:** de bestanden hebben geen digitale handtekening. Meldt Windows *"Windows heeft uw pc beschermd"*, klik dan op **Meer info → Toch uitvoeren**.
 
           ---
 
           "@
 
-          # GitHub groups the merged pull requests by label (.github/release.yml); the table goes on top.
-          # gh prints the body line by line; join it again so the Markdown keeps its line breaks.
-          $changes = (gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:GITHUB_REF_NAME" --jq .body) -join "`n"
-          if ($LASTEXITCODE -ne 0) { throw 'Generating the release notes failed.' }
-          Set-Content -LiteralPath release-notes.md -Value ($downloads + $changes) -Encoding utf8
+          # Changelog from the merged pull requests, grouped by label (see .github/release.yml).
+          # gh returns it as separate lines, so glue them back together for the Markdown.
+          $log = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:GITHUB_REF_NAME" --jq .body
+          if ($LASTEXITCODE -ne 0) { throw 'gh could not generate the release notes.' }
+          Set-Content -LiteralPath release-notes.md -Value ($intro + ($log -join "`n")) -Encoding utf8
 
-          $files = Get-ChildItem -LiteralPath artifacts -File | Select-Object -ExpandProperty FullName
-          gh release create $env:GITHUB_REF_NAME @files --draft --title "OLED Protect $env:GITHUB_REF_NAME" --notes-file release-notes.md
+          $assets = @(Get-ChildItem -LiteralPath artifacts -File | ForEach-Object FullName)
+          gh release create $env:GITHUB_REF_NAME @assets --draft --title "OLED Protect $env:GITHUB_REF_NAME" --notes-file release-notes.md
