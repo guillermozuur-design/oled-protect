@@ -5,102 +5,97 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:behavior="clr-namespace:OledProtect.Features.MonitorBehavior.Models"
              xmlns:conv="clr-namespace:OledProtect.UI.Converters"
-             xmlns:vm="clr-namespace:OledProtect.UI.ViewModels"
-             mc:Ignorable="d"
+             xmlns:vm="clr-namespace:OledProtect.UI.ViewModels"             mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:MonitorConfigurationViewModel}"
-             FontFamily="Bahnschrift"
-             ToolTipService.InitialShowDelay="200">
+             d:DesignWidth="640"
+             ToolTipService.InitialShowDelay="300"
+             ToolTipService.ShowOnDisabled="True">
 
-    <!-- Settings for the one screen picked in the overview. -->
+    <!--
+        The panel for the screen picked in the overview. It reads top to bottom like the other tabs:
+        a header with the on/off switch, then one block per question (what happens, after how long,
+        what keeps the screen on). Each block names its own problem in red right where it is.
+    -->
     <UserControl.Resources>
         <conv:EnumToBooleanConverter x:Key="IsBehavior" />
         <conv:TimeUnitToTextConverter x:Key="UnitName" />
         <conv:StringNullOrEmptyToVisibilityConverter x:Key="ShowWhenText" />
 
-        <!-- Small grey caps above each group. -->
-        <Style x:Key="GroupLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="Light" />
-            <Setter Property="Foreground" Value="{StaticResource SecondaryForegroundColor}" />
+        <!-- Plain-text hover texts wrap instead of growing into one very wide line. -->
+        <Style TargetType="ToolTip" BasedOn="{StaticResource {x:Type ToolTip}}">
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" MaxWidth="320" TextWrapping="Wrap" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
-        <!-- Red asterisk next to a label whose group still has a problem. -->
-        <Style x:Key="ProblemMark" TargetType="TextBlock">
-            <Setter Property="Text" Value="*" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Margin" Value="4,-2,0,0" />
-            <Setter Property="VerticalAlignment" Value="Top" />
+        <!-- One question of the panel: a rounded block, a shade darker than the card around it. -->
+        <Style x:Key="Block" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PrimaryBackgroundColor}" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="16,13,16,15" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+
+        <!-- Title of an option inside a block: a bit smaller than a card title. -->
+        <Style x:Key="OptionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+        </Style>
+
+        <!-- Thin divider between the options of one block. -->
+        <Style x:Key="Divider" TargetType="Border">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Margin" Value="0,11" />
+            <Setter Property="Background" Value="{StaticResource SeparatorColorBrush}" />
+        </Style>
+
+        <!-- Red note under a block that still needs something; hidden while the text is empty. -->
+        <Style x:Key="ProblemNote" TargetType="Border">
+            <Setter Property="Margin" Value="0,12,0,0" />
+            <Setter Property="Padding" Value="9,5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="#2AFF5A6A" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+
+        <Style x:Key="ProblemText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Foreground" Value="{StaticResource DestructiveColorBrush}" />
         </Style>
 
-        <Style x:Key="Tick" TargetType="CheckBox">
-            <Setter Property="FontSize" Value="14" />
+        <!-- Behaviour choice as a row of pills; the chosen one is filled with the soft accent. -->
+        <Style x:Key="Pill" TargetType="RadioButton">
+            <Setter Property="GroupName" Value="IdleAction" />
+            <Setter Property="FontSize" Value="13" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="Foreground" Value="{StaticResource SecondaryForegroundColor}" />
             <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
             <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
-            <Setter Property="Validation.ErrorTemplate" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="CheckBox">
-                        <Grid Background="Transparent">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Border x:Name="Square" Width="18" Height="18" CornerRadius="4" BorderThickness="1.5"
-                                    Background="Transparent" BorderBrush="{StaticResource SecondaryForegroundColor}">
-                                <Path x:Name="Tickmark" Margin="3" Stretch="Uniform" Visibility="Hidden"
-                                      Data="M 1,6 L 5,10 L 12,2" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                      Stroke="{StaticResource PrimaryBackgroundColor}" />
-                            </Border>
-                            <ContentPresenter Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Square" Property="Background" Value="{StaticResource AccentColorBrush}" />
-                                <Setter TargetName="Square" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
-                                <Setter TargetName="Tickmark" Property="Visibility" Value="Visible" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Square" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.45" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="Choice" TargetType="RadioButton">
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Margin" Value="0,0,24,0" />
-            <Setter Property="GroupName" Value="ScreenBehavior" />
-            <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
-            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <DockPanel Background="Transparent" LastChildFill="True">
-                            <Grid DockPanel.Dock="Left" Width="18" Height="18">
-                                <Ellipse x:Name="Ring" StrokeThickness="1.5" Stroke="{StaticResource SecondaryForegroundColor}" />
-                                <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource AccentColorBrush}" Visibility="Hidden" />
-                            </Grid>
-                            <ContentPresenter VerticalAlignment="Center" Margin="9,0,0,0" />
-                        </DockPanel>
+                        <Border x:Name="Shape" CornerRadius="15" Padding="14,6" BorderThickness="1"
+                                Background="{StaticResource TertiaryBackgroundColor}"
+                                BorderBrush="{StaticResource SeparatorColorBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource AccentColorBrush}" />
-                                <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
-                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource AccentColorBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Shape" Property="Background" Value="{StaticResource AccentSoftBrush}" />
+                                <Setter TargetName="Shape" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource AccentColorBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.45" />
+                                <Setter TargetName="Shape" Property="Opacity" Value="0.4" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -108,27 +103,28 @@
             </Setter>
         </Style>
 
-        <Style x:Key="LevelSlider" TargetType="Slider">
+        <!-- Brightness slider: a thin rail, the part up to the knob in accent, a small hollow knob. -->
+        <Style x:Key="LevelRail" TargetType="Slider">
             <Setter Property="Minimum" Value="0" />
             <Setter Property="Maximum" Value="100" />
             <Setter Property="SmallChange" Value="1" />
-            <Setter Property="LargeChange" Value="10" />
+            <Setter Property="LargeChange" Value="5" />
             <Setter Property="IsMoveToPointEnabled" Value="True" />
-            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
-                        <Grid Height="20">
-                            <Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{StaticResource TertiaryBackgroundColor}" />
+                        <Grid Height="22" Background="Transparent">
+                            <Border Height="3" CornerRadius="1.5" VerticalAlignment="Center" Background="{StaticResource SeparatorColorBrush}" />
                             <Track x:Name="PART_Track">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
                                         <RepeatButton.Template>
-                                            <!-- The part left of the knob is the filled part of the bar. -->
                                             <ControlTemplate TargetType="RepeatButton">
-                                                <Grid Background="Transparent">
-                                                    <Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{StaticResource AccentColorBrush}" />
-                                                </Grid>
+                                                <Border Background="Transparent">
+                                                    <Border Height="3" CornerRadius="1.5" VerticalAlignment="Center" Background="{StaticResource AccentColorBrush}" />
+                                                </Border>
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
@@ -137,20 +133,20 @@
                                     <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
                                         <RepeatButton.Template>
                                             <ControlTemplate TargetType="RepeatButton">
-                                                <Grid Background="Transparent" />
+                                                <Border Background="Transparent" />
                                             </ControlTemplate>
                                         </RepeatButton.Template>
                                     </RepeatButton>
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb x:Name="Knob" Width="16" Height="16">
+                                    <Thumb Width="14" Height="14">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
-                                                <Ellipse x:Name="Face" Fill="{StaticResource PrimaryForegroundColor}"
-                                                         Stroke="{StaticResource SecondaryForegroundColor}" StrokeThickness="1" />
+                                                <Ellipse x:Name="Ring" Fill="{StaticResource PrimaryBackgroundColor}"
+                                                         Stroke="{StaticResource AccentColorBrush}" StrokeThickness="2.5" />
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="Face" Property="Stroke" Value="{StaticResource AccentColorBrush}" />
+                                                        <Setter TargetName="Ring" Property="Fill" Value="{StaticResource AccentColorBrush}" />
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
@@ -161,7 +157,7 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.45" />
+                                <Setter Property="Opacity" Value="0.35" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -169,153 +165,205 @@
             </Setter>
         </Style>
 
-        <!-- The shared text field, minus WPF's red error frame: problems are shown as text instead. -->
-        <Style x:Key="NumberField" TargetType="TextBox" BasedOn="{StaticResource Field}">
+        <!-- The shared text field without WPF's red frame: the blocks show problems themselves. -->
+        <Style x:Key="Amount" TargetType="TextBox" BasedOn="{StaticResource Field}">
             <Setter Property="Validation.ErrorTemplate" Value="{x:Null}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <!-- Switches here never show WPF's error frame either. -->
+        <Style x:Key="PanelSwitch" TargetType="CheckBox" BasedOn="{StaticResource Switch}">
+            <Setter Property="Validation.ErrorTemplate" Value="{x:Null}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
         </Style>
     </UserControl.Resources>
 
-    <StackPanel Margin="25,20">
-        <CheckBox Style="{StaticResource Switch}"
-                  Content="{Binding MonitorTitle}"
-                  IsChecked="{Binding IsManaged, UpdateSourceTrigger=PropertyChanged}"
-                  FontSize="18" FontWeight="SemiBold"
-                  ToolTip="Zet aan om dit scherm te laten bewaken tegen inbranden." />
+    <StackPanel Margin="20,18,20,10">
 
-        <Rectangle Height="1" Margin="0,14,0,26" Fill="{StaticResource SeparatorColorBrush}" />
-
-        <Grid IsEnabled="{Binding IsManaged}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="40" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="20" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <!-- What happens once the screen is idle -->
-            <StackPanel Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" ToolTip="{Binding BehaviorSectionTooltip}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Style="{StaticResource GroupLabel}" Text="WAT ER GEBEURT" />
-                    <TextBlock Style="{StaticResource ProblemMark}"
-                               Visibility="{Binding BehaviorError, Converter={StaticResource ShowWhenText}}" />
-                </StackPanel>
-                <WrapPanel Margin="0,10,0,0">
-                    <RadioButton Style="{StaticResource Choice}" Content="Zwart"
-                                 IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Blackout}, UpdateSourceTrigger=PropertyChanged}" />
-                    <RadioButton Style="{StaticResource Choice}" Content="Dimmen"
-                                        IsEnabled="{Binding Path=IsDimBehaviorEnabled}"
-                                 IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Dim}, UpdateSourceTrigger=PropertyChanged}" />
-                    <RadioButton Style="{StaticResource Choice}" Content="Sterren"
-                                 ToolTip="OLED-vriendelijke screensaver: zwarte hemel met twinkelende en vallende sterren."
-                                 IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Screensaver}, UpdateSourceTrigger=PropertyChanged}" />
-                    <RadioButton Style="{StaticResource Choice}" Content="Vliegtuigen" Margin="0"
-                                 ToolTip="Een donkere, langzaam bewegende kaart met de echte vliegtuigen erboven (instellen in het tabblad Vliegtuigen)."
-                                 IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Flights}, UpdateSourceTrigger=PropertyChanged}" />
-                </WrapPanel>
-                <CheckBox Style="{StaticResource Tick}" Margin="0,12,0,0" FontSize="13"
-                          Content="Ook helderheid naar 0"
-                          IsEnabled="{Binding IsLowerBrightnessOptionEnabled}"
-                          IsChecked="{Binding LowerBrightnessOnBlackout, UpdateSourceTrigger=PropertyChanged}"
-                          ToolTip="{Binding LowerBrightnessTooltip}" />
+        <!-- ===== Header: which screen, and is it looked after at all ===== -->
+        <DockPanel Margin="0,0,0,16">
+            <CheckBox DockPanel.Dock="Right" Style="{StaticResource PanelSwitch}"
+                      AutomationProperties.Name="Dit scherm bewaken"
+                      IsChecked="{Binding IsManaged, UpdateSourceTrigger=PropertyChanged}"
+                      ToolTip="Aan: OLED Protect let op dit scherm. Uit: het scherm gaat zijn eigen gang." />
+            <StackPanel>
+                <TextBlock Text="{Binding MonitorTitle}" FontSize="17" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryForegroundColor}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Style="{StaticResource CardText}"
+                           Text="Zet de schakelaar aan en dit scherm krijgt rust zodra je er even niet naar kijkt." />
             </StackPanel>
+        </DockPanel>
 
-            <!-- Brightness used by the "Dimmen" behaviour -->
-            <StackPanel Grid.Row="0" Grid.Column="2" VerticalAlignment="Center"
-                        IsEnabled="{Binding IsDimSliderEnabled}"
-                        ToolTip="De helderheid die het scherm krijgt als het gedimd wordt.">
-                <TextBlock Style="{StaticResource GroupLabel}" Text="DIMNIVEAU" />
-                <DockPanel Margin="0,8,0,0">
-                    <TextBlock DockPanel.Dock="Right" MinWidth="40" Margin="14,0,0,0" VerticalAlignment="Center" TextAlignment="Right"
-                               Foreground="{StaticResource PrimaryForegroundColor}"
-                               Text="{Binding DimLevel, StringFormat={}{0:F0}%}" />
-                    <Slider Style="{StaticResource LevelSlider}" Value="{Binding DimLevel, UpdateSourceTrigger=PropertyChanged}" />
-                </DockPanel>
-            </StackPanel>
+        <StackPanel IsEnabled="{Binding IsManaged}">
 
-            <!-- Idle time -->
-            <StackPanel Grid.Row="2" Grid.Column="0"
-                        ToolTip="Hoe lang het scherm stil moet staan voordat het zwart wordt, dimt of een screensaver (sterren of vliegtuigen) laat zien.">
-                <TextBlock Style="{StaticResource GroupLabel}" Text="WACHTTIJD" />
-                <Grid Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120" />
-                        <ColumnDefinition Width="10" />
-                        <ColumnDefinition Width="80" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="4,0,0,3" FontSize="11" Text="Eenheid"
-                               Foreground="{StaticResource SecondaryForegroundColor}" />
-                    <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Margin="4,0,0,3">
-                        <TextBlock FontSize="11" Text="Waarde" Foreground="{StaticResource SecondaryForegroundColor}" />
-                        <TextBlock Style="{StaticResource ProblemMark}"
-                                   Visibility="{Binding IdleValueError, Converter={StaticResource ShowWhenText}}" />
+            <!-- ===== What happens ===== -->
+            <Border Style="{StaticResource Block}">
+                <StackPanel>
+                    <StackPanel ToolTip="{Binding BehaviorSectionTooltip}" Background="Transparent">
+                        <TextBlock Style="{StaticResource CardTitle}" Text="Wat doet dit scherm als je weg bent?" />
+                        <TextBlock Style="{StaticResource CardText}" Margin="0,3,0,10" Text="Kies er één; het gebeurt zodra de wachttijd om is." />
+                        <WrapPanel>
+                            <RadioButton Style="{StaticResource Pill}" Content="Zwart"
+                                         IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Blackout}, UpdateSourceTrigger=PropertyChanged}" />
+                            <RadioButton Style="{StaticResource Pill}" Content="Dimmen"
+                                         IsEnabled="{Binding IsDimBehaviorEnabled}"
+                                         IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Dim}, UpdateSourceTrigger=PropertyChanged}" />
+                            <RadioButton Style="{StaticResource Pill}" Content="Sterrenhemel"
+                                         ToolTip="Pikzwarte lucht met hier en daar een twinkelende of vallende ster."
+                                         IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Screensaver}, UpdateSourceTrigger=PropertyChanged}" />
+                            <RadioButton Style="{StaticResource Pill}" Content="Vliegtuigen"
+                                         ToolTip="Een donkere kaart die langzaam meedrijft met de vliegtuigen die er nu echt vliegen. Kies de plek in het tabblad Vliegtuigen."
+                                         IsChecked="{Binding Behavior, Converter={StaticResource IsBehavior}, ConverterParameter={x:Static behavior:MonitorBehaviorType.Flights}, UpdateSourceTrigger=PropertyChanged}" />
+                        </WrapPanel>
                     </StackPanel>
 
-                    <ComboBox Grid.Row="1" Grid.Column="0" Height="32" FontSize="14"
-                              ItemsSource="{Binding TimeUnits}"
-                              SelectedItem="{Binding SelectedTimeUnit, UpdateSourceTrigger=PropertyChanged}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Converter={StaticResource UnitName}}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <TextBox Grid.Row="1" Grid.Column="2" Style="{StaticResource NumberField}"
-                             Text="{Binding IdleValue, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
-                </Grid>
-            </StackPanel>
+                    <Border Style="{StaticResource Divider}" />
 
-            <!-- What keeps the screen awake -->
-            <StackPanel Grid.Row="2" Grid.Column="2">
-                <StackPanel.ToolTip>
-                    <TextBlock>
-                        <Bold>Per scherm</Bold><LineBreak />
-                        Deze vinkjes houden ALLEEN dit scherm wakker.<LineBreak /><LineBreak />
-                        • <Bold>De muis op dit scherm:</Bold> zolang je muis hier staat.<LineBreak />
-                        • <Bold>Het actieve venster op dit scherm:</Bold> het venster waar je het laatst in klikte.<LineBreak /><LineBreak />
-                        <Bold>Overal</Bold><LineBreak />
-                        • <Bold>Muis of toetsenbord ergens:</Bold> elke invoer, op welk scherm ook (zoals Windows zelf).
-                    </TextBlock>
-                </StackPanel.ToolTip>
+                    <!-- Only meaningful for Dimmen: how bright the screen stays. -->
+                    <DockPanel IsEnabled="{Binding IsDimSliderEnabled}">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Slider Style="{StaticResource LevelRail}" Width="170"
+                                    AutomationProperties.Name="Helderheid bij dimmen"
+                                    Value="{Binding DimLevel, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Width="44" Margin="10,0,0,0" VerticalAlignment="Center" TextAlignment="Right" FontSize="13.5"
+                                       Foreground="{StaticResource PrimaryForegroundColor}"
+                                       Text="{Binding DimLevel, StringFormat={}{0:F0}%}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource OptionTitle}" Text="Gedimd tot" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Hoe fel het scherm nog is bij Dimmen." />
+                        </StackPanel>
+                    </DockPanel>
 
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Style="{StaticResource GroupLabel}" Text="WAKKER HOUDEN ALS…" />
-                    <TextBlock Style="{StaticResource ProblemMark}"
-                               Visibility="{Binding ActiveConditionsError, Converter={StaticResource ShowWhenText}}" />
+                    <Border Style="{StaticResource Divider}" />
+
+                    <!-- Only meaningful for Zwart on a screen that takes brightness commands. -->
+                    <DockPanel Background="Transparent" ToolTip="{Binding LowerBrightnessTooltip}" ToolTipService.ShowOnDisabled="True">
+                        <CheckBox DockPanel.Dock="Right" Style="{StaticResource PanelSwitch}"
+                                  AutomationProperties.Name="Bij zwart ook de helderheid op nul"
+                                  IsEnabled="{Binding IsLowerBrightnessOptionEnabled}"
+                                  IsChecked="{Binding LowerBrightnessOnBlackout, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource OptionTitle}" Text="Bij Zwart ook het licht uit" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Het scherm zelf gaat dan naar helderheid 0." />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <Border Style="{StaticResource ProblemNote}" Visibility="{Binding BehaviorError, Converter={StaticResource ShowWhenText}}">
+                        <TextBlock Style="{StaticResource ProblemText}" Text="{Binding BehaviorError}" />
+                    </Border>
                 </StackPanel>
+            </Border>
 
-                <CheckBox Style="{StaticResource Tick}" Margin="0,8,0,8" Content="de muis op dit scherm staat"
-                          IsChecked="{Binding IsActiveOnMousePosition, UpdateSourceTrigger=PropertyChanged}" />
-                <CheckBox Style="{StaticResource Tick}" Margin="0,0,0,8" Content="het actieve venster op dit scherm staat"
-                          IsChecked="{Binding IsActiveOnActiveWindow, UpdateSourceTrigger=PropertyChanged}" />
+            <!-- ===== After how long ===== -->
+            <Border Style="{StaticResource Block}">
+                <StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBox Style="{StaticResource Amount}" Width="64"
+                                     AutomationProperties.Name="Wachttijd"
+                                     Text="{Binding IdleValue, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
+                            <ComboBox Width="112" Margin="8,0,0,0" FontSize="13.5"
+                                      AutomationProperties.Name="Eenheid van de wachttijd"
+                                      ItemsSource="{Binding TimeUnits}"
+                                      SelectedItem="{Binding SelectedTimeUnit, UpdateSourceTrigger=PropertyChanged}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={StaticResource UnitName}}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource CardTitle}" Text="Wachttijd" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Zo lang blijft het rustig op dit scherm voordat het aan de beurt is." />
+                        </StackPanel>
+                    </DockPanel>
 
-                <!-- Refinement of the two options above, so it is indented under them. -->
-                <WrapPanel Margin="27,0,0,10" IsEnabled="{Binding IsStillLimitApplicable}" ToolTipService.ShowOnDisabled="True"
-                           ToolTip="Geldt voor de muis en voor het gefocuste venster hierboven: staat de muis hier, of het actieve venster,&#10;maar beweeg je de muis niet en druk je geen toets in, dan gaat dit scherm na deze tijd toch uit.&#10;Muis bewegen of een toets indrukken maakt het weer wakker.&#10;Speelt er een video (YouTube, Netflix, VLC), dan blijft het scherm met het actieve venster gewoon aan.">
-                    <CheckBox Style="{StaticResource Tick}" FontSize="13" VerticalAlignment="Center" Content="maar toch uit na"
-                              IsChecked="{Binding UseMouseStillLimit, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBox Style="{StaticResource NumberField}" Width="46" Height="26" Margin="8,0,0,0" FontSize="13"
-                             IsEnabled="{Binding UseMouseStillLimit}"
-                             Text="{Binding MouseStillMinutes, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
-                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Text="min zonder muis of toets"
-                               Foreground="{StaticResource SecondaryForegroundColor}" />
-                    <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" FontSize="12"
-                               Foreground="{StaticResource DestructiveColorBrush}"
-                               Text="{Binding MouseStillError}"
-                               Visibility="{Binding MouseStillError, Converter={StaticResource ShowWhenText}}" />
-                </WrapPanel>
+                    <Border Style="{StaticResource ProblemNote}" Visibility="{Binding IdleValueError, Converter={StaticResource ShowWhenText}}">
+                        <TextBlock Style="{StaticResource ProblemText}" Text="{Binding IdleValueError}" />
+                    </Border>
+                </StackPanel>
+            </Border>
 
-                <CheckBox Style="{StaticResource Tick}" Content="ik ergens muis of toetsenbord gebruik"
-                          IsChecked="{Binding IsActiveOnInput, UpdateSourceTrigger=PropertyChanged}" />
-            </StackPanel>
-        </Grid>
+            <!-- ===== What keeps it on ===== -->
+            <Border Style="{StaticResource Block}">
+                <StackPanel>
+                    <StackPanel Background="Transparent">
+                        <StackPanel.ToolTip>
+                            <TextBlock MaxWidth="320" TextWrapping="Wrap">
+                                Staat er minstens één aan die klopt, dan blijft dit scherm gewoon aan.<LineBreak /><LineBreak />
+                                Muis en venster kijken alleen naar dít scherm: zo kan het scherm naast je al rusten terwijl jij hier werkt.<LineBreak /><LineBreak />
+                                Ergens muis of toetsenbord kijkt naar al je schermen samen, net als de slaapstand van Windows.
+                            </TextBlock>
+                        </StackPanel.ToolTip>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="Wakker houden als…" />
+                        <TextBlock Style="{StaticResource CardText}" Text="Zolang één van deze klopt, wacht dit scherm nog even." />
+                    </StackPanel>
+
+                    <Border Style="{StaticResource Divider}" />
+
+                    <DockPanel>
+                        <CheckBox DockPanel.Dock="Right" Style="{StaticResource PanelSwitch}"
+                                  AutomationProperties.Name="Je muis staat op dit scherm"
+                                  IsChecked="{Binding IsActiveOnMousePosition, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource OptionTitle}" Text="…je muis hier staat" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Ook als je hem niet beweegt." />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <DockPanel Margin="0,12,0,0">
+                        <CheckBox DockPanel.Dock="Right" Style="{StaticResource PanelSwitch}"
+                                  AutomationProperties.Name="Je venster staat op dit scherm"
+                                  IsChecked="{Binding IsActiveOnActiveWindow, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource OptionTitle}" Text="…het venster waar je in werkt hier staat" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Het venster dat je het laatst aanklikte." />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Belongs to the two options above: an accent line on the left ties it to them. -->
+                    <Border Margin="2,12,0,0" Padding="12,4,0,4" BorderThickness="2,0,0,0" BorderBrush="{StaticResource AccentSoftBrush}"
+                            IsEnabled="{Binding IsStillLimitApplicable}" Background="Transparent"
+                            ToolTipService.ShowOnDisabled="True"
+                            ToolTip="Voor muis en venster hierboven: raak je niets aan, dan rust dit scherm na deze minuten toch. Even bewegen of typen en het is terug. Loopt er een video in je venster, dan blijft het aan.">
+                        <StackPanel>
+                            <WrapPanel>
+                                <CheckBox Style="{StaticResource PanelSwitch}" FontSize="13" Content="Toch rust na"
+                                          IsChecked="{Binding UseMouseStillLimit, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Style="{StaticResource Amount}" Width="52" Margin="10,0,0,0" FontSize="13" VerticalAlignment="Center"
+                                         AutomationProperties.Name="Minuten zonder muis of toetsenbord"
+                                         IsEnabled="{Binding UseMouseStillLimit}"
+                                         Text="{Binding MouseStillMinutes, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
+                                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                           Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="minuten niks aanraken" />
+                            </WrapPanel>
+                            <TextBlock Style="{StaticResource ProblemText}" Margin="0,6,0,0"
+                                       Text="{Binding MouseStillError}"
+                                       Visibility="{Binding MouseStillError, Converter={StaticResource ShowWhenText}}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Divider}" />
+
+                    <DockPanel>
+                        <CheckBox DockPanel.Dock="Right" Style="{StaticResource PanelSwitch}"
+                                  AutomationProperties.Name="Je gebruikt ergens muis of toetsenbord"
+                                  IsChecked="{Binding IsActiveOnInput, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel Margin="0,0,16,0">
+                            <TextBlock Style="{StaticResource OptionTitle}" Text="…je ergens muis of toetsenbord gebruikt" />
+                            <TextBlock Style="{StaticResource CardText}" Text="Op welk scherm dan ook." />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <Border Style="{StaticResource ProblemNote}" Visibility="{Binding ActiveConditionsError, Converter={StaticResource ShowWhenText}}">
+                        <TextBlock Style="{StaticResource ProblemText}" Text="{Binding ActiveConditionsError}" />
+                    </Border>
+                </StackPanel>
+            </Border>
+        </StackPanel>
     </StackPanel>
 </UserControl>

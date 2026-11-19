@@ -249,13 +249,20 @@ namespace OledProtect.Tests.UI.ViewModels
             var ddc = Panel(ddc: true);
             ddc.Behavior = MonitorBehaviorType.Dim;
 
-            Assert.StartsWith("DIT SCHERM ONDERSTEUNT GEEN DIMMEN.", noDdc.BehaviorSectionTooltip);
-            Assert.StartsWith("DIT SCHERM ONDERSTEUNT GEEN DIMMEN.", noDdc.LowerBrightnessTooltip);
-            Assert.StartsWith("Wat dit scherm doet", ddc.BehaviorSectionTooltip);
-            Assert.StartsWith("ALLEEN BIJ 'ZWART'.", ddc.LowerBrightnessTooltip);
+            const string noDdcNote = "(geen DDC/CI).";
+
+            // The explanation always comes first; the reason for a grey option is a note at the end.
+            Assert.StartsWith("Zwart zet de pixels", noDdc.BehaviorSectionTooltip);
+            Assert.EndsWith(noDdcNote, noDdc.BehaviorSectionTooltip);
+            Assert.StartsWith("Naast het zwart", noDdc.LowerBrightnessTooltip);
+            Assert.EndsWith(noDdcNote, noDdc.LowerBrightnessTooltip);
+
+            Assert.DoesNotContain("DDC/CI", ddc.BehaviorSectionTooltip);
+            Assert.EndsWith("Kies eerst Zwart, dan kan deze aan.", ddc.LowerBrightnessTooltip);
 
             ddc.Behavior = MonitorBehaviorType.Blackout;
-            Assert.StartsWith("Zet ook de helderheid", ddc.LowerBrightnessTooltip);
+            Assert.DoesNotContain("\n\n", ddc.LowerBrightnessTooltip);
+            Assert.EndsWith("achtergrondlicht anders nog door.", ddc.LowerBrightnessTooltip);
         }
 
         [Fact]

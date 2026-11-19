@@ -3,35 +3,44 @@ using System.Windows;
 
 namespace OledProtect.UI.Services
 {
-    // Yes = save (and go on only if the save was accepted), No = throw the edits away and go on,
-    // Cancel = stay. Without pending edits there is nothing to ask.
+    /// <summary>
+    /// Asks what to do with unsaved edits before the window closes or the app stops. Only asks
+    /// when there is something to lose. Yes saves (and only lets go once that worked), No drops
+    /// the edits and lets go, Cancel stays in the settings.
+    /// </summary>
     public class UnsavedSettingsService(
         IUnsavedSettings edits,
         IDialogService dialogs) : IUnsavedSettingsService
     {
-        private const string Title = "Niet opgeslagen wijzigingen";
-        private const string Question = "Je hebt wijzigingen die nog niet zijn opgeslagen. Wil je ze opslaan voordat {0}?";
+        private const string Caption = "Even checken";
 
-        public bool ConfirmHide() => Resolve("het venster sluit");
+        public bool ConfirmHide() => MayLeave("het venster dichtgaat");
 
-        public bool ConfirmExit() => Resolve("OLED Protect stopt");
+        public bool ConfirmExit() => MayLeave("OLED Protect afsluit");
 
-        private bool Resolve(string whatHappensNext)
+        // The whole question, including what each button does, since a message box says only Ja/Nee.
+        private static string Question(string moment) =>
+            "Je aanpassingen zijn nog niet bewaard." + Environment.NewLine + Environment.NewLine +
+            $"Eerst bewaren, voordat {moment}?" + Environment.NewLine +
+            "Ja bewaart ze, Nee laat ze vallen, Annuleren brengt je terug.";
+
+        private bool MayLeave(string moment)
         {
             if (!edits.IsDirty)
                 return true;
 
-            var answer = dialogs.AskYesNoCancel(string.Format(Question, whatHappensNext), Title);
-            switch (answer)
+            return dialogs.AskYesNoCancel(Question(moment), Caption) switch
             {
-                case MessageBoxResult.Yes:
-                    return edits.TrySaveChanges();
-                case MessageBoxResult.Cancel:
-                    return false;
-                default:
-                    edits.DiscardChanges();
-                    return true;
-            }
+                MessageBoxResult.Yes => edits.TrySaveChanges(),
+                MessageBoxResult.Cancel => false,
+                _ => DiscardAndGo(),
+            };
+        }
+
+        private bool DiscardAndGo()
+        {
+            edits.DiscardChanges();
+            return true;
         }
     }
 }

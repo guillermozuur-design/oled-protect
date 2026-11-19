@@ -15,7 +15,9 @@ namespace OledProtect.UI.ViewModels
     /// </summary>
     public class MonitorConfigurationViewModel : ViewModelBase, IDataErrorInfo
     {
-        private const string NoDimmingPrefix = "DIT SCHERM ONDERSTEUNT GEEN DIMMEN.\n\n";
+        // Short notes added below a hover text when an option is greyed out.
+        private const string NoDdcNote = "Dimmen en helderheid 0 kunnen hier niet: dit scherm laat zich niet op afstand regelen (geen DDC/CI).";
+        private const string OnlyWithBlackNote = "Kies eerst Zwart, dan kan deze aan.";
 
         // Slider values come back as doubles with float noise; smaller differences are not edits.
         private const double DimTolerance = 0.0001;
@@ -156,37 +158,24 @@ namespace OledProtect.UI.ViewModels
         /// <summary>The "still" limit only refines the mouse and focused-window conditions.</summary>
         public bool IsStillLimitApplicable => IsActiveOnMousePosition || IsActiveOnActiveWindow;
 
-        public string BehaviorSectionTooltip
-        {
-            get
-            {
-                const string explanation =
-                    "Wat dit scherm doet als de wachttijd voorbij is.\n\n" +
-                    "• Zwart: het scherm wordt helemaal zwart (OLED-pixels uit).\n" +
-                    "• Dimmen: de helderheid van het scherm zelf gaat omlaag (DDC/CI).\n" +
-                    "• Sterren: de echte sterrenhemel als screensaver.\n" +
-                    "• Vliegtuigen: een donkere kaart met de echte vliegtuigen erboven.";
-                return IsDimBehaviorEnabled ? explanation : NoDimmingPrefix + explanation;
-            }
-        }
+        /// <summary>Hover text for the behaviour choice; ends with a note when dimming is not possible here.</summary>
+        public string BehaviorSectionTooltip =>
+            WithNote(
+                "Zwart zet de pixels gewoon uit. Dimmen draait het scherm zelf zachter. " +
+                "Sterrenhemel en Vliegtuigen laten een rustig, donker beeld zien.",
+                IsDimBehaviorEnabled ? null : NoDdcNote);
 
-        public string LowerBrightnessTooltip
-        {
-            get
-            {
-                const string explanation =
-                    "Zet ook de helderheid van het scherm zelf op 0,\n" +
-                    "naast het zwarte beeld.\n\n" +
-                    "Vooral nuttig bij niet-OLED-schermen, waar de\n" +
-                    "achtergrondverlichting anders blijft branden.";
+        /// <summary>Hover text for "brightness to 0"; ends with why the switch is grey, if it is.</summary>
+        public string LowerBrightnessTooltip =>
+            WithNote(
+                "Naast het zwart gaat ook het scherm zelf op helderheid 0. " +
+                "Fijn bij een LCD-scherm: daar schijnt het achtergrondlicht anders nog door.",
+                !IsDimBehaviorEnabled ? NoDdcNote
+                    : Behavior != MonitorBehaviorType.Blackout ? OnlyWithBlackNote
+                    : null);
 
-                // Say first why the box is greyed out, if it is.
-                var reason = !IsDimBehaviorEnabled ? NoDimmingPrefix
-                    : Behavior != MonitorBehaviorType.Blackout ? "ALLEEN BIJ 'ZWART'.\n\n"
-                    : string.Empty;
-                return reason + explanation;
-            }
-        }
+        private static string WithNote(string text, string? note) =>
+            note is null ? text : $"{text}\n\n{note}";
 
         public bool IsDirty
         {

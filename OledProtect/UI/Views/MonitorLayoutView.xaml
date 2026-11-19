@@ -7,123 +7,118 @@
              xmlns:vm="clr-namespace:OledProtect.UI.ViewModels"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
-             d:DesignWidth="800" d:DesignHeight="450"
-             ToolTipService.InitialShowDelay="200"
-             x:Name="Overview"
-             SizeChanged="OnPanelResized">
+             d:DesignWidth="760" d:DesignHeight="184"
+             ToolTipService.InitialShowDelay="300"
+             x:Name="Overview">
 
-    <!-- Overview of all screens as scaled tiles; clicking a tile opens its settings below. -->
+    <!--
+        A header line (what this is, and a button to look for screens again) above a dark "desk"
+        on which every screen sits as a small panel in the same arrangement as in Windows.
+        Clicking a panel opens its settings underneath.
+    -->
     <UserControl.Resources>
         <conv:LeftTopToMarginConverter x:Key="PositionToMargin" />
         <conv:BooleanToVisibilityConverter x:Key="ShowWhenTrue" />
 
-        <Style x:Key="ScreenTile" TargetType="Border">
-            <Setter Property="CornerRadius" Value="5" />
+        <!-- A screen on the desk: thin outline, lit with a soft accent glow once it is the chosen one. -->
+        <Style x:Key="Panel" TargetType="Border">
             <Setter Property="HorizontalAlignment" Value="Left" />
             <Setter Property="VerticalAlignment" Value="Top" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{StaticResource SeparatorColorBrush}" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Effect">
-                <Setter.Value>
-                    <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.45" Color="Black" />
-                </Setter.Value>
-            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource SecondaryForegroundColor}" />
                 </Trigger>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="Effect">
+                        <Setter.Value>
+                            <DropShadowEffect ShadowDepth="0" BlurRadius="16" Opacity="0.55" Color="#7FA7FF" />
+                        </Setter.Value>
+                    </Setter>
+                    <Setter Property="BorderThickness" Value="2" />
                     <Setter Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
-                    <Setter Property="BorderThickness" Value="3" />
                 </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="RoundIconButton" TargetType="Button">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{StaticResource SecondaryForegroundColor}" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid>
-                            <Ellipse Fill="{TemplateBinding Background}" />
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{StaticResource TertiaryBackgroundColor}" />
-                    <Setter Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
-                </Trigger>
             </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
-    <Border Background="{StaticResource SecondaryBackgroundColor}" CornerRadius="8">
-        <Grid>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header: caption on the left, refresh as a small labelled button on the right. -->
+        <DockPanel Grid.Row="0" Margin="6,2,2,8">
+            <Button DockPanel.Dock="Right" Style="{StaticResource SubtleButton}" Padding="10,3" FontSize="12"
+                    Command="{Binding ReloadMonitorsCommand}"
+                    ToolTip="Net een scherm aangesloten of losgehaald? Hiermee kijkt OLED Protect opnieuw.">
+                <StackPanel Orientation="Horizontal">
+                    <!-- E72C: the refresh arrow of Segoe MDL2 Assets. -->
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72C;" FontSize="11" VerticalAlignment="Center" />
+                    <TextBlock Text="Opnieuw zoeken" Margin="6,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                <Run Text="Zo staan je schermen" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource PrimaryForegroundColor}" />
+                <Run Text="  ·  klik er een aan" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}" />
+            </TextBlock>
+        </DockPanel>
+
+        <!-- The desk. Its own size (not the whole control's) is what the tiles are fitted into. -->
+        <Border Grid.Row="1" Background="{StaticResource PrimaryBackgroundColor}" CornerRadius="9"
+                SizeChanged="OnDeskResized">
             <ItemsControl ItemsSource="{Binding Monitors}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <!-- Tiles are placed by margin inside one cell, matching the desktop arrangement. -->
+                        <!-- One cell; each panel is pushed into place by its margin. -->
                         <Grid ClipToBounds="True" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:MonitorLayoutViewModel}">
-                        <Border Style="{StaticResource ScreenTile}"
+                        <Border Style="{StaticResource Panel}"
                                 Width="{Binding ScaledWidth}"
                                 Height="{Binding ScaledHeight}"
                                 Background="{Binding BackgroundColor}">
+                            <Border.InputBindings>
+                                <!-- A click anywhere on the panel picks this screen. -->
+                                <MouseBinding Command="{Binding DataContext.SelectMonitorCommand, ElementName=Overview}"
+                                              CommandParameter="{Binding}" MouseAction="LeftClick" />
+                            </Border.InputBindings>
                             <Border.Margin>
+                                <!-- Where the panel sits on the desk (left, top). -->
                                 <MultiBinding Converter="{StaticResource PositionToMargin}">
                                     <Binding Path="ScaledLeft" />
                                     <Binding Path="ScaledTop" />
                                 </MultiBinding>
                             </Border.Margin>
-                            <Border.InputBindings>
-                                <MouseBinding MouseAction="LeftClick"
-                                              Command="{Binding DataContext.SelectMonitorCommand, ElementName=Overview}"
-                                              CommandParameter="{Binding}" />
-                            </Border.InputBindings>
 
-                            <Grid>
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <TextBlock HorizontalAlignment="Center" Text="{Binding MonitorTitle}"
-                                               FontSize="16" FontWeight="SemiBold"
-                                               Foreground="{StaticResource PrimaryForegroundColor}" />
-                                    <TextBlock HorizontalAlignment="Center" Margin="0,2,0,0" Text="{Binding ResolutionText}"
-                                               FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}" />
+                            <Grid Margin="9,7">
+                                <!-- Name and resolution sit in the lower left corner, like a label on a bezel. -->
+                                <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Left">
+                                    <DockPanel>
+                                        <!-- Gold pencil right after the name: changed here, not saved yet. E70F is the edit glyph. -->
+                                        <TextBlock DockPanel.Dock="Right" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                   FontFamily="Segoe MDL2 Assets" Text="&#xE70F;" FontSize="11"
+                                                   Foreground="{StaticResource StarGoldBrush}" Background="Transparent"
+                                                   Visibility="{Binding IsDirty, Converter={StaticResource ShowWhenTrue}}"
+                                                   ToolTip="Aangepast, maar nog niet bewaard." />
+                                        <TextBlock Text="{Binding MonitorTitle}" FontSize="13" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource PrimaryForegroundColor}" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding ResolutionText}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                               Foreground="{StaticResource SecondaryForegroundColor}" />
                                 </StackPanel>
-
-                                <!-- Amber dot: this screen has edits that are not written yet. -->
-                                <Ellipse Width="10" Height="10" Margin="0,6,6,0"
-                                         VerticalAlignment="Top" HorizontalAlignment="Right"
-                                         Fill="#F5A623"
-                                         Visibility="{Binding IsDirty, Converter={StaticResource ShowWhenTrue}}"
-                                         ToolTip="Dit scherm heeft wijzigingen die nog worden opgeslagen." />
                             </Grid>
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-
-            <TextBlock Text="Jouw schermen" Margin="15,10,0,0"
-                       HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"
-                       FontSize="14" FontWeight="Light" Foreground="{StaticResource SecondaryForegroundColor}" />
-
-            <!-- E72C is the Refresh glyph in Segoe MDL2 Assets. -->
-            <Button Style="{StaticResource RoundIconButton}" Content="&#xE72C;"
-                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0"
-                    Command="{Binding ReloadMonitorsCommand}"
-                    ToolTip="Schermen opnieuw zoeken" />
-        </Grid>
-    </Border>
+        </Border>
+    </Grid>
 </UserControl>
