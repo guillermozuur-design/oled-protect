@@ -2,29 +2,16 @@ using OLED_Sleeper.Features.UserSettings.Models;
 
 namespace OLED_Sleeper.Features.UserSettings.Services.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for loading and saving user settings to persistent storage.
-    /// </summary>
     public interface IMonitorSettingsFileService
     {
-        /// <summary>
-        /// Event raised after settings have been saved. It carries the settings the caller supplied rather than
-        /// the merged list that was written.
-        /// </summary>
+        // Fires after a successful save with exactly the list passed to SaveSettings (not the merged file).
         event Action<List<MonitorSettings>>? SettingsChanged;
 
-        /// <summary>
-        /// Loads all monitor settings from persistent storage.
-        /// </summary>
-        /// <returns>A list of <see cref="MonitorSettings"/> objects, empty when no settings could be read.</returns>
+        // Empty list when there is no usable settings file.
         List<MonitorSettings> LoadSettings();
 
-        /// <summary>
-        /// Saves the provided monitor settings to persistent storage. Stored settings for monitors that are
-        /// not in <paramref name="settings"/> are kept. <see cref="SettingsChanged"/> is raised only when the
-        /// save succeeded. Never throws: a failed write and a subscriber that throws are both caught and logged.
-        /// </summary>
-        /// <param name="settings">The list of monitor settings to save.</param>
+        // Upserts by HardwareId: monitors absent from the list (e.g. unplugged) keep their stored entry.
+        // Swallows and logs every failure, including exceptions from SettingsChanged handlers.
         void SaveSettings(List<MonitorSettings> settings);
     }
 }

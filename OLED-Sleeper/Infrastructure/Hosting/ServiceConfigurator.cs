@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OLED_Sleeper.Features.BrightnessSchedule.Services;
+using OLED_Sleeper.Features.Flights;
+using OLED_Sleeper.Features.KeepAwakeApps;
 using OLED_Sleeper.Features.MonitorBehavior.Commands;
 using OLED_Sleeper.Features.MonitorBehavior.Handlers;
 using OLED_Sleeper.Features.MonitorBlackout.Commands;
@@ -19,6 +21,8 @@ using OLED_Sleeper.Features.MonitorState.Commands;
 using OLED_Sleeper.Features.MonitorState.Handlers;
 using OLED_Sleeper.Features.MonitorState.Services;
 using OLED_Sleeper.Features.MonitorState.Services.Interfaces;
+using OLED_Sleeper.Features.Sky;
+using OLED_Sleeper.Features.TaskbarDim;
 using OLED_Sleeper.Features.UserSettings.Commands;
 using OLED_Sleeper.Features.UserSettings.Handlers;
 using OLED_Sleeper.Features.UserSettings.Services;
@@ -37,77 +41,87 @@ using OLED_Sleeper.UI.ViewModels;
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Configures and builds the application's dependency injection service provider.
-    /// </summary>
+    // The composition root. Everything is a singleton except command handlers, which are cheap and stateless.
     public static class ServiceConfigurator
     {
-        /// <summary>
-        /// Registers all application services and builds the service provider.
-        /// </summary>
-        /// <param name="applicationOptions">The parsed command-line options to register.</param>
-        /// <param name="storageRoot">The storage root resolved and prepared during startup.</param>
-        /// <returns>The built <see cref="IServiceProvider"/>.</returns>
-        public static IServiceProvider ConfigureServices(ApplicationOptions applicationOptions, IStorageRoot storageRoot)
-        {
-            var services = new ServiceCollection();
-            services.AddSingleton<IMediator, Mediator>();
-            services.AddSingleton<IDispatcher, ApplicationDispatcher>();
-            services.AddSingleton<IMainWindowAccessor, MainWindowAccessor>();
+        public static IServiceProvider ConfigureServices(ApplicationOptions applicationOptions, IStorageRoot storageRoot) =>
+            new ServiceCollection()
+                .AddPlumbing(applicationOptions, storageRoot)
+                .AddCommandHandlers()
+                .AddMonitorServices()
+                .AddFeatureSettings()
+                .AddUserInterface()
+                .BuildServiceProvider();
 
-            services.AddTransient<ICommandHandler<ApplyMonitorActiveBehaviorCommand>, ApplyMonitorActiveBehaviorCommandHandler>();
-            services.AddTransient<ICommandHandler<ApplyMonitorIdleBehaviorCommand>, ApplyMonitorIdleBehaviorCommandHandler>();
-            services.AddTransient<ICommandHandler<ApplyBlackoutOverlayCommand>, ApplyBlackoutOverlayCommandHandler>();
-            services.AddTransient<ICommandHandler<HideBlackoutOverlayCommand>, HideBlackoutOverlayCommandHandler>();
-            services.AddTransient<ICommandHandler<ApplyDimCommand>, ApplyDimCommandHandler>();
-            services.AddTransient<ICommandHandler<ApplyUndimCommand>, ApplyUndimCommandHandler>();
-            services.AddTransient<ICommandHandler<RestoreBrightnessOnAllMonitorsCommand>, RestoreBrightnessOnAllMonitorsCommandHandler>();
-            services.AddTransient<ICommandHandler<SynchronizeMonitorStateCommand>, SynchronizeMonitorStateCommandHandler>();
-            services.AddTransient<ICommandHandler<RestoreMonitorStateCommand>, RestoreMonitorStateCommandHandler>();
-            services.AddTransient<ICommandHandler<ApplySettingsChangeCommand>, ApplySettingsChangeCommandHandler>();
+        // Cross-cutting pieces: messaging, threading, options and on-disk storage.
+        private static IServiceCollection AddPlumbing(this IServiceCollection di, ApplicationOptions options, IStorageRoot root) => di
+            .AddSingleton<IMediator, Mediator>()
+            .AddSingleton<IDispatcher, ApplicationDispatcher>()
+            .AddSingleton(Options.Create(options))
+            .AddSingleton(root)
+            .AddSingleton<IFileSystem, FileSystem>()
+            .AddSingleton<IAppDataFileStore, AppDataFileStore>()
+            .AddSingleton<IMonitorSettingsFileService, MonitorSettingsFileService>();
 
-            services.AddSingleton(Options.Create(applicationOptions));
+        private static IServiceCollection AddCommandHandlers(this IServiceCollection di) => di
+            .AddHandler<ApplyMonitorActiveBehaviorCommand, ApplyMonitorActiveBehaviorCommandHandler>()
+            .AddHandler<ApplyMonitorIdleBehaviorCommand, ApplyMonitorIdleBehaviorCommandHandler>()
+            .AddHandler<ApplyBlackoutOverlayCommand, ApplyBlackoutOverlayCommandHandler>()
+            .AddHandler<HideBlackoutOverlayCommand, HideBlackoutOverlayCommandHandler>()
+            .AddHandler<ApplyDimCommand, ApplyDimCommandHandler>()
+            .AddHandler<ApplyUndimCommand, ApplyUndimCommandHandler>()
+            .AddHandler<RestoreBrightnessOnAllMonitorsCommand, RestoreBrightnessOnAllMonitorsCommandHandler>()
+            .AddHandler<SynchronizeMonitorStateCommand, SynchronizeMonitorStateCommandHandler>()
+            .AddHandler<RestoreMonitorStateCommand, RestoreMonitorStateCommandHandler>()
+            .AddHandler<ApplySettingsChangeCommand, ApplySettingsChangeCommandHandler>();
 
-            services.AddSingleton<IStorageRoot>(storageRoot);
-            services.AddSingleton<IFileSystem, FileSystem>();
-            services.AddSingleton<IAppDataFileStore, AppDataFileStore>();
-            services.AddSingleton<IMonitorInfoManager, MonitorInfoManager>();
-            services.AddSingleton<IMonitorStateWatcher, MonitorStateWatcher>();
-            services.AddSingleton<IMonitorBrightnessStateService, MonitorBrightnessStateService>();
-            services.AddSingleton<IOriginalBrightnessStore, OriginalBrightnessStore>();
-            services.AddSingleton<IDdcCiAccess, DdcCiAccess>();
-            services.AddSingleton(BrightnessFadeOptions.Default);
-            services.AddSingleton<IMonitorDimmingService, MonitorDimmingService>();
-            services.AddSingleton<IWorkModeService, WorkModeService>();
-            services.AddSingleton<GlobalHotkeyService>();
-            services.AddSingleton<OLED_Sleeper.Features.Sky.PanoramaSettings>();
-            services.AddSingleton<OLED_Sleeper.Features.Flights.FlightsSettings>();
-            services.AddSingleton<ScreensaverPreview>();
-            services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
-            services.AddSingleton<ManualBrightnessService>();
-            services.AddSingleton<GlobalBrightnessSchedule>();
-            services.AddSingleton<OLED_Sleeper.Features.TaskbarDim.TaskbarDimSettings>();
-            services.AddSingleton<OLED_Sleeper.Features.TaskbarDim.TaskbarDimmer>();
-            services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
-            services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();
-            services.AddSingleton<IApplicationOrchestrator, ApplicationOrchestrator>();
-            services.AddSingleton<IWorkspaceService, WorkspaceService>();
-            services.AddSingleton<IMonitorInfoProvider, MonitorInfoProvider>();
-            services.AddSingleton<IMonitorLayoutService, MonitorLayoutService>();
-            services.AddSingleton<IMonitorSettingsFileService, MonitorSettingsFileService>();
-            services.AddSingleton<GlobalIdleSettings>();
-            services.AddSingleton<OLED_Sleeper.Features.KeepAwakeApps.KeepAwakeAppsSettings>();
-            services.AddSingleton<IMonitorIdleDetectionService, MonitorIdleDetectionService>();
-            services.AddSingleton<MainViewModel>();
-            services.AddSingleton<MainWindow>();
-            services.AddSingleton<ITrayIconService, TrayIconService>();
-            services.AddSingleton<IMainWindowService, MainWindowService>();
-            services.AddSingleton<IDialogService, MessageBoxDialogService>();
-            services.AddSingleton<IUnsavedSettings>(sp => sp.GetRequiredService<MainViewModel>());
-            services.AddSingleton<IUnsavedSettingsService, UnsavedSettingsService>();
-            services.AddSingleton<IMonitorSettingsSaveService, MonitorSettingsSaveService>();
+        private static IServiceCollection AddHandler<TCommand, THandler>(this IServiceCollection di)
+            where TCommand : ICommand
+            where THandler : class, ICommandHandler<TCommand> =>
+            di.AddTransient<ICommandHandler<TCommand>, THandler>();
 
-            return services.BuildServiceProvider();
-        }
+        // Detection, dimming, blackout, brightness and the orchestrator that ties them together.
+        private static IServiceCollection AddMonitorServices(this IServiceCollection di) => di
+            .AddSingleton<IMonitorInfoManager, MonitorInfoManager>()
+            .AddSingleton<IMonitorInfoProvider, MonitorInfoProvider>()
+            .AddSingleton<IMonitorLayoutService, MonitorLayoutService>()
+            .AddSingleton<IWorkspaceService, WorkspaceService>()
+            .AddSingleton<IMonitorStateWatcher, MonitorStateWatcher>()
+            .AddSingleton<IDdcCiAccess, DdcCiAccess>()
+            .AddSingleton(BrightnessFadeOptions.Default)
+            .AddSingleton<IOriginalBrightnessStore, OriginalBrightnessStore>()
+            .AddSingleton<IMonitorBrightnessStateService, MonitorBrightnessStateService>()
+            .AddSingleton<IMonitorDimmingService, MonitorDimmingService>()
+            .AddSingleton<ManualBrightnessService>()
+            .AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>()
+            .AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>()
+            .AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>()
+            .AddSingleton<IMonitorIdleDetectionService, MonitorIdleDetectionService>()
+            .AddSingleton<IWorkModeService, WorkModeService>()
+            .AddSingleton<GlobalHotkeyService>()
+            .AddSingleton<TaskbarDimmer>()
+            .AddSingleton<ScreensaverPreview>()
+            .AddSingleton<IApplicationOrchestrator, ApplicationOrchestrator>();
+
+        // Small per-feature settings objects, each persisted in its own JSON file.
+        private static IServiceCollection AddFeatureSettings(this IServiceCollection di) => di
+            .AddSingleton<GlobalIdleSettings>()
+            .AddSingleton<GlobalBrightnessSchedule>()
+            .AddSingleton<KeepAwakeAppsSettings>()
+            .AddSingleton<TaskbarDimSettings>()
+            .AddSingleton<PanoramaSettings>()
+            .AddSingleton<FlightsSettings>();
+
+        private static IServiceCollection AddUserInterface(this IServiceCollection di) => di
+            .AddSingleton<IMainWindowAccessor, MainWindowAccessor>()
+            .AddSingleton<MainViewModel>()
+            .AddSingleton<MainWindow>()
+            .AddSingleton<IMainWindowService, MainWindowService>()
+            .AddSingleton<ITrayIconService, TrayIconService>()
+            .AddSingleton<IDialogService, MessageBoxDialogService>()
+            // The view model is what knows about pending edits, so it also serves that role.
+            .AddSingleton<IUnsavedSettings>(provider => provider.GetRequiredService<MainViewModel>())
+            .AddSingleton<IUnsavedSettingsService, UnsavedSettingsService>()
+            .AddSingleton<IMonitorSettingsSaveService, MonitorSettingsSaveService>();
     }
 }

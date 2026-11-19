@@ -3,26 +3,12 @@ using System.IO;
 
 namespace OLED_Sleeper.Storage
 {
-    /// <summary>
-    /// Resolves the storage root from the build's distribution: <c>Data</c> beside the executable for a portable
-    /// build, and <c>OLED-Space-Sleeper</c> under the user's application data directory for an installed one.
-    /// </summary>
-    public class StorageRoot : IStorageRoot
+    // Portable builds keep everything in a "Data" folder next to the exe; installed builds use a folder
+    // under the roaming AppData. Both names decide where existing users' files are found.
+    public sealed class StorageRoot(IFileSystem fileSystem, bool isPortable) : IStorageRoot
     {
-        /// <summary>The folder an installed build creates under the user's application data directory.</summary>
-        private const string ApplicationFolderName = "OLED-Space-Sleeper";
-
-        /// <summary>The folder a portable build creates beside the executable.</summary>
-        private const string PortableFolderName = "Data";
-
-        public StorageRoot(IFileSystem fileSystem, bool isPortable)
-        {
-            DirectoryPath = isPortable
-                ? Path.Combine(fileSystem.GetApplicationDirectoryPath(), PortableFolderName)
-                : Path.Combine(fileSystem.GetApplicationDataPath(), ApplicationFolderName);
-        }
-
-        /// <inheritdoc />
-        public string DirectoryPath { get; }
+        public string DirectoryPath { get; } = isPortable
+            ? Path.Combine(fileSystem.GetApplicationDirectoryPath(), "Data")
+            : Path.Combine(fileSystem.GetApplicationDataPath(), "OLED-Space-Sleeper");
     }
 }

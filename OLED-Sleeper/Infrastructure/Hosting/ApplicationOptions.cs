@@ -2,18 +2,11 @@
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Represents command-line options supported by the application.
-    /// These options are parsed at application startup and control runtime behavior.
-    /// </summary>
+    // Command-line switches, filled by CommandLineHelper at startup.
     public class ApplicationOptions
     {
-        /// <summary>
-        /// When specified, the application starts hidden in the system tray instead
-        /// of opening the main window. Intended primarily for launches performed
-        /// during system startup.
-        /// </summary>
-        [Option('h', "hide", Required = false, HelpText = "Start the application hidden in the system tray.")]
+        // Used by the Windows autostart entry: skip the settings window and only show the tray icon.
+        [Option('h', "hide", HelpText = "Launch minimized to the tray, without opening the settings window.")]
         public bool StartHidden { get; set; }
     }
 }

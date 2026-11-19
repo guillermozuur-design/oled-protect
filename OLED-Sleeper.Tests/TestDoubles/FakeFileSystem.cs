@@ -3,118 +3,95 @@ using System.IO;
 
 namespace OLED_Sleeper.Tests.TestDoubles
 {
-    /// <summary>
-    /// An <see cref="IFileSystem"/> over a dictionary of paths and contents, holding no real files.
-    /// <see cref="Replace"/> and <see cref="Move"/> reject the same calls the Win32 originals reject, so a
-    /// caller that picks the wrong one of the two fails here instead of quietly passing.
-    /// <see cref="ReadsFail"/>, <see cref="WritesFail"/> and <see cref="ReplaceFails"/> script the failures
-    /// the store's catch blocks exist for.
-    /// </summary>
+    // Which operations of FakeFileSystem should throw an IOException.
+    [Flags]
+    public enum FakeDiskFault
+    {
+        None = 0,
+        Read = 1,
+        Write = 2,
+        Replace = 4,
+        Delete = 8,
+        CreateDirectory = 16,
+    }
+
+    // In-memory disk. Replace/Move enforce the same preconditions as the real Win32 calls, so code that
+    // picks the wrong one fails in tests too. Faults simulates I/O errors per operation.
     public class FakeFileSystem : IFileSystem
     {
-        private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _disk = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The root <see cref="GetApplicationDataPath"/> reports.</summary>
-        public string ApplicationDataPath { get; set; } = @"C:\FakeAppData";
+        public string AppDataRoot { get; init; } = @"C:\FakeAppData";
 
-        /// <summary>The directory <see cref="GetApplicationDirectoryPath"/> reports.</summary>
-        public string ApplicationDirectoryPath { get; set; } = @"C:\FakeApp";
+        public string ExeFolder { get; init; } = @"C:\FakeApp";
 
-        /// <summary>Every path <see cref="CreateDirectory"/> was called with, in order.</summary>
-        public List<string> CreatedDirectories { get; } = new();
+        public FakeDiskFault Faults { get; set; }
 
-        /// <summary>Makes every <see cref="ReadAllText"/> call throw.</summary>
-        public bool ReadsFail { get; set; }
+        // Every folder creation request, in call order.
+        public List<string> Mkdirs { get; } = [];
 
-        /// <summary>Makes every <see cref="WriteAllText"/> call throw.</summary>
-        public bool WritesFail { get; set; }
+        // Setup/inspection helpers; they bypass Faults on purpose.
+        public void Seed(string path, string contents) => _disk[path] = contents;
 
-        /// <summary>Makes every <see cref="Replace"/> call throw.</summary>
-        public bool ReplaceFails { get; set; }
+        public string? Peek(string path) => _disk.GetValueOrDefault(path);
 
-        /// <summary>Makes every <see cref="DeleteFile"/> call throw.</summary>
-        public bool DeletesFail { get; set; }
+        string IFileSystem.GetApplicationDataPath() => AppDataRoot;
 
-        /// <summary>Makes every <see cref="CreateDirectory"/> call throw.</summary>
-        public bool DirectoryCreationFails { get; set; }
+        string IFileSystem.GetApplicationDirectoryPath() => ExeFolder;
 
-        /// <summary>
-        /// Puts a file in place without going through <see cref="WriteAllText"/>, so arranging a fixture is
-        /// not affected by <see cref="WritesFail"/>.
-        /// </summary>
-        /// <param name="path">The full path of the file.</param>
-        /// <param name="contents">The contents to store.</param>
-        public void AddFile(string path, string contents) => _files[path] = contents;
-
-        /// <summary>
-        /// Reads a file's contents without going through <see cref="ReadAllText"/>.
-        /// </summary>
-        /// <param name="path">The full path of the file.</param>
-        /// <returns>The contents, or <c>null</c> when no such file exists.</returns>
-        public string? Contents(string path) => _files.TryGetValue(path, out var contents) ? contents : null;
-
-        /// <inheritdoc />
-        public string GetApplicationDataPath() => ApplicationDataPath;
-
-        /// <inheritdoc />
-        public string GetApplicationDirectoryPath() => ApplicationDirectoryPath;
-
-        /// <inheritdoc />
-        public void CreateDirectory(string path)
+        void IFileSystem.CreateDirectory(string path)
         {
-            if (DirectoryCreationFails) throw new IOException($"Directory creation is failing: {path}.");
-
-            CreatedDirectories.Add(path);
+            Trip(FakeDiskFault.CreateDirectory, path);
+            Mkdirs.Add(path);
         }
 
-        /// <inheritdoc />
-        public bool FileExists(string path) => _files.ContainsKey(path);
+        public bool FileExists(string path) => _disk.ContainsKey(path);
 
-        /// <inheritdoc />
-        public string ReadAllText(string path)
+        string IFileSystem.ReadAllText(string path)
         {
-            if (ReadsFail) throw new IOException($"Reads are failing: {path}.");
-            if (!_files.TryGetValue(path, out var contents)) throw new FileNotFoundException(path);
-
-            return contents;
+            Trip(FakeDiskFault.Read, path);
+            return Existing(path);
         }
 
-        /// <inheritdoc />
-        public void WriteAllText(string path, string contents)
+        void IFileSystem.WriteAllText(string path, string contents)
         {
-            if (WritesFail) throw new IOException($"Writes are failing: {path}.");
-
-            _files[path] = contents;
+            Trip(FakeDiskFault.Write, path);
+            _disk[path] = contents;
         }
 
-        /// <inheritdoc />
-        public void Replace(string sourcePath, string destinationPath, string backupPath)
+        void IFileSystem.Replace(string sourcePath, string destinationPath, string backupPath)
         {
-            if (ReplaceFails) throw new IOException($"Replaces are failing: {destinationPath}.");
-            if (!_files.ContainsKey(sourcePath)) throw new FileNotFoundException(sourcePath);
-            if (!_files.ContainsKey(destinationPath)) throw new FileNotFoundException(destinationPath);
+            Trip(FakeDiskFault.Replace, destinationPath);
+            string incoming = Existing(sourcePath);
+            string previous = Existing(destinationPath);
 
-            _files[backupPath] = _files[destinationPath];
-            _files[destinationPath] = _files[sourcePath];
-            _files.Remove(sourcePath);
+            _disk.Remove(sourcePath);
+            _disk[backupPath] = previous;
+            _disk[destinationPath] = incoming;
         }
 
-        /// <inheritdoc />
-        public void Move(string sourcePath, string destinationPath)
+        void IFileSystem.Move(string sourcePath, string destinationPath)
         {
-            if (!_files.ContainsKey(sourcePath)) throw new FileNotFoundException(sourcePath);
-            if (_files.ContainsKey(destinationPath)) throw new IOException($"Already exists: {destinationPath}.");
+            if (_disk.ContainsKey(destinationPath))
+                throw new IOException("Target already exists: " + destinationPath);
 
-            _files[destinationPath] = _files[sourcePath];
-            _files.Remove(sourcePath);
+            _disk[destinationPath] = Existing(sourcePath);
+            _disk.Remove(sourcePath);
         }
 
-        /// <inheritdoc />
-        public void DeleteFile(string path)
+        void IFileSystem.DeleteFile(string path)
         {
-            if (DeletesFail) throw new IOException($"Deletes are failing: {path}.");
+            Trip(FakeDiskFault.Delete, path);
+            _disk.Remove(path);
+        }
 
-            _files.Remove(path);
+        private string Existing(string path) =>
+            _disk.TryGetValue(path, out var text) ? text : throw new FileNotFoundException(null, path);
+
+        private void Trip(FakeDiskFault operation, string path)
+        {
+            if (Faults.HasFlag(operation))
+                throw new IOException($"Simulated {operation} failure on {path}");
         }
     }
 }

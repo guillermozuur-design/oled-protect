@@ -1,7 +1,11 @@
 {
   "profiles": {
-    "OLED-Sleeper": {
+    "Space Sleeper": {
       "commandName": "Project"
+    },
+    "Space Sleeper (tray only)": {
+      "commandName": "Project",
+      "commandLineArgs": "--hide"
     }
   }
 }

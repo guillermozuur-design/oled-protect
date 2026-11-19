@@ -2,88 +2,59 @@ using OLED_Sleeper.Infrastructure.Runtime.Interfaces;
 
 namespace OLED_Sleeper.Tests.TestDoubles
 {
-    /// <summary>
-    /// An <see cref="IDispatcher"/> that runs actions on the calling thread and counts them, so a test
-    /// can assert work was handed to the UI thread without needing a real one.
-    /// </summary>
+    // Synchronous IDispatcher: work runs inline and every entry point is counted, so tests can check that
+    // code marshalled to the "UI thread" without having one.
     public class ImmediateDispatcher : IDispatcher
     {
-        /// <summary>
-        /// How deep invokes may nest before <see cref="Run"/> throws.
-        /// </summary>
-        private const int MaxNestedInvokes = 8;
+        // Guards against code that keeps re-dispatching itself: fail the test, do not blow the stack.
+        private const int DepthLimit = 8;
 
-        private int _nestedInvokes;
+        private int _depth;
+        private int _sync;
+        private int _queued;
+        private int _afterInput;
+        private bool _uiThread = true;
 
-        /// <summary>
-        /// How many actions have been run through <see cref="Invoke"/>.
-        /// </summary>
-        public int InvokeCount { get; private set; }
+        public int InvokeCount => _sync;
 
-        /// <summary>
-        /// How many actions have been run through <see cref="InvokeAsync"/>.
-        /// </summary>
-        public int InvokeAsyncCount { get; private set; }
+        public int InvokeAsyncCount => _queued;
 
-        /// <summary>
-        /// How many actions have been run through <see cref="InvokeAfterInputAsync"/>.
-        /// </summary>
-        public int InvokeAfterInputCount { get; private set; }
+        public int AfterInputCount => _afterInput;
 
-        /// <summary>
-        /// Whether the caller counts as being on the UI thread. Starts true; set it to false to make a
-        /// class under test take its marshalling branch. Reads true while an action is running.
-        /// </summary>
-        public bool IsOnUiThread { get; set; } = true;
-
-        /// <inheritdoc />
-        public void Invoke(Action action)
+        // Defaults to true. Set false to push the code under test onto its marshalling path; it always
+        // reads true while a dispatched action runs.
+        public bool IsOnUiThread
         {
-            InvokeCount++;
-            Run(action);
+            get => _uiThread;
+            set => _uiThread = value;
         }
 
-        /// <inheritdoc />
-        public Task InvokeAsync(Action action)
+        public void Invoke(Action action) => Dispatch(ref _sync, action);
+
+        public Task InvokeAsync(Action action) => Dispatch(ref _queued, action);
+
+        public Task InvokeAfterInputAsync(Action action) => Dispatch(ref _afterInput, action);
+
+        private Task Dispatch(ref int counter, Action action)
         {
-            InvokeAsyncCount++;
-            Run(action);
-            return Task.CompletedTask;
-        }
+            counter++;
+            if (_depth == DepthLimit)
+                throw new InvalidOperationException("Dispatcher re-entered " + DepthLimit + " times; likely an endless loop.");
 
-        /// <inheritdoc />
-        public Task InvokeAfterInputAsync(Action action)
-        {
-            InvokeAfterInputCount++;
-            Run(action);
-            return Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// Runs the action as if on the UI thread. Throws when invokes nest more than
-        /// <see cref="MaxNestedInvokes"/> deep, which fails the test instead of overflowing the stack.
-        /// </summary>
-        /// <param name="action">The action to run.</param>
-        private void Run(Action action)
-        {
-            if (_nestedInvokes >= MaxNestedInvokes)
-            {
-                throw new InvalidOperationException($"Dispatcher invokes nested more than {MaxNestedInvokes} deep.");
-            }
-
-            bool wasOnUiThread = IsOnUiThread;
-            _nestedInvokes++;
-            IsOnUiThread = true;
-
+            bool callerState = _uiThread;
+            _depth++;
+            _uiThread = true;
             try
             {
                 action();
             }
             finally
             {
-                _nestedInvokes--;
-                IsOnUiThread = wasOnUiThread;
+                _uiThread = callerState;
+                _depth--;
             }
+
+            return Task.CompletedTask;
         }
     }
 }

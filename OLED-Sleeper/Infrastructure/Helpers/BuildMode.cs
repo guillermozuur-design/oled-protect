@@ -1,18 +1,14 @@
 namespace OLED_Sleeper.Infrastructure.Helpers
 {
-    /// <summary>
-    /// Reports which distribution this build was published for.
-    /// </summary>
     public static class BuildMode
     {
-        /// <summary>
-        /// Whether this build keeps its settings, state and logs beside the executable rather than under the
-        /// user's application data directory. Publishing with <c>-p:Portable=true</c> sets it.
-        /// </summary>
+        // Set by publishing with -p:Portable=true (defines PORTABLE). A portable build stores its data
+        // next to the exe instead of in the user's profile.
+        public const bool IsPortable =
 #if PORTABLE
-        public const bool IsPortable = true;
+            true;
 #else
-        public const bool IsPortable = false;
+            false;
 #endif
     }
 }

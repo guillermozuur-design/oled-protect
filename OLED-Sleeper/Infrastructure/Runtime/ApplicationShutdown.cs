@@ -4,13 +4,14 @@ using System.Windows;
 
 namespace OLED_Sleeper.Infrastructure.Runtime
 {
-    /// <summary>
-    /// Ends the process by shutting down the running <see cref="Application"/>.
-    /// </summary>
     [ExcludeFromCodeCoverage]
-    public class ApplicationShutdown : IApplicationShutdown
+    public sealed class ApplicationShutdown : IApplicationShutdown
     {
-        /// <inheritdoc />
-        public void Shutdown() => Application.Current?.Shutdown();
+        // Application.Current is null once WPF has torn down; there is nothing left to stop then.
+        public void Shutdown()
+        {
+            if (Application.Current is { } app)
+                app.Shutdown();
+        }
     }
 }

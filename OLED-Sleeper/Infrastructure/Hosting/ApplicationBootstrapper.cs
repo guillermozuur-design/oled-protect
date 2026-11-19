@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using OLED_Sleeper.Features.TaskbarDim;
 using OLED_Sleeper.Infrastructure.Helpers;
 using OLED_Sleeper.Infrastructure.Hosting.Interfaces;
 using OLED_Sleeper.Infrastructure.Runtime;
@@ -8,246 +9,150 @@ using OLED_Sleeper.Storage.Interfaces;
 using OLED_Sleeper.UI.Services;
 using OLED_Sleeper.UI.Services.Interfaces;
 using Serilog;
-using System;
-using System.Linq;
-using System.Windows;
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Handles application startup, dependency injection, single-instance enforcement, orchestrator startup, and shutdown logic.
-    /// Keeps <see cref="Application"/> subclasses lightweight and focused on WPF lifecycle events.
-    /// </summary>
-    public class ApplicationBootstrapper(string[] args) : IDisposable
+    // Owns the app's lifetime so App.xaml.cs only has to forward WPF events. Startup runs in a strict order:
+    // storage (logging writes there) -> logging -> single-instance check -> DI -> services -> window/tray.
+    public sealed class ApplicationBootstrapper(string[] args) : IDisposable
     {
-        /// <summary>
-        /// How long shutdown waits for the monitor restore to finish.
-        /// </summary>
-        private const int RestoreOnShutdownTimeoutMs = 10000;
+        private const string DialogTitle = "OLED Space Sleeper";
 
-        /// <summary>The title of the dialog shown when the storage root cannot be written to.</summary>
-        private const string StorageErrorCaption = "OLED Space Sleeper";
+        // Upper bound on how long exit waits for monitors to return to normal brightness. If it runs out the
+        // saved brightness state stays on disk and the next start finishes the job.
+        private static readonly TimeSpan RestoreBudget = TimeSpan.FromSeconds(10);
 
-        private readonly ApplicationOptions _applicationOptions = CommandLineHelper.ParseArguments(args);
+        private readonly ApplicationOptions _options = CommandLineHelper.ParseArguments(args);
 
-        /// <summary>
-        /// Ends the process. Created here rather than resolved, since shutdown has to work both
-        /// before the container is built and after it has been disposed.
-        /// </summary>
-        private readonly IApplicationShutdown _applicationShutdown = new ApplicationShutdown();
+        // Built by hand instead of resolved: both are needed before the container exists and after it is gone.
+        private readonly IApplicationShutdown _shutdown = new ApplicationShutdown();
+        private readonly IDispatcher _uiThread = new ApplicationDispatcher();
 
-        /// <summary>
-        /// Reaches the UI thread. Created here for the same reason as <see cref="_applicationShutdown"/>.
-        /// </summary>
-        private readonly IDispatcher _dispatcher = new ApplicationDispatcher();
+        private IServiceProvider? _container;
+        private IApplicationInstanceManager? _singleInstance;
+        private IApplicationOrchestrator? _monitorServices;
+        private IMainWindowService? _window;
+        private ITrayIconService? _tray;
+        private IUnsavedSettingsService? _unsaved;
+        private bool _shuttingDown;
 
-        private IStorageRoot? _storageRoot;
-        private IServiceProvider? _serviceProvider;
-        private ITrayIconService? _trayIconService;
-        private IMainWindowService? _mainWindowService;
-        private IApplicationInstanceManager? _instanceManager;
-        private IApplicationOrchestrator? _orchestrator;
-        private IUnsavedSettingsService? _unsavedSettingsService;
-        private bool _isExiting = false;
-
-        /// <summary>
-        /// Initializes the application: storage, logging, single-instance, DI, orchestrator, main window, and tray icon.
-        /// A second instance stops after the single-instance check and starts no services.
-        /// </summary>
         public void Initialize()
         {
-            if (!TryPrepareStorage())
+            var storage = PrepareStorageOrQuit();
+            if (storage is null)
+                return;
+
+            LoggingConfigurator.Configure(storage.DirectoryPath);
+
+            _singleInstance = new ApplicationInstanceManager(_uiThread, _shutdown);
+            _singleInstance.Initialize();
+            if (!_singleInstance.IsFirstInstance)
             {
+                Log.Information("Already running elsewhere; asked that copy to show itself and quitting.");
                 return;
             }
 
-            LoggingConfigurator.Configure(_storageRoot!.DirectoryPath);
-            InitializeInstanceManager();
-
-            if (!_instanceManager!.IsFirstInstance)
-            {
-                Log.Information("Another instance is already running. Exiting without starting any services.");
-                return;
-            }
-
-            ConfigureServices();
-            StartOrchestrator();
-
-            SetupMainWindowService();
-            SetupTrayIconService();
-            HookInstanceManagerShowWindow();
+            _container = ServiceConfigurator.ConfigureServices(_options, storage);
+            StartServices(_container);
         }
 
-        /// <summary>
-        /// Resolves the storage root, creates it and confirms it is writable, reporting the failure and ending
-        /// the process when it is not. Runs before logging, whose file sink writes into the same directory and
-        /// reports nothing of its own when it cannot.
-        /// </summary>
-        /// <returns><c>true</c> when startup can continue; otherwise, <c>false</c>.</returns>
-        private bool TryPrepareStorage()
+        private void StartServices(IServiceProvider services)
         {
-            var fileSystem = new FileSystem();
-            _storageRoot = new StorageRoot(fileSystem, BuildMode.IsPortable);
+            _monitorServices = services.GetRequiredService<IApplicationOrchestrator>();
+            _monitorServices.Start();
 
-            if (new StorageRootPreparer(fileSystem, _storageRoot).TryPrepare(out var error))
-            {
-                return true;
-            }
+            _window = services.GetRequiredService<IMainWindowService>();
+            _window.SetupMainWindow();
 
-            var guidance = BuildMode.IsPortable
+            _unsaved = services.GetRequiredService<IUnsavedSettingsService>();
+            _tray = services.GetRequiredService<ITrayIconService>();
+            _tray.Initialize(ShowWindow, OnTrayExit);
+
+            // No-op unless taskbar dimming is switched on in the Algemeen tab.
+            services.GetRequiredService<TaskbarDimmer>().Start();
+
+            _singleInstance!.SetShowMainWindowAction(ShowWindow);
+        }
+
+        private void ShowWindow() => _window?.ShowMainWindow();
+
+        // Returns null after telling the user what is wrong; the app is already shutting down then.
+        private IStorageRoot? PrepareStorageOrQuit()
+        {
+            var disk = new FileSystem();
+            var root = new StorageRoot(disk, BuildMode.IsPortable);
+
+            if (new StorageRootPreparer(disk, root).TryPrepare(out string? problem))
+                return root;
+
+            string hint = BuildMode.IsPortable
                 ? "Zet de map van OLED Space Sleeper op een plek waar je mag schrijven (bijvoorbeeld je Bureaublad) en start opnieuw."
                 : "Controleer of je gebruikersprofiel bereikbaar is en start OLED Space Sleeper opnieuw.";
+            string nl = Environment.NewLine;
 
-            new MessageBoxDialogService(new MainWindowAccessor()).ShowError($"{error}{Environment.NewLine}{Environment.NewLine}{guidance}", StorageErrorCaption);
-            _applicationShutdown.Shutdown();
-            return false;
+            new MessageBoxDialogService(new MainWindowAccessor()).ShowError(problem + nl + nl + hint, DialogTitle);
+            _shutdown.Shutdown();
+            return null;
         }
 
-        /// <summary>
-        /// Initializes the single-instance manager before any other services.
-        /// Its seams are constructed here because the check runs before the container exists.
-        /// </summary>
-        private void InitializeInstanceManager()
-        {
-            _instanceManager = new ApplicationInstanceManager(_dispatcher, _applicationShutdown);
-            _instanceManager.Initialize();
-        }
+        // Deferred to after pending input so the click on "Exit" cannot also answer the unsaved-changes prompt.
+        private void OnTrayExit() => _ = _uiThread.InvokeAfterInputAsync(ExitUnlessCancelled);
 
-        /// <summary>
-        /// Configures dependency injection services and builds the service provider using <see cref="ServiceConfigurator"/>.
-        /// </summary>
-        private void ConfigureServices()
+        // Only the tray route asks about unsaved edits; Windows logoff and OnExit go straight to ShutdownApp.
+        private void ExitUnlessCancelled()
         {
-            _serviceProvider = ServiceConfigurator.ConfigureServices(_applicationOptions, _storageRoot!);
-        }
-
-        /// <summary>
-        /// Starts the application orchestrator service.
-        /// </summary>
-        private void StartOrchestrator()
-        {
-            if (_serviceProvider != null)
+            if (_unsaved is not null && !_unsaved.ConfirmExit())
             {
-                _orchestrator = _serviceProvider.GetRequiredService<IApplicationOrchestrator>();
-                _orchestrator.Start();
-            }
-        }
-
-        /// <summary>
-        /// Sets up the main window service and its data context.
-        /// </summary>
-        private void SetupMainWindowService()
-        {
-            if (_serviceProvider == null) return;
-            _mainWindowService = _serviceProvider.GetRequiredService<IMainWindowService>();
-            _mainWindowService.SetupMainWindow();
-        }
-
-        /// <summary>
-        /// Configures and displays the tray icon using the tray icon service.
-        /// </summary>
-        private void SetupTrayIconService()
-        {
-            if (_serviceProvider == null) return;
-            _unsavedSettingsService = _serviceProvider.GetRequiredService<IUnsavedSettingsService>();
-            _trayIconService = _serviceProvider.GetRequiredService<ITrayIconService>();
-            _trayIconService.Initialize(
-                () => _mainWindowService?.ShowMainWindow(),
-                RequestExit
-            );
-            // Dims the taskbar after a few seconds when that is switched on (Algemeen tab).
-            _serviceProvider.GetRequiredService<OLED_Sleeper.Features.TaskbarDim.TaskbarDimmer>().Start();
-        }
-
-        /// <summary>
-        /// Handles the tray menu's Exit. The work is queued behind the menu's own input, so the click that
-        /// picked Exit cannot answer the prompt that follows it.
-        /// </summary>
-        private void RequestExit() => _ = _dispatcher.InvokeAfterInputAsync(ConfirmAndShutdown);
-
-        /// <summary>
-        /// Shuts down unless the user cancels over unsaved settings. Only the tray exit asks; <c>OnExit</c>
-        /// and <c>SessionEnding</c> shut down without a prompt.
-        /// </summary>
-        private void ConfirmAndShutdown()
-        {
-            if (_unsavedSettingsService?.ConfirmExit() == false)
-            {
-                Log.Information("Exit cancelled. Unsaved settings were kept.");
+                Log.Information("User kept the app open because of unsaved settings.");
                 return;
             }
 
             ShutdownApp();
         }
 
-        /// <summary>
-        /// Hooks up the delegate for showing the main window after DI and services are ready.
-        /// </summary>
-        private void HookInstanceManagerShowWindow()
-        {
-            _instanceManager?.SetShowMainWindowAction(() => _mainWindowService?.ShowMainWindow());
-        }
-
-        /// <summary>
-        /// Tells the main window the application is exiting, stops the orchestrator, disposes the tray icon
-        /// and the instance manager, flushes the log, and exits. A second instance has no orchestrator and
-        /// restores nothing.
-        /// </summary>
+        // Safe to call more than once (tray exit, session end and OnExit can all arrive).
         public void ShutdownApp()
         {
-            if (_isExiting) return; // Prevent re-entrancy
-            _isExiting = true;
+            if (_shuttingDown)
+                return;
+            _shuttingDown = true;
 
-            _mainWindowService?.PrepareForShutdown();
+            _window?.PrepareForShutdown();
+            RestoreMonitorsBeforeExit();
+            _tray?.Dispose();
+            _singleInstance?.Dispose();
 
-            StopOrchestrator();
-
-            _trayIconService?.Dispose();
-            _instanceManager?.Dispose();
-
-            Log.Information("--- Application Exiting ---");
+            Log.Information("=== OLED Space Sleeper stopped ===");
             Log.CloseAndFlush();
 
-            _applicationShutdown.Shutdown();
+            _shutdown.Shutdown();
         }
 
-        /// <summary>
-        /// Stops the orchestrator and blocks until the monitor restore finishes or
-        /// <see cref="RestoreOnShutdownTimeoutMs"/> elapses.
-        /// </summary>
-        /// <remarks>
-        /// The restore runs on the thread pool, since the UI thread is no longer processing dispatcher
-        /// messages by the time <c>OnExit</c> reaches this. On timeout the brightness state file is left
-        /// unchanged and the next launch restores the monitor.
-        /// </remarks>
-        private void StopOrchestrator()
+        // Runs on the thread pool because during OnExit the UI dispatcher no longer pumps, so awaiting
+        // here directly could deadlock. A second instance never started an orchestrator.
+        private void RestoreMonitorsBeforeExit()
         {
-            if (_orchestrator == null) return;
+            if (_monitorServices is not { } orchestrator)
+                return;
 
-            Log.Information("Shutdown initiated. Restoring all monitors...");
-
+            Log.Information("Exiting: putting all monitors back to normal.");
             try
             {
-                var stopTask = Task.Run(() => _orchestrator.StopAsync());
-                if (!stopTask.Wait(RestoreOnShutdownTimeoutMs))
-                {
-                    Log.Warning("Monitor restore did not finish within {TimeoutMs} ms. Exiting anyway.", RestoreOnShutdownTimeoutMs);
-                }
+                bool finished = Task.Run(orchestrator.StopAsync).Wait(RestoreBudget);
+                if (!finished)
+                    Log.Warning("Monitor restore still busy after {Budget}; exiting regardless.", RestoreBudget);
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to stop the orchestrator during shutdown.");
+                Log.Error(failure, "Stopping the monitor services threw during exit.");
             }
         }
 
-        /// <summary>
-        /// Disposes resources used by the bootstrapper.
-        /// </summary>
         public void Dispose()
         {
-            _trayIconService?.Dispose();
-            _instanceManager?.Dispose();
-            (_serviceProvider as IDisposable)?.Dispose();
+            _tray?.Dispose();
+            _singleInstance?.Dispose();
+            (_container as IDisposable)?.Dispose();
         }
     }
 }

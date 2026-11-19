@@ -1,61 +1,51 @@
 using Serilog;
+using Serilog.Events;
+using System.IO;
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Configures Serilog logging for the application and performs log file cleanup.
-    /// </summary>
+    // Serilog to daily files in <storage root>\Logs, keeping about a week of history.
     public static class LoggingConfigurator
     {
-        /// <summary>The folder created under the storage root for log files.</summary>
-        private const string LogFolderName = "Logs";
+        private static readonly TimeSpan KeepFor = TimeSpan.FromDays(7);
 
-        /// <summary>
-        /// Sets up Serilog logging and deletes log files older than 7 days.
-        /// </summary>
-        /// <param name="storageDirectory">The storage root the log folder is created under. Must already be writable.</param>
+        // storageDirectory must already exist and be writable: the file sink fails silently otherwise.
         public static void Configure(string storageDirectory)
         {
-            var logDirectory = System.IO.Path.Combine(storageDirectory, LogFolderName);
-            var logPath = System.IO.Path.Combine(logDirectory, "log-.txt");
+            string folder = Path.Combine(storageDirectory, "Logs");
 
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
-                .CreateLogger();
+            var setup = new LoggerConfiguration();
+            setup.MinimumLevel.Is(LogEventLevel.Debug);
+            setup.WriteTo.File(Path.Combine(folder, "log-.txt"), rollingInterval: RollingInterval.Day);
+            Log.Logger = setup.CreateLogger();
 
-            Log.Information("--- Application Starting ---");
-            Log.Information("Storage root is {StorageDirectory}.", storageDirectory);
+            Log.Information("=== OLED Space Sleeper started ===");
+            Log.Information("Data folder: {StorageDirectory}", storageDirectory);
 
-            CleanupOldLogs(logDirectory, TimeSpan.FromDays(7));
+            PruneOldLogs(folder);
         }
 
-        /// <summary>
-        /// Deletes log files in the specified directory that are older than the specified retention period.
-        /// </summary>
-        /// <param name="logDirectory">The directory containing log files.</param>
-        /// <param name="retention">The maximum age of log files to keep.</param>
-        private static void CleanupOldLogs(string logDirectory, TimeSpan retention)
+        // Housekeeping only; a locked or vanished file must never break startup.
+        private static void PruneOldLogs(string folder)
         {
+            if (!Directory.Exists(folder))
+                return;
+
+            DateTime cutoff = DateTime.UtcNow - KeepFor;
+            IEnumerable<FileInfo> candidates;
             try
             {
-                if (!System.IO.Directory.Exists(logDirectory))
-                    return;
-
-                var now = DateTime.UtcNow;
-                var files = System.IO.Directory.GetFiles(logDirectory, "log-*.txt");
-                foreach (var file in files)
-                {
-                    var info = new System.IO.FileInfo(file);
-                    if (now - info.CreationTimeUtc > retention)
-                    {
-                        try { info.Delete(); } catch { /* Ignore errors */ }
-                    }
-                }
+                candidates = new DirectoryInfo(folder).EnumerateFiles("log-*.txt").ToList();
             }
-            catch
+            catch (Exception)
             {
-                // Ignore cleanup errors
+                return;
+            }
+
+            foreach (var file in candidates.Where(f => f.CreationTimeUtc < cutoff))
+            {
+                try { file.Delete(); }
+                catch (Exception) { /* try again next start */ }
             }
         }
     }

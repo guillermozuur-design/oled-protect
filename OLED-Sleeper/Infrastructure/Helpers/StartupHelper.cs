@@ -2,43 +2,35 @@ using Microsoft.Win32;
 
 namespace OLED_Sleeper.Infrastructure.Helpers
 {
-    /// <summary>
-    /// Provides static helper methods to manage the application's startup behavior via the Windows registry.
-    /// </summary>
+    // "Start with Windows" via the per-user Run key (no admin rights needed).
     public static class StartupHelper
     {
-        private const string AppName = "OLED Space Sleeper";
-        private const string RunKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+        private const string RunKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
-        /// <summary>
-        /// Checks if the app is currently set to run at startup.
-        /// </summary>
+        // Value name under the Run key. Changing it would orphan the entry existing users already have.
+        private const string EntryName = "OLED Space Sleeper";
+
         public static bool IsRunAtStartupEnabled()
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false);
-            return key?.GetValue(AppName) != null;
+            using var run = Registry.CurrentUser.OpenSubKey(RunKey);
+            return run?.GetValue(EntryName) is not null;
         }
 
-        /// <summary>
-        /// Toggles the startup registry key on or off.
-        /// </summary>
         public static void SetRunAtStartup(bool enable)
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, true);
-            if (key == null) return;
+            using var run = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (run is null)
+                return;
 
-            if (enable)
+            if (!enable)
             {
-                string? exePath = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(exePath))
-                {
-                    key.SetValue(AppName, $"\"{exePath}\" -h");
-                }
+                run.DeleteValue(EntryName, throwOnMissingValue: false);
+                return;
             }
-            else
-            {
-                key.DeleteValue(AppName, false);
-            }
+
+            // -h: start hidden in the tray when launched at sign-in.
+            if (Environment.ProcessPath is { Length: > 0 } exe)
+                run.SetValue(EntryName, "\"" + exe + "\" -h");
         }
     }
 }

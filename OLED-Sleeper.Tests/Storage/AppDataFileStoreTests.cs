@@ -5,173 +5,101 @@ namespace OLED_Sleeper.Tests.Storage
 {
     public class AppDataFileStoreTests
     {
-        private const string FileName = "state.json";
-        private const string StoreDirectory = @"C:\FakeAppData\OLED-Space-Sleeper";
-        private const string TargetPath = StoreDirectory + @"\" + FileName;
-        private const string BackupPath = TargetPath + ".bak";
-        private const string TempPath = TargetPath + ".tmp";
+        private const string Name = "state.json";
+        private const string Main = @"C:\FakeAppData\OLED-Space-Sleeper\state.json";
+        private const string Bak = Main + ".bak";
+        private const string Tmp = Main + ".tmp";
 
-        private readonly FakeFileSystem _fileSystem;
-        private readonly AppDataFileStore _store;
+        private const string Good = """{ "A": 40 }""";
+        private const string Broken = """{ "A": """;
 
-        public AppDataFileStoreTests()
+        private readonly FakeFileSystem _disk = new();
+        private readonly AppDataFileStore _sut;
+
+        public AppDataFileStoreTests() => _sut = new AppDataFileStore(_disk, new StorageRoot(_disk, false));
+
+        private uint? ReadA() => _sut.Read<Dictionary<string, uint>>(Name)?["A"];
+
+        private bool WriteA(uint value) => _sut.TryWrite(Name, new Dictionary<string, uint> { ["A"] = value });
+
+        // ---- reading ----
+
+        [Theory]
+        [InlineData(Good, null, 40u)]       // normal case
+        [InlineData(null, Good, 40u)]       // main missing -> backup
+        [InlineData(Broken, Good, 40u)]     // main truncated -> backup
+        [InlineData(Broken, Broken, null)]  // nothing usable
+        [InlineData(null, null, null)]      // first run
+        [InlineData("null", Good, null)]    // a literal null is a valid read, not a reason to fall back
+        public void Read_prefers_main_file_and_falls_back_to_backup(string? main, string? bak, uint? expected)
         {
-            _fileSystem = new FakeFileSystem();
-            _store = new AppDataFileStore(_fileSystem, new StorageRoot(_fileSystem, isPortable: false));
+            if (main is not null) _disk.Seed(Main, main);
+            if (bak is not null) _disk.Seed(Bak, bak);
+
+            Assert.Equal(expected, ReadA());
         }
 
         [Fact]
-        public void Read_WhenTheTargetParses_ReturnsItsContents()
+        public void Read_returns_default_when_the_disk_errors()
         {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": 40 }""");
+            _disk.Seed(Main, Good);
+            _disk.Seed(Bak, Good);
+            _disk.Faults = FakeDiskFault.Read;
 
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
+            Assert.Null(ReadA());
+        }
 
-            // Assert
-            Assert.NotNull(state);
-            Assert.Equal(40u, state["A"]);
+        // ---- writing ----
+
+        [Fact]
+        public void First_write_creates_the_file_without_backup_or_leftovers()
+        {
+            Assert.True(WriteA(40));
+
+            Assert.Contains("\"A\": 40", _disk.Peek(Main));
+            Assert.False(_disk.FileExists(Bak));
+            Assert.False(_disk.FileExists(Tmp));
         }
 
         [Fact]
-        public void Read_WhenTheTargetIsMissing_ReadsTheBackup()
+        public void Overwrite_keeps_previous_version_as_backup()
         {
-            // Arrange
-            _fileSystem.AddFile(BackupPath, """{ "A": 40 }""");
+            _disk.Seed(Main, Good);
 
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
+            Assert.True(WriteA(5));
 
-            // Assert
-            Assert.NotNull(state);
-            Assert.Equal(40u, state["A"]);
+            Assert.Contains("\"A\": 5", _disk.Peek(Main));
+            Assert.Equal(Good, _disk.Peek(Bak));
+            Assert.False(_disk.FileExists(Tmp));
         }
 
         [Fact]
-        public void Read_WhenTheTargetIsTruncated_ReadsTheBackup()
+        public void Output_is_indented_json()
         {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": """);
-            _fileSystem.AddFile(BackupPath, """{ "A": 40 }""");
+            WriteA(1);
 
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
+            Assert.Contains(Environment.NewLine, _disk.Peek(Main));
+        }
 
-            // Assert
-            Assert.NotNull(state);
-            Assert.Equal(40u, state["A"]);
+        [Theory]
+        [InlineData(FakeDiskFault.Write)]
+        [InlineData(FakeDiskFault.Replace)]
+        public void Failed_write_reports_false_and_leaves_main_file_untouched(FakeDiskFault fault)
+        {
+            _disk.Seed(Main, Good);
+            _disk.Faults = fault;
+
+            Assert.False(WriteA(5));
+            Assert.Equal(Good, _disk.Peek(Main));
         }
 
         [Fact]
-        public void Read_WhenNeitherFileParses_ReturnsNull()
+        public void Written_value_reads_back_unchanged()
         {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": """);
-            _fileSystem.AddFile(BackupPath, """{ "A": """);
+            WriteA(40);
+            WriteA(41);
 
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
-
-            // Assert
-            Assert.Null(state);
-        }
-
-        [Fact]
-        public void Read_WhenNeitherFileExists_ReturnsNull()
-        {
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
-
-            // Assert
-            Assert.Null(state);
-        }
-
-        [Fact]
-        public void Read_WhenTheTargetHoldsJsonNull_ReturnsNullWithoutReadingTheBackup()
-        {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, "null");
-            _fileSystem.AddFile(BackupPath, """{ "A": 40 }""");
-
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
-
-            // Assert
-            Assert.Null(state);
-        }
-
-        [Fact]
-        public void TryWrite_WhenNoTargetExists_MovesTheTemporaryFileOntoIt()
-        {
-            // Act
-            var written = _store.TryWrite(FileName, new Dictionary<string, uint> { ["A"] = 40 });
-
-            // Assert
-            Assert.True(written);
-            Assert.Contains("\"A\": 40", _fileSystem.Contents(TargetPath)!);
-            Assert.Null(_fileSystem.Contents(BackupPath));
-            Assert.Null(_fileSystem.Contents(TempPath));
-        }
-
-        [Fact]
-        public void TryWrite_WhenTheTargetExists_ReplacesItAndKeepsTheOldContentsAsBackup()
-        {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": 40 }""");
-
-            // Act
-            var written = _store.TryWrite(FileName, new Dictionary<string, uint> { ["A"] = 5 });
-
-            // Assert
-            Assert.True(written);
-            Assert.Contains("\"A\": 5", _fileSystem.Contents(TargetPath)!);
-            Assert.Equal("""{ "A": 40 }""", _fileSystem.Contents(BackupPath));
-            Assert.Null(_fileSystem.Contents(TempPath));
-        }
-
-        [Fact]
-        public void TryWrite_WhenTheTemporaryWriteFails_ReturnsFalseAndLeavesTheTargetAlone()
-        {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": 40 }""");
-            _fileSystem.WritesFail = true;
-
-            // Act
-            var written = _store.TryWrite(FileName, new Dictionary<string, uint> { ["A"] = 5 });
-
-            // Assert
-            Assert.False(written);
-            Assert.Equal("""{ "A": 40 }""", _fileSystem.Contents(TargetPath));
-        }
-
-        [Fact]
-        public void TryWrite_WhenTheReplaceFails_ReturnsFalseAndLeavesTheTargetAlone()
-        {
-            // Arrange
-            _fileSystem.AddFile(TargetPath, """{ "A": 40 }""");
-            _fileSystem.ReplaceFails = true;
-
-            // Act
-            var written = _store.TryWrite(FileName, new Dictionary<string, uint> { ["A"] = 5 });
-
-            // Assert
-            Assert.False(written);
-            Assert.Equal("""{ "A": 40 }""", _fileSystem.Contents(TargetPath));
-        }
-
-        [Fact]
-        public void TryWrite_WhenReadBack_ReturnsTheSameValue()
-        {
-            // Arrange
-            _store.TryWrite(FileName, new Dictionary<string, uint> { ["A"] = 40 });
-
-            // Act
-            var state = _store.Read<Dictionary<string, uint>>(FileName);
-
-            // Assert
-            Assert.NotNull(state);
-            Assert.Equal(40u, state["A"]);
+            Assert.Equal(41u, ReadA());
         }
     }
 }

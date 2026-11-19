@@ -3,35 +3,36 @@ using System.IO;
 
 namespace OLED_Sleeper.Storage
 {
-    /// <summary>
-    /// Creates the storage root and proves it accepts a write by putting a file in it and deleting it again.
-    /// Creating a directory that already exists succeeds whether or not it can be written to, so only the write
-    /// settles it.
-    /// </summary>
-    public class StorageRootPreparer(IFileSystem fileSystem, IStorageRoot storageRoot) : IStorageRootPreparer
+    // Creating a folder that already exists says nothing about write access, so we also write and
+    // remove a tiny marker file. Any failure along the way becomes a message for the user.
+    public sealed class StorageRootPreparer(IFileSystem fileSystem, IStorageRoot storageRoot) : IStorageRootPreparer
     {
-        /// <summary>The file written and deleted to prove the directory accepts a write.</summary>
-        private const string ProbeFileName = ".write-probe";
+        private const string MarkerName = ".write-probe";
 
-        /// <inheritdoc />
         public bool TryPrepare(out string? error)
         {
+            string folder = storageRoot.DirectoryPath;
+            error = null;
+
             try
             {
-                fileSystem.CreateDirectory(storageRoot.DirectoryPath);
-
-                var probePath = Path.Combine(storageRoot.DirectoryPath, ProbeFileName);
-                fileSystem.WriteAllText(probePath, string.Empty);
-                fileSystem.DeleteFile(probePath);
-
-                error = null;
-                return true;
+                fileSystem.CreateDirectory(folder);
+                string marker = Path.Combine(folder, MarkerName);
+                fileSystem.WriteAllText(marker, "");
+                fileSystem.DeleteFile(marker);
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                error = $"OLED Space Sleeper kan niet schrijven naar:{Environment.NewLine}{storageRoot.DirectoryPath}{Environment.NewLine}{Environment.NewLine}{ex.Message}";
-                return false;
+                error = DescribeFailure(folder, failure);
             }
+
+            return error is null;
+        }
+
+        private static string DescribeFailure(string folder, Exception failure)
+        {
+            string nl = Environment.NewLine;
+            return "OLED Space Sleeper kan niet schrijven naar:" + nl + folder + nl + nl + failure.Message;
         }
     }
 }

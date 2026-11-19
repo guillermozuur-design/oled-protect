@@ -12,151 +12,69 @@ using Serilog;
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Central application orchestrator for monitor management in OLED-Sleeper.
-    /// <para>
-    /// This class is responsible for initializing and coordinating monitor-related services, applying user settings, and ensuring monitor state is restored on startup and shutdown.
-    /// It subscribes to user settings changes and system notifications, and dispatches commands to synchronize and restore monitor state as needed.
-    /// </para>
-    /// <para>
-    /// Key responsibilities:
-    /// <list type="bullet">
-    /// <item><description>Initializes monitor management services and applies persisted settings on startup.</description></item>
-    /// <item><description>Restores all monitor brightness levels on startup and shutdown.</description></item>
-    /// <item><description>Handles user settings changes and updates monitor idle detection accordingly.</description></item>
-    /// <item><description>Dispatches commands to synchronize and restore monitor state as needed.</description></item>
-    /// </list>
-    /// </para>
-    /// </summary>
-    public class ApplicationOrchestrator : IApplicationOrchestrator
+    // Wires the long-running monitor services together. Brightness is reset to normal both at start (to
+    // undo a previous run that crashed while a screen was dimmed) and at stop (so nothing stays dark).
+    public sealed class ApplicationOrchestrator(
+        IMediator bus,
+        IMonitorIdleDetectionService idleDetection,
+        IMonitorSettingsFileService settingsFile,
+        IMonitorStateWatcher displayWatcher,
+        IWorkModeService workMode,
+        IBrightnessScheduleService schedule) : IApplicationOrchestrator
     {
-        private readonly IMediator _mediator;
-        private readonly IMonitorIdleDetectionService _monitorIdleDetectionService;
-        private readonly IMonitorSettingsFileService _monitorSettingsFileService;
-        private readonly IMonitorStateWatcher _monitorStateWatcher;
-        private readonly IWorkModeService _workModeService;
-        private readonly IBrightnessScheduleService _brightnessScheduleService;
-
-        #region Constructor
-
-        public ApplicationOrchestrator(
-            IMediator mediator,
-            IMonitorIdleDetectionService monitorIdleDetectionService,
-            IMonitorSettingsFileService monitorSettingsFileService,
-            IMonitorStateWatcher monitorStateWatcher,
-            IWorkModeService workModeService,
-            IBrightnessScheduleService brightnessScheduleService)
-        {
-            _workModeService = workModeService;
-            _brightnessScheduleService = brightnessScheduleService;
-            _mediator = mediator;
-            _monitorIdleDetectionService = monitorIdleDetectionService;
-            _monitorSettingsFileService = monitorSettingsFileService;
-            _monitorStateWatcher = monitorStateWatcher;
-        }
-
-        #endregion Constructor
-
-        #region Startup/Shutdown
-
-        /// <summary>
-        /// Starts the orchestrator, subscribes to relevant events, restores monitor brightness, and starts monitor state monitoring.
-        /// </summary>
         public void Start()
         {
-            _ = RestoreAllMonitorsAsync();
-            SubscribeToEvents();
-            InitializeStateWatcher();
-            _brightnessScheduleService.Start();
+            _ = ResetBrightnessAsync();
+            Subscribe(true);
+            displayWatcher.Start();
+            schedule.Start();
         }
 
-        /// <summary>
-        /// Unsubscribes from events, stops the idle loop and the state watcher, then restores all monitor
-        /// brightness. The returned task completes when the restore has finished.
-        /// </summary>
         public async Task StopAsync()
         {
-            Log.Information("ApplicationOrchestrator is stopping.");
+            Log.Information("Stopping monitor services.");
 
-            UnsubscribeFromEvents();
-            _monitorIdleDetectionService.Stop();
-            _monitorStateWatcher.Stop();
-            _brightnessScheduleService.Stop();
+            Subscribe(false);
+            idleDetection.Stop();
+            displayWatcher.Stop();
+            schedule.Stop();
 
-            await RestoreAllMonitorsAsync();
+            await ResetBrightnessAsync();
         }
 
-        #endregion Startup/Shutdown
-
-        #region Event Subscriptions
-
-        /// <summary>
-        /// Subscribes to user settings changes.
-        /// </summary>
-        private void SubscribeToEvents()
+        private void Subscribe(bool attach)
         {
-            _monitorSettingsFileService.SettingsChanged += OnSettingsChanged;
-            _workModeService.Changed += OnWorkModeChanged;
+            if (attach)
+            {
+                settingsFile.SettingsChanged += ForwardSavedSettings;
+                workMode.Changed += SyncWorkMode;
+            }
+            else
+            {
+                settingsFile.SettingsChanged -= ForwardSavedSettings;
+                workMode.Changed -= SyncWorkMode;
+            }
         }
 
-        private void OnWorkModeChanged(bool _)
+        private void ForwardSavedSettings(List<MonitorSettings> saved) =>
+            _ = bus.SendAsync(new ApplySettingsChangeCommand { Settings = saved });
+
+        // The flag in the event can be stale: a timer expiry and a user click may raise their events out
+        // of order on different threads. Asking the service for its current state avoids that race.
+        private void SyncWorkMode(bool _) => idleDetection.SetPaused(workMode.IsEnabled);
+
+        private async Task ResetBrightnessAsync()
         {
-            // Read the current state instead of trusting the event argument: an expiry on the timer thread and a
-            // click on the UI thread can deliver their events in either order.
-            _monitorIdleDetectionService.SetPaused(_workModeService.IsEnabled);
-        }
-
-        /// <summary>
-        /// Unsubscribes from user settings changes.
-        /// </summary>
-        private void UnsubscribeFromEvents()
-        {
-            _monitorSettingsFileService.SettingsChanged -= OnSettingsChanged;
-            _workModeService.Changed -= OnWorkModeChanged;
-        }
-
-        #endregion Event Subscriptions
-
-        #region Monitor State Initialization & Restoration
-
-        /// <summary>
-        /// Starts the monitor state watcher, which monitors system monitor connection/disconnection.
-        /// </summary>
-        private void InitializeStateWatcher()
-        {
-            _monitorStateWatcher.Start();
-        }
-
-        /// <summary>
-        /// Restores all monitors' brightness levels to their normal state.
-        /// </summary>
-        private async Task RestoreAllMonitorsAsync()
-        {
-            Log.Information("Restoring all monitors brightness levels...");
-
+            Log.Information("Resetting every monitor to its normal brightness.");
             try
             {
-                await _mediator.SendAsync(new RestoreBrightnessOnAllMonitorsCommand());
-                Log.Information("RestoreBrightnessOnAllMonitorsCommand completed.");
+                await bus.SendAsync(new RestoreBrightnessOnAllMonitorsCommand());
+                Log.Information("Brightness reset finished.");
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to restore monitor brightness levels.");
+                Log.Error(failure, "Brightness reset failed.");
             }
         }
-
-        #endregion Monitor State Initialization & Restoration
-
-        #region Monitor State Event Handlers
-
-        /// <summary>
-        /// Sends an <see cref="ApplySettingsChangeCommand"/> for the settings that changed.
-        /// </summary>
-        private void OnSettingsChanged(List<MonitorSettings> settings)
-        {
-            _mediator.SendAsync(new ApplySettingsChangeCommand { Settings = settings });
-        }
-
-        #endregion Monitor State Event Handlers
     }
 }

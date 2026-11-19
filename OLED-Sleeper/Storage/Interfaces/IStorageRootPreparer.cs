@@ -1,15 +1,9 @@
 namespace OLED_Sleeper.Storage.Interfaces
 {
-    /// <summary>
-    /// Creates the storage root and confirms the application can write to it.
-    /// </summary>
+    // Startup check that the storage folder can actually be used.
     public interface IStorageRootPreparer
     {
-        /// <summary>
-        /// Creates the storage root if it is missing, then writes and deletes a file in it.
-        /// </summary>
-        /// <param name="error">A message naming the directory and what failed, or <c>null</c> on success.</param>
-        /// <returns><c>true</c> when the directory exists and accepted the write; otherwise, <c>false</c>.</returns>
+        // On failure, error is a user-facing (Dutch) message that names the folder; on success it is null.
         bool TryPrepare(out string? error);
     }
 }
