@@ -11,6 +11,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- The version is never written down: MinVer takes it from the nearest git tag such as v3.1.0. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
+    <!-- Shown in the file's Properties > Details in Explorer. -->
+    <Product>OLED Protect</Product>
+    <AssemblyTitle>OLED Protect</AssemblyTitle>
+    <Description>Protects OLED monitors against burn-in on multi-monitor setups.</Description>
+    <Authors>guillermozuur-design</Authors>
+    <Company>guillermozuur-design</Company>
+    <Copyright>© 2026 guillermozuur-design</Copyright>
   </PropertyGroup>
 
   <!-- dotnet publish -p:Portable=true: the PORTABLE build keeps its data in a folder beside the exe. -->
