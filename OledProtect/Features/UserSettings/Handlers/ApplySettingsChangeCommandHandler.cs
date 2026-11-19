@@ -8,34 +8,37 @@ using Serilog;
 
 namespace OledProtect.Features.UserSettings.Handlers
 {
-    public sealed class ApplySettingsChangeCommandHandler(IMediator bus, IMonitorIdleDetectionService idleDetection, IMonitorInfoManager screens)
-        : ICommandHandler<ApplySettingsChangeCommand>
+    // Two phases, strictly in this order:
+    //   1. hand the saved rules to idle detection (with the screen list it needs for geometry);
+    //   2. wake every screen that was saved, all at the same time.
+    // Phase 2 waits for phase 1 so a woken screen is never judged by its old timeout and dimmed again.
+    // The handler completes when every wake-up has finished; a failure anywhere is logged, not thrown.
+    public sealed class ApplySettingsChangeCommandHandler(
+        IMediator bus,
+        IMonitorIdleDetectionService idleDetection,
+        IMonitorInfoManager screens) : ICommandHandler<ApplySettingsChangeCommand>
     {
-        public Task HandleAsync(ApplySettingsChangeCommand command) => ApplyAsync(command.Settings);
-
-        private async Task ApplyAsync(List<MonitorSettings> saved)
+        public async Task HandleAsync(ApplySettingsChangeCommand command)
         {
+            List<MonitorSettings> saved = command.Settings;
             try
             {
-                // Idle detection must know the new rules before any screen is woken, otherwise a restored
-                // monitor could immediately be put back to sleep under the old timeout.
-                var knownMonitors = await screens.GetCurrentMonitorsAsync();
-                await idleDetection.UpdateSettingsAsync(saved, knownMonitors);
+                await idleDetection.UpdateSettingsAsync(saved, await screens.GetCurrentMonitorsAsync());
 
-                foreach (string id in saved.Select(s => s.HardwareId))
-                    WakeMonitor(id);
+                Task[] wakeUps = [.. saved.Select(entry => Wake(entry.HardwareId))];
+                await Task.WhenAll(wakeUps);
+                Log.Information("Settings change applied; {Count} screen(s) woken.", wakeUps.Length);
             }
-            catch (Exception failure)
+            catch (Exception error)
             {
-                Log.Error(failure, "Applying the saved monitor settings failed.");
+                Log.Error(error, "Could not put the new monitor settings into effect.");
             }
         }
 
-        // Fire-and-forget: one slow DDC/CI monitor should not hold up the others.
-        private void WakeMonitor(string hardwareId)
+        private Task Wake(string hardwareId)
         {
-            _ = bus.SendAsync(new RestoreMonitorStateCommand { HardwareId = hardwareId });
-            Log.Information("Requested restore of {HardwareId} after a settings change.", hardwareId);
+            Log.Debug("Waking {HardwareId} because its settings were saved.", hardwareId);
+            return bus.SendAsync(new RestoreMonitorStateCommand { HardwareId = hardwareId });
         }
     }
 }

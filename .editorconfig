@@ -1,47 +1,24 @@
-# OLED Protect code style. `dotnet format` and the IDE both read this file.
 root = true
 
-# ---- everything ----
+# Base: what `dotnet new editorconfig` assumes for any text file in a .NET repo.
 [*]
+trim_trailing_whitespace = true
 indent_style = space
 indent_size = 4
-trim_trailing_whitespace = true
 
-# ---- data and docs: two-space indent ----
-[*.{yml,yaml,json,md}]
+# Config, workflow and project files nest deeply; two spaces keeps them readable.
+[*.{json,yml,yaml,csproj,props,targets,md}]
 indent_size = 2
 
-[*.{csproj,props,targets}]
-indent_size = 2
-
-# Markdown uses two trailing spaces as a line break.
+# A Markdown line ending in two spaces is a hard break, so leave those alone.
 [*.md]
 trim_trailing_whitespace = false
 
-[*.xaml]
-indent_size = 4
-
-# ---- C# ----
+# C#: the template defaults apply, with two exceptions that match how the code is written. Everything
+# else the old file listed was either a default already or only an IDE hint, and
+# `dotnet format --verify-no-changes` passes without it.
 [*.cs]
-indent_size = 4
-
-# Block namespaces, `using`s above them, in written order.
-csharp_style_namespace_declarations = block_scoped:suggestion
-csharp_using_directive_placement = outside_namespace:suggestion
+# Braced namespaces in every file; do not offer to convert them to the file-scoped form.
+csharp_style_namespace_declarations = block_scoped:silent
+# Usings keep the order they were written in; System.* is not pulled to the top.
 dotnet_sort_system_directives_first = false
-
-# Preferred forms, offered as hints only.
-csharp_prefer_braces = when_multiline:suggestion
-csharp_style_prefer_primary_constructors = true:suggestion
-csharp_style_expression_bodied_properties = true:suggestion
-csharp_style_expression_bodied_methods = when_on_single_line:suggestion
-csharp_style_throw_expression = true:suggestion
-csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
-
-# `var` or an explicit type: left to the author.
-csharp_style_var_elsewhere = false:silent
-csharp_style_var_for_built_in_types = false:silent
-csharp_style_var_when_type_is_apparent = true:silent
-
-# Whitespace issues are fixed by `dotnet format`, so they do not show up as build warnings.
-dotnet_diagnostic.IDE0055.severity = suggestion

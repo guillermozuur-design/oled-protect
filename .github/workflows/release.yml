@@ -1,46 +1,43 @@
 name: Release
 
-# Pushing a v* tag (on master) builds everything and opens a draft release to review and publish.
-# A manual run is a trial: the files are only stored as a workflow artifact, nothing is released.
+# Two ways in:
+#   * push a tag vX.Y.Z that sits on master  -> build, then a draft release waits for review on GitHub;
+#   * start the workflow by hand              -> trial build, kept as a workflow artifact only.
 on:
+  workflow_dispatch: # no inputs: a manual run is always a trial
   push:
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Trial build (manual runs never create a release)'
-        type: boolean
-        default: true
+    tags:
+      - 'v*'
 
 jobs:
   ship:
     name: Build and draft
     runs-on: windows-latest
     permissions:
-      contents: write # needed by gh release create
+      contents: write # gh release create
     defaults:
       run:
         shell: pwsh
     env:
-      TAGGED: ${{ startsWith(github.ref, 'refs/tags/') }}
-      MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+      FROM_TAG: ${{ github.ref_type == 'tag' }}
+      TRIAL: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - name: Checkout with tags
+      - name: Checkout (full history)
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # MinVer needs the tags to compute the version
+          fetch-depth: 0 # MinVer walks back to the nearest v* tag
 
-      - name: Tag must be on master
-        if: env.TAGGED == 'true'
+      - name: Refuse tags outside master
+        if: env.FROM_TAG == 'true'
         run: |
-          git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
-          git merge-base --is-ancestor "$env:GITHUB_SHA" origin/master
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::$env:GITHUB_REF_NAME does not point into master. Tag a commit on master (after merging develop)."
+          git fetch --quiet --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          $branches = @(git branch --remotes --contains $env:GITHUB_SHA --format='%(refname:short)')
+          Write-Host "Remote branches holding $($env:GITHUB_SHA.Substring(0, 7)): $($branches -join ', ')"
+          if ('origin/master' -notin $branches) {
+            Write-Host "::error title=Tag not on master::$env:GITHUB_REF_NAME points at a commit master does not contain. Merge into master first, then tag there."
             exit 1
           }
-          Write-Host "OK: $env:GITHUB_REF_NAME is part of master."
 
       - name: .NET 8 SDK
         uses: actions/setup-dotnet@v6
@@ -50,30 +47,39 @@ jobs:
       - name: Inno Setup 6
         run: choco install innosetup --yes --no-progress
 
-      - name: Add commit to trial version
-        if: env.MANUAL == 'true'
+      - name: Give the trial build its own version
+        if: env.TRIAL == 'true'
         run: |
-          # MinVer reads MinVerBuildMetadata from the environment, so a trial build gets a +<sha>
-          # suffix and is easy to tell apart from a tagged release.
-          $sha = git rev-parse --short HEAD
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MinVerBuildMetadata=$sha"
+          # The marker goes in the pre-release part, because MinVer leaves +build metadata out of the
+          # Version that build.ps1 reads (and so out of the file names). Examples for run 42 of 1a2b3c4d:
+          #   commit after v3.8.1  -> 3.8.2-trial.run42.g1a2b3c4d.<height>   (MinVer adds the height)
+          #   commit tagged v3.8.1 -> 3.8.1-trial.run42.g1a2b3c4d             (override, MinVer would say 3.8.1)
+          # The 'g' keeps the hash a valid SemVer identifier even when it is all digits.
+          $marker = "trial.run$env:GITHUB_RUN_NUMBER.g$(git rev-parse --short=8 HEAD)"
+          $tag = git tag --points-at HEAD --list 'v*' | Select-Object -First 1
+          if ($tag) {
+            $line = "MinVerVersionOverride=$($tag.Substring(1))-$marker"
+          } else {
+            $line = "MinVerDefaultPreReleaseIdentifiers=$marker"
+          }
+          Write-Host "Trial build: $line"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value $line
 
       - name: Run build.ps1
         id: build # build.ps1 sets the 'version' output
         run: ./build.ps1
 
       - name: Keep trial build
-        if: env.MANUAL == 'true'
+        if: env.TRIAL == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: oled-protect-${{ steps.build.outputs.version }}
-          path: |
-            artifacts/*
-            !artifacts/publish
+          # Every deliverable starts with OledProtect-; the publish\ staging folder does not match.
+          path: artifacts/OledProtect-*
           if-no-files-found: error
 
       - name: Draft GitHub release
-        if: env.TAGGED == 'true'
+        if: env.FROM_TAG == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.build.outputs.version }}
@@ -95,12 +101,11 @@ jobs:
           ---
 
           "@
+          $notes = Join-Path $env:RUNNER_TEMP 'release-intro.md'
+          Set-Content -LiteralPath $notes -Value $intro -Encoding utf8
 
-          # Changelog from the merged pull requests, grouped by label (see .github/release.yml).
-          # gh returns it as separate lines, so glue them back together for the Markdown.
-          $log = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:GITHUB_REF_NAME" --jq .body
-          if ($LASTEXITCODE -ne 0) { throw 'gh could not generate the release notes.' }
-          Set-Content -LiteralPath release-notes.md -Value ($intro + ($log -join "`n")) -Encoding utf8
-
+          # --generate-notes asks GitHub for the changelog of merged pull requests (grouped by label, see
+          # .github/release.yml) and puts it below the intro above.
           $assets = @(Get-ChildItem -LiteralPath artifacts -File | ForEach-Object FullName)
-          gh release create $env:GITHUB_REF_NAME @assets --draft --title "OLED Protect $env:GITHUB_REF_NAME" --notes-file release-notes.md
+          gh release create $env:GITHUB_REF_NAME @assets --draft --title "OLED Protect $env:GITHUB_REF_NAME" --notes-file $notes --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
