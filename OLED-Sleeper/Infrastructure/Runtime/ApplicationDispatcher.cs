@@ -5,24 +5,20 @@ using System.Windows.Threading;
 
 namespace OLED_Sleeper.Infrastructure.Runtime
 {
-    /// <summary>
-    /// Runs actions on the WPF UI thread owned by <see cref="Application.Current"/>.
-    /// </summary>
+    // Production IDispatcher backed by the dispatcher of the running WPF Application.
     [ExcludeFromCodeCoverage]
-    public class ApplicationDispatcher : IDispatcher
+    public sealed class ApplicationDispatcher : IDispatcher
     {
-        /// <inheritdoc />
-        public bool IsOnUiThread => Application.Current.Dispatcher.CheckAccess();
+        private static Dispatcher Ui => Application.Current.Dispatcher;
 
-        /// <inheritdoc />
-        public void Invoke(Action action) => Application.Current.Dispatcher.Invoke(action);
+        public bool IsOnUiThread => Ui.CheckAccess();
 
-        /// <inheritdoc />
-        public async Task InvokeAsync(Action action) =>
-            await Application.Current.Dispatcher.InvokeAsync(action);
+        public void Invoke(Action action) => Ui.Invoke(action);
 
-        /// <inheritdoc />
-        public async Task InvokeAfterInputAsync(Action action) =>
-            await Application.Current.Dispatcher.InvokeAsync(action, DispatcherPriority.Background);
+        public Task InvokeAsync(Action action) => Ui.InvokeAsync(action).Task;
+
+        // Background priority sits below Input, which is what lets queued input go first.
+        public Task InvokeAfterInputAsync(Action action) =>
+            Ui.InvokeAsync(action, DispatcherPriority.Background).Task;
     }
 }

@@ -1,99 +1,56 @@
 using OLED_Sleeper.Storage;
-using OLED_Sleeper.Storage.Interfaces;
 using OLED_Sleeper.Tests.TestDoubles;
 
 namespace OLED_Sleeper.Tests.Storage
 {
     public class StorageRootPreparerTests
     {
-        private const string StoreDirectory = @"C:\FakeAppData\OLED-Space-Sleeper";
+        private const string Installed = @"C:\FakeAppData\OLED-Space-Sleeper";
 
-        private readonly FakeFileSystem _fileSystem;
-        private readonly StorageRootPreparer _preparer;
+        private readonly FakeFileSystem _disk = new();
 
-        public StorageRootPreparerTests()
+        private bool Prepare(out string? message, bool portable = false) =>
+            new StorageRootPreparer(_disk, new StorageRoot(_disk, portable)).TryPrepare(out message);
+
+        [Fact]
+        public void Healthy_folder_is_created_and_reports_no_error()
         {
-            _fileSystem = new FakeFileSystem();
-            _preparer = new StorageRootPreparer(_fileSystem, new StorageRoot(_fileSystem, isPortable: false));
+            bool ok = Prepare(out var message);
+
+            Assert.True(ok);
+            Assert.Null(message);
+            Assert.Equal([Installed], _disk.Mkdirs);
         }
 
         [Fact]
-        public void TryPrepare_WhenTheDirectoryAcceptsAWrite_SucceedsAndCreatesIt()
+        public void Probe_file_is_cleaned_up()
         {
-            // Act
-            var prepared = _preparer.TryPrepare(out var error);
+            Prepare(out _);
 
-            // Assert
-            Assert.True(prepared);
-            Assert.Null(error);
-            Assert.Equal(new[] { StoreDirectory }, _fileSystem.CreatedDirectories);
+            Assert.False(_disk.FileExists(Installed + @"\.write-probe"));
         }
 
         [Fact]
-        public void TryPrepare_WhenItSucceeds_LeavesNoProbeFileBehind()
+        public void Portable_build_prepares_the_data_folder_next_to_the_exe()
         {
-            // Act
-            _preparer.TryPrepare(out _);
-
-            // Assert
-            Assert.Null(_fileSystem.Contents(StoreDirectory + @"\.write-probe"));
+            Assert.True(Prepare(out _, portable: true));
+            Assert.Equal([@"C:\FakeApp\Data"], _disk.Mkdirs);
         }
 
-        [Fact]
-        public void TryPrepare_WhenTheDirectoryCannotBeCreated_FailsAndNamesIt()
+        [Theory]
+        [InlineData(FakeDiskFault.CreateDirectory)]
+        [InlineData(FakeDiskFault.Write)]
+        [InlineData(FakeDiskFault.Delete)]
+        public void Any_io_failure_is_reported_with_the_folder_and_cause(FakeDiskFault fault)
         {
-            // Arrange
-            _fileSystem.DirectoryCreationFails = true;
+            _disk.Faults = fault;
 
-            // Act
-            var prepared = _preparer.TryPrepare(out var error);
+            bool ok = Prepare(out var message);
 
-            // Assert
-            Assert.False(prepared);
-            Assert.Contains(StoreDirectory, error);
-        }
-
-        [Fact]
-        public void TryPrepare_WhenTheDirectoryRejectsAWrite_FailsAndNamesIt()
-        {
-            // Arrange
-            _fileSystem.WritesFail = true;
-
-            // Act
-            var prepared = _preparer.TryPrepare(out var error);
-
-            // Assert
-            Assert.False(prepared);
-            Assert.Contains(StoreDirectory, error);
-        }
-
-        [Fact]
-        public void TryPrepare_WhenTheProbeCannotBeDeleted_Fails()
-        {
-            // Arrange
-            _fileSystem.DeletesFail = true;
-
-            // Act
-            var prepared = _preparer.TryPrepare(out var error);
-
-            // Assert
-            Assert.False(prepared);
-            Assert.NotNull(error);
-        }
-
-        [Fact]
-        public void TryPrepare_WhenPortable_PreparesTheFolderBesideTheExecutable()
-        {
-            // Arrange
-            var portableRoot = new StorageRoot(_fileSystem, isPortable: true);
-            IStorageRootPreparer preparer = new StorageRootPreparer(_fileSystem, portableRoot);
-
-            // Act
-            var prepared = preparer.TryPrepare(out _);
-
-            // Assert
-            Assert.True(prepared);
-            Assert.Equal(new[] { @"C:\FakeApp\Data" }, _fileSystem.CreatedDirectories);
+            Assert.False(ok);
+            Assert.NotNull(message);
+            Assert.Contains(Installed, message);
+            Assert.Contains("Simulated", message);
         }
     }
 }

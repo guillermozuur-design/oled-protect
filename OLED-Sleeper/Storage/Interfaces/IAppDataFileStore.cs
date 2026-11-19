@@ -1,25 +1,12 @@
 namespace OLED_Sleeper.Storage.Interfaces
 {
-    /// <summary>
-    /// Provides methods for reading and writing JSON files in the application's data directory.
-    /// </summary>
+    // JSON persistence for small files that live directly in the storage root.
     public interface IAppDataFileStore
     {
-        /// <summary>
-        /// Reads a file and deserializes its contents.
-        /// </summary>
-        /// <typeparam name="T">The type the contents deserialize to.</typeparam>
-        /// <param name="fileName">The file name, with no directory part.</param>
-        /// <returns>The deserialized contents, or <c>null</c> when nothing could be read.</returns>
+        // Null/default when the file is absent or unreadable (callers fall back to their defaults).
         T? Read<T>(string fileName);
 
-        /// <summary>
-        /// Serializes a value and writes it to a file, replacing any existing contents.
-        /// </summary>
-        /// <typeparam name="T">The type being serialized.</typeparam>
-        /// <param name="fileName">The file name, with no directory part.</param>
-        /// <param name="value">The value to write.</param>
-        /// <returns><c>true</c> if the file was written; otherwise, <c>false</c>.</returns>
+        // False when anything went wrong; the previous contents then stay in place.
         bool TryWrite<T>(string fileName, T value);
     }
 }

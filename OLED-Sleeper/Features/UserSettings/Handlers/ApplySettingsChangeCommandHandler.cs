@@ -2,53 +2,40 @@
 using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.UserSettings.Commands;
+using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Messaging.Interfaces;
 using Serilog;
 
 namespace OLED_Sleeper.Features.UserSettings.Handlers
 {
-    /// <summary>
-    /// Handles the execution of the <see cref="ApplySettingsChangeCommand"/>.
-    /// Updates idle detection with the changed settings, then restores the monitors they cover.
-    /// </summary>
-    public class ApplySettingsChangeCommandHandler(
-        IMediator mediator,
-        IMonitorIdleDetectionService monitorIdleDetectionService,
-        IMonitorInfoManager monitorInfoManager) : ICommandHandler<ApplySettingsChangeCommand>
+    public sealed class ApplySettingsChangeCommandHandler(IMediator bus, IMonitorIdleDetectionService idleDetection, IMonitorInfoManager screens)
+        : ICommandHandler<ApplySettingsChangeCommand>
     {
-        /// <summary>
-        /// Applies the changed settings to idle detection, then restores each affected monitor.
-        /// The restore commands are issued only after the new settings are in effect. The geometry comes
-        /// from the cached monitor list.
-        /// </summary>
-        /// <param name="command">The command containing the changed settings.</param>
-        public async Task HandleAsync(ApplySettingsChangeCommand command)
+        public Task HandleAsync(ApplySettingsChangeCommand command) => ApplyAsync(command.Settings);
+
+        private async Task ApplyAsync(List<MonitorSettings> saved)
         {
             try
             {
-                var monitors = await monitorInfoManager.GetCurrentMonitorsAsync();
-                await monitorIdleDetectionService.UpdateSettingsAsync(command.Settings, monitors);
+                // Idle detection must know the new rules before any screen is woken, otherwise a restored
+                // monitor could immediately be put back to sleep under the old timeout.
+                var knownMonitors = await screens.GetCurrentMonitorsAsync();
+                await idleDetection.UpdateSettingsAsync(saved, knownMonitors);
 
-                foreach (var setting in command.Settings)
-                {
-                    SendRestoreMonitorStateCommand(setting.HardwareId);
-                }
+                foreach (string id in saved.Select(s => s.HardwareId))
+                    WakeMonitor(id);
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to apply changed monitor settings.");
+                Log.Error(failure, "Applying the saved monitor settings failed.");
             }
         }
 
-        /// <summary>
-        /// Sends a command to restore a monitor's state by undimming it and hiding any blackout overlay.
-        /// </summary>
-        /// <param name="hardwareId">The unique hardware ID of the monitor to restore.</param>
-        private void SendRestoreMonitorStateCommand(string hardwareId)
+        // Fire-and-forget: one slow DDC/CI monitor should not hold up the others.
+        private void WakeMonitor(string hardwareId)
         {
-            var restoreCommand = new RestoreMonitorStateCommand { HardwareId = hardwareId };
-            mediator.SendAsync(restoreCommand);
-            Log.Information("RestoreMonitorStateCommand sent for monitor {HardwareId}.", hardwareId);
+            _ = bus.SendAsync(new RestoreMonitorStateCommand { HardwareId = hardwareId });
+            Log.Information("Requested restore of {HardwareId} after a settings change.", hardwareId);
         }
     }
 }

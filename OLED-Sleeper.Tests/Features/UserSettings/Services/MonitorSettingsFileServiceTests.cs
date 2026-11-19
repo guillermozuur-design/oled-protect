@@ -7,186 +7,146 @@ namespace OLED_Sleeper.Tests.Features.UserSettings.Services
 {
     public class MonitorSettingsFileServiceTests
     {
-        private const string SettingsFileName = "settings.json";
-        private const int CurrentSchemaVersion = 1;
+        private const string File = "settings.json";
+        private const int Schema = 1;
 
-        private readonly Mock<IAppDataFileStore> _fileStore;
-        private readonly MonitorSettingsFileService _service;
+        private readonly Mock<IAppDataFileStore> _store = new();
+        private readonly MonitorSettingsFileService _sut;
+        private readonly List<MonitorSettingsDocument> _writes = [];
 
         public MonitorSettingsFileServiceTests()
         {
-            _fileStore = new Mock<IAppDataFileStore>();
-            _fileStore.Setup(s => s.TryWrite(SettingsFileName, It.IsAny<MonitorSettingsDocument>())).Returns(true);
-            _service = new MonitorSettingsFileService(_fileStore.Object);
+            _store.Setup(s => s.TryWrite(File, It.IsAny<MonitorSettingsDocument>()))
+                  .Callback<string, MonitorSettingsDocument>((_, doc) => _writes.Add(doc))
+                  .Returns(true);
+            _sut = new MonitorSettingsFileService(_store.Object);
+        }
+
+        private static MonitorSettings Monitor(string id, double dim = 15) => new() { HardwareId = id, DimLevel = dim };
+
+        private void OnDisk(int version, params MonitorSettings[] monitors) =>
+            _store.Setup(s => s.Read<MonitorSettingsDocument>(File))
+                  .Returns(new MonitorSettingsDocument { SchemaVersion = version, Monitors = [.. monitors] });
+
+        private MonitorSettingsDocument SingleWrite() => Assert.Single(_writes);
+
+        // ---- loading ----
+
+        [Fact]
+        public void Load_returns_stored_monitors_for_the_current_schema()
+        {
+            OnDisk(Schema, Monitor("A"));
+
+            Assert.Equal("A", Assert.Single(_sut.LoadSettings()).HardwareId);
         }
 
         [Fact]
-        public void LoadSettings_WhenTheStoreHasSettings_ReturnsThem()
+        public void Load_without_a_file_gives_an_empty_list()
         {
-            // Arrange
-            SetupStoredSettings(Settings("A"));
+            Assert.Empty(_sut.LoadSettings());
+        }
 
-            // Act
-            var settings = _service.LoadSettings();
+        [Theory]
+        [InlineData(0)]          // file from before versioning (key absent)
+        [InlineData(-1)]         // garbage
+        [InlineData(Schema + 1)] // written by a newer build
+        public void Load_discards_other_schema_versions(int version)
+        {
+            OnDisk(version, Monitor("A"));
 
-            // Assert
-            Assert.Equal("A", Assert.Single(settings).HardwareId);
+            Assert.Empty(_sut.LoadSettings());
         }
 
         [Fact]
-        public void LoadSettings_WhenNothingCouldBeRead_ReturnsAnEmptyList()
+        public void Load_survives_a_null_monitor_list()
         {
-            // Act
-            var settings = _service.LoadSettings();
+            _store.Setup(s => s.Read<MonitorSettingsDocument>(File))
+                  .Returns(new MonitorSettingsDocument { SchemaVersion = Schema, Monitors = null! });
 
-            // Assert
-            Assert.Empty(settings);
+            Assert.Empty(_sut.LoadSettings());
+        }
+
+        // ---- saving ----
+
+        [Fact]
+        public void Save_on_a_fresh_install_writes_just_the_given_monitors_with_the_schema()
+        {
+            _sut.SaveSettings([Monitor("A")]);
+
+            var doc = SingleWrite();
+            Assert.Equal(Schema, doc.SchemaVersion);
+            Assert.Equal("A", Assert.Single(doc.Monitors).HardwareId);
         }
 
         [Fact]
-        public void SaveSettings_WhenAStoredMonitorWasNotSupplied_KeepsItsSettings()
+        public void Save_keeps_entries_of_monitors_that_were_not_passed_in()
         {
-            // Arrange
-            SetupStoredSettings(Settings("A"), Settings("B"));
+            OnDisk(Schema, Monitor("A"), Monitor("B"));
 
-            // Act
-            _service.SaveSettings(new List<MonitorSettings> { Settings("A") });
+            _sut.SaveSettings([Monitor("A")]);
 
-            // Assert
-            VerifyWritten(written => written.Count == 2 && written.Any(m => m.HardwareId == "B"));
+            Assert.Equal(["A", "B"], SingleWrite().Monitors.Select(m => m.HardwareId));
         }
 
         [Fact]
-        public void SaveSettings_WhenAStoredMonitorWasSupplied_WritesOnlyTheSuppliedCopy()
+        public void Save_replaces_the_stored_entry_of_a_passed_monitor()
         {
-            // Arrange
-            SetupStoredSettings(Settings("A", dimLevel: 15));
+            OnDisk(Schema, Monitor("A", dim: 15));
 
-            // Act
-            _service.SaveSettings(new List<MonitorSettings> { Settings("A", dimLevel: 50) });
+            _sut.SaveSettings([Monitor("A", dim: 50)]);
 
-            // Assert
-            VerifyWritten(written => written.Count == 1 && written.Single().DimLevel == 50);
+            Assert.Equal(50, Assert.Single(SingleWrite().Monitors).DimLevel);
         }
 
         [Fact]
-        public void SaveSettings_WhenNothingIsStored_WritesTheSuppliedSettings()
+        public void Save_ignores_stored_entries_from_another_schema()
         {
-            // Act
-            _service.SaveSettings(new List<MonitorSettings> { Settings("A") });
+            OnDisk(Schema - 1, Monitor("Old"));
 
-            // Assert
-            VerifyWritten(written => written.Count == 1 && written.Single().HardwareId == "A");
+            _sut.SaveSettings([Monitor("A")]);
+
+            Assert.Equal("A", Assert.Single(SingleWrite().Monitors).HardwareId);
         }
 
         [Fact]
-        public void SaveSettings_WhenTheWriteSucceeds_RaisesSettingsChangedWithTheSuppliedSettings()
+        public void Successful_save_raises_SettingsChanged_with_the_callers_list()
         {
-            // Arrange
-            SetupStoredSettings(Settings("A"), Settings("B"));
-            var supplied = new List<MonitorSettings> { Settings("A") };
-            List<MonitorSettings>? raised = null;
-            _service.SettingsChanged += settings => raised = settings;
+            OnDisk(Schema, Monitor("A"), Monitor("B"));
+            List<MonitorSettings> given = [Monitor("A")];
+            List<MonitorSettings>? received = null;
+            _sut.SettingsChanged += list => received = list;
 
-            // Act
-            _service.SaveSettings(supplied);
+            _sut.SaveSettings(given);
 
-            // Assert
-            Assert.Same(supplied, raised);
+            Assert.Same(given, received);
         }
 
         [Fact]
-        public void SaveSettings_WhenTheWriteFails_DoesNotRaiseSettingsChanged()
+        public void Failed_write_does_not_raise_SettingsChanged()
         {
-            // Arrange
-            _fileStore.Setup(s => s.TryWrite(SettingsFileName, It.IsAny<MonitorSettingsDocument>())).Returns(false);
-            var raised = false;
-            _service.SettingsChanged += _ => raised = true;
+            _store.Setup(s => s.TryWrite(File, It.IsAny<MonitorSettingsDocument>())).Returns(false);
+            int raised = 0;
+            _sut.SettingsChanged += _ => raised++;
 
-            // Act
-            _service.SaveSettings(new List<MonitorSettings> { Settings("A") });
+            _sut.SaveSettings([Monitor("A")]);
 
-            // Assert
-            Assert.False(raised);
+            Assert.Equal(0, raised);
         }
 
         [Fact]
-        public void SaveSettings_WhenASubscriberThrows_DoesNotPropagate()
+        public void Throwing_subscriber_is_contained()
         {
-            // Arrange
-            _service.SettingsChanged += _ => throw new InvalidOperationException("Subscriber failed.");
+            _sut.SettingsChanged += _ => throw new InvalidOperationException("boom");
 
-            // Act
-            var exception = Record.Exception(() => _service.SaveSettings(new List<MonitorSettings> { Settings("A") }));
-
-            // Assert
-            Assert.Null(exception);
+            Assert.Null(Record.Exception(() => _sut.SaveSettings([Monitor("A")])));
         }
 
         [Fact]
-        public void LoadSettings_WhenTheStoredVersionIsOlder_DiscardsTheSettings()
+        public void Throwing_store_is_contained()
         {
-            // Arrange
-            SetupStoredDocument(new MonitorSettingsDocument
-            {
-                SchemaVersion = CurrentSchemaVersion - 1,
-                Monitors = new List<MonitorSettings> { Settings("A") }
-            });
+            _store.Setup(s => s.Read<MonitorSettingsDocument>(File)).Throws(new System.IO.IOException("disk gone"));
 
-            // Act
-            var settings = _service.LoadSettings();
-
-            // Assert
-            Assert.Empty(settings);
+            Assert.Null(Record.Exception(() => _sut.SaveSettings([Monitor("A")])));
         }
-
-        [Fact]
-        public void LoadSettings_WhenTheStoredVersionIsAbsent_DiscardsTheSettings()
-        {
-            // Arrange
-            SetupStoredDocument(new MonitorSettingsDocument { Monitors = new List<MonitorSettings> { Settings("A") } });
-
-            // Act
-            var settings = _service.LoadSettings();
-
-            // Assert
-            Assert.Empty(settings);
-        }
-
-        [Fact]
-        public void SaveSettings_StampsTheCurrentSchemaVersion()
-        {
-            // Act
-            _service.SaveSettings(new List<MonitorSettings> { Settings("A") });
-
-            // Assert
-            _fileStore.Verify(
-                s => s.TryWrite(SettingsFileName, It.Is<MonitorSettingsDocument>(d => d.SchemaVersion == CurrentSchemaVersion)),
-                Times.Once);
-        }
-
-        /// <summary>
-        /// Builds a settings entry for the given monitor.
-        /// </summary>
-        private static MonitorSettings Settings(string hardwareId, double dimLevel = 15)
-            => new() { HardwareId = hardwareId, DimLevel = dimLevel };
-
-        /// <summary>
-        /// Makes the store report the given entries as already on disk.
-        /// </summary>
-        private void SetupStoredSettings(params MonitorSettings[] stored)
-            => SetupStoredDocument(new MonitorSettingsDocument { SchemaVersion = CurrentSchemaVersion, Monitors = stored.ToList() });
-
-        /// <summary>
-        /// Makes the store report the given document as already on disk.
-        /// </summary>
-        private void SetupStoredDocument(MonitorSettingsDocument document)
-            => _fileStore.Setup(s => s.Read<MonitorSettingsDocument>(SettingsFileName)).Returns(document);
-
-        /// <summary>
-        /// Asserts that exactly one write happened and that the list it carried satisfies the predicate.
-        /// </summary>
-        private void VerifyWritten(Func<List<MonitorSettings>, bool> predicate)
-            => _fileStore.Verify(s => s.TryWrite(SettingsFileName, It.Is<MonitorSettingsDocument>(w => predicate(w.Monitors))), Times.Once);
     }
 }

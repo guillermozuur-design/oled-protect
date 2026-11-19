@@ -1,19 +1,11 @@
 ﻿namespace OLED_Sleeper.Infrastructure.Hosting.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for the application orchestrator, which coordinates monitor management and application lifecycle.
-    /// </summary>
+    // Starts and stops the background monitor machinery as one unit.
     public interface IApplicationOrchestrator
     {
-        /// <summary>
-        /// Starts the orchestrator, initializing all monitor management logic and event subscriptions.
-        /// </summary>
         void Start();
 
-        /// <summary>
-        /// Stops the orchestrator, unsubscribing from events and restoring monitor states.
-        /// The returned task completes when the restore has finished.
-        /// </summary>
+        // Completes once every monitor is back at its normal brightness.
         Task StopAsync();
     }
 }

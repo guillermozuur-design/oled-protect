@@ -5,90 +5,76 @@ using Serilog;
 
 namespace OLED_Sleeper.Features.UserSettings.Services
 {
-    /// <summary>
-    /// Keeps the monitor settings in <c>settings.json</c> under the application's data directory.
-    /// </summary>
-    public class MonitorSettingsFileService : IMonitorSettingsFileService
+    public sealed class MonitorSettingsFileService(IAppDataFileStore fileStore) : IMonitorSettingsFileService
     {
-        /// <summary>The name of the file the settings are kept in.</summary>
-        private const string SettingsFileName = "settings.json";
+        private const string FileName = "settings.json";
 
-        /// <summary>
-        /// The schema version this build writes and is willing to read. Raise it whenever a change to
-        /// <see cref="MonitorSettings"/> makes an older file's contents wrong rather than merely incomplete.
-        /// </summary>
-        private const int CurrentSchemaVersion = 1;
+        // Bump only when an old file would be interpreted wrongly (added fields just take their defaults).
+        // A file with another version is dropped rather than migrated.
+        private const int Version = 1;
 
-        private readonly IAppDataFileStore _fileStore;
-
-        /// <inheritdoc />
         public event Action<List<MonitorSettings>>? SettingsChanged;
 
-        public MonitorSettingsFileService(IAppDataFileStore fileStore)
-        {
-            _fileStore = fileStore;
-        }
-
-        /// <inheritdoc />
         public List<MonitorSettings> LoadSettings()
         {
-            var document = _fileStore.Read<MonitorSettingsDocument>(SettingsFileName);
+            var stored = fileStore.Read<MonitorSettingsDocument>(FileName);
 
-            if (document == null)
+            switch (stored)
             {
-                Log.Information("No monitor settings could be read. Starting from defaults.");
-                return new List<MonitorSettings>();
-            }
+                case null:
+                    Log.Information("No usable {File}; using default monitor settings.", FileName);
+                    return [];
 
-            if (document.SchemaVersion != CurrentSchemaVersion)
-            {
-                Log.Warning(
-                    "Discarding monitor settings written under schema version {StoredVersion}; this build reads version {CurrentVersion}. Starting from defaults.",
-                    document.SchemaVersion,
-                    CurrentSchemaVersion);
-                return new List<MonitorSettings>();
-            }
+                case { SchemaVersion: not Version }:
+                    Log.Warning("{File} has schema version {Found}, expected {Expected}; using defaults.",
+                        FileName, stored.SchemaVersion, Version);
+                    return [];
 
-            Log.Information("Loaded {Count} monitor settings.", document.Monitors.Count);
-            return document.Monitors;
+                default:
+                    // A hand-edited "Monitors": null must not crash startup.
+                    var monitors = stored.Monitors ?? [];
+                    Log.Information("Read settings for {Count} monitor(s).", monitors.Count);
+                    return monitors;
+            }
         }
 
-        /// <inheritdoc />
-        public void SaveSettings(List<MonitorSettings> settings)
+        public void SaveSettings(List<MonitorSettings> changed)
         {
             try
             {
-                var merged = MergeWithStoredSettings(settings);
-                var document = new MonitorSettingsDocument { SchemaVersion = CurrentSchemaVersion, Monitors = merged };
+                var toWrite = new MonitorSettingsDocument { SchemaVersion = Version, Monitors = Upsert(changed) };
+                if (!fileStore.TryWrite(FileName, toWrite))
+                    return;
 
-                if (!_fileStore.TryWrite(SettingsFileName, document)) return;
-
-                Log.Information("Saved {Count} monitor settings.", merged.Count);
-                SettingsChanged?.Invoke(settings);
+                Log.Information("Wrote settings for {Count} monitor(s).", toWrite.Monitors.Count);
+                SettingsChanged?.Invoke(changed);
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to save monitor settings.");
+                Log.Error(failure, "Saving monitor settings failed.");
             }
         }
 
-        /// <summary>
-        /// Appends the stored settings whose hardware ID is absent from <paramref name="settings"/> to the
-        /// supplied list, so the configuration of monitors that are not connected is kept.
-        /// </summary>
-        /// <param name="settings">The settings supplied by the caller.</param>
-        /// <returns>The supplied settings followed by the stored settings that were kept.</returns>
-        private List<MonitorSettings> MergeWithStoredSettings(List<MonitorSettings> settings)
+        // The editor only knows the monitors that are connected right now; entries for the others are
+        // carried over from disk so unplugging a screen does not wipe its configuration.
+        private List<MonitorSettings> Upsert(List<MonitorSettings> incoming)
         {
-            var suppliedIds = settings.Select(s => s.HardwareId).ToHashSet();
-            var retained = LoadSettings().Where(stored => !suppliedIds.Contains(stored.HardwareId)).ToList();
+            var result = new List<MonitorSettings>(incoming);
+            var seen = new HashSet<string>(incoming.Select(m => m.HardwareId));
 
-            if (retained.Count > 0)
+            int carried = 0;
+            foreach (var old in LoadSettings())
             {
-                Log.Information("Kept stored settings for {Count} monitors that were not supplied.", retained.Count);
+                if (seen.Contains(old.HardwareId))
+                    continue;
+                result.Add(old);
+                carried++;
             }
 
-            return settings.Concat(retained).ToList();
+            if (carried > 0)
+                Log.Information("Carried over stored settings of {Count} disconnected monitor(s).", carried);
+
+            return result;
         }
     }
 }

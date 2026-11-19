@@ -3,56 +3,31 @@ using System.Windows;
 
 namespace OLED_Sleeper
 {
-    /// <summary>
-    /// Entry point for the WPF application. 
-    /// Handles WPF lifecycle events and delegates application initialization
-    /// and shutdown to <see cref="ApplicationBootstrapper"/>.
-    /// </summary>
+    // Deliberately thin: every lifecycle decision lives in ApplicationBootstrapper.
     public partial class App : Application
     {
-        private ApplicationBootstrapper? _bootstrapper;
+        private ApplicationBootstrapper? _host;
 
-        /// <summary>
-        /// Invoked when the application starts. Creates and initializes the
-        /// <see cref="ApplicationBootstrapper"/> using the provided startup arguments.
-        /// </summary>
-        /// <param name="e">Startup event arguments containing command-line parameters.</param>
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
-            this.SessionEnding += App_SessionEnding;
-            StartBootstrapper(e);
+
+            // Logoff/shutdown: restore the monitors while Windows still gives us time.
+            SessionEnding += (_, _) => _host?.ShutdownApp();
+
+            _host = new ApplicationBootstrapper(e.Args);
+            _host.Initialize();
         }
 
-        /// <summary>
-        /// Invoked when the application is exiting. Ensures the bootstrapper
-        /// performs its shutdown logic and releases resources.
-        /// </summary>
-        /// <param name="e">Exit event arguments.</param>
         protected override void OnExit(ExitEventArgs e)
         {
-            _bootstrapper?.ShutdownApp();
-            _bootstrapper?.Dispose();
+            if (_host is { } host)
+            {
+                host.ShutdownApp();
+                host.Dispose();
+            }
+
             base.OnExit(e);
-        }
-
-        /// <summary>
-        /// Handles Windows session ending events (e.g., user logoff or system shutdown)
-        /// and forwards shutdown handling to the bootstrapper.
-        /// </summary>
-        private void App_SessionEnding(object sender, SessionEndingCancelEventArgs e)
-        {
-            _bootstrapper?.ShutdownApp();
-        }
-
-        /// <summary>
-        /// Creates and initializes the <see cref="ApplicationBootstrapper"/>
-        /// using the provided startup arguments.
-        /// </summary>
-        private void StartBootstrapper(StartupEventArgs e)
-        {
-            _bootstrapper = new ApplicationBootstrapper(e.Args);
-            _bootstrapper.Initialize();
         }
     }
 }

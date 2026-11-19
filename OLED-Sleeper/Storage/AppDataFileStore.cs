@@ -5,125 +5,80 @@ using System.Text.Json;
 
 namespace OLED_Sleeper.Storage
 {
-    /// <summary>
-    /// Reads and writes JSON files in the directory <see cref="IStorageRoot"/> names.
-    /// A write is built in a temporary file and replaces the target, keeping the contents it replaced as a backup.
-    /// A read tries the target and then that backup, so an interrupted write does not lose the previous contents.
-    /// </summary>
-    public class AppDataFileStore : IAppDataFileStore
+    // Crash-safe JSON files: every save goes to "<name>.tmp" first and is then swapped in, with the
+    // previous version parked in "<name>.bak". Loading falls back to that .bak when the main file is
+    // missing or damaged, so a power cut halfway through a save never costs the user their settings.
+    public sealed class AppDataFileStore(IFileSystem fileSystem, IStorageRoot storageRoot) : IAppDataFileStore
     {
-        #region Constants
+        private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-        /// <summary>Appended to a file name for the staging file a write is built in.</summary>
-        private const string TempFileSuffix = ".tmp";
+        private readonly string _folder = storageRoot.DirectoryPath;
 
-        /// <summary>Appended to a file name for the contents a write replaced.</summary>
-        private const string BackupFileSuffix = ".bak";
-
-        #endregion Constants
-
-        #region Fields
-
-        private readonly IFileSystem _fileSystem;
-
-        /// <summary>The directory every file name is resolved against. Created before the store is built.</summary>
-        private readonly string _storeDirectory;
-
-        private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
-
-        #endregion Fields
-
-        #region Constructor
-
-        public AppDataFileStore(IFileSystem fileSystem, IStorageRoot storageRoot)
-        {
-            _fileSystem = fileSystem;
-            _storeDirectory = storageRoot.DirectoryPath;
-        }
-
-        #endregion Constructor
-
-        #region IAppDataFileStore Implementation
-
-        /// <inheritdoc />
         public T? Read<T>(string fileName)
         {
-            var filePath = Path.Combine(_storeDirectory, fileName);
+            string primary = PathOf(fileName);
 
-            if (TryRead<T>(filePath, out var value))
-            {
-                return value;
-            }
+            if (TryLoad(primary, out T? loaded))
+                return loaded;
 
-            if (TryRead<T>(filePath + BackupFileSuffix, out var backupValue))
+            if (TryLoad(BackupOf(primary), out T? recovered))
             {
-                Log.Warning("Loaded {FileName} from its backup file.", fileName);
-                return backupValue;
+                Log.Warning("{FileName} was unusable; using its .bak copy instead.", fileName);
+                return recovered;
             }
 
             return default;
         }
 
-        /// <inheritdoc />
         public bool TryWrite<T>(string fileName, T value)
         {
-            var filePath = Path.Combine(_storeDirectory, fileName);
-            var tempFilePath = filePath + TempFileSuffix;
+            string primary = PathOf(fileName);
+            string staging = primary + ".tmp";
 
             try
             {
-                _fileSystem.WriteAllText(tempFilePath, JsonSerializer.Serialize(value, SerializerOptions));
-
-                if (_fileSystem.FileExists(filePath))
-                {
-                    _fileSystem.Replace(tempFilePath, filePath, filePath + BackupFileSuffix);
-                }
-                else
-                {
-                    _fileSystem.Move(tempFilePath, filePath);
-                }
-
+                fileSystem.WriteAllText(staging, JsonSerializer.Serialize(value, Json));
+                SwapIn(staging, primary);
                 return true;
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to write {FilePath}.", filePath);
+                Log.Error(failure, "Could not save {Path}; the previous version is kept.", primary);
                 return false;
             }
         }
 
-        #endregion IAppDataFileStore Implementation
-
-        #region Private Methods
-
-        /// <summary>
-        /// Reads and deserializes one file.
-        /// </summary>
-        /// <typeparam name="T">The type the contents deserialize to.</typeparam>
-        /// <param name="filePath">The full path of the file to read.</param>
-        /// <param name="value">The deserialized contents, which are <c>null</c> when the file held the JSON literal <c>null</c>.</param>
-        /// <returns><c>true</c> if the file was read and deserialized; otherwise, <c>false</c>.</returns>
-        private bool TryRead<T>(string filePath, out T? value)
+        // Replace needs an existing target; the very first save has none and simply renames.
+        private void SwapIn(string staging, string primary)
         {
-            value = default;
+            if (fileSystem.FileExists(primary))
+                fileSystem.Replace(staging, primary, BackupOf(primary));
+            else
+                fileSystem.Move(staging, primary);
+        }
 
-            if (!_fileSystem.FileExists(filePath))
-            {
+        // A file holding the JSON literal null counts as read (result null), so it does not
+        // trigger the backup fallback.
+        private bool TryLoad<T>(string path, out T? result)
+        {
+            result = default;
+            if (!fileSystem.FileExists(path))
                 return false;
-            }
 
             try
             {
-                value = JsonSerializer.Deserialize<T>(_fileSystem.ReadAllText(filePath));
+                result = JsonSerializer.Deserialize<T>(fileSystem.ReadAllText(path));
                 return true;
             }
-            catch (Exception ex)
+            catch (Exception failure)
             {
-                Log.Error(ex, "Failed to read {FilePath}.", filePath);
+                Log.Error(failure, "Could not load {Path}.", path);
                 return false;
             }
         }
 
-        #endregion Private Methods
+        private string PathOf(string fileName) => Path.Combine(_folder, fileName);
+
+        private static string BackupOf(string path) => path + ".bak";
     }
 }

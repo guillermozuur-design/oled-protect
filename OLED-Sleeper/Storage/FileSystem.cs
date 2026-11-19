@@ -4,38 +4,36 @@ using System.IO;
 
 namespace OLED_Sleeper.Storage
 {
-    /// <summary>
-    /// Forwards every call to <see cref="File"/>, <see cref="Directory"/> and <see cref="Environment"/>.
-    /// </summary>
+    // Production IFileSystem: straight pass-through to the BCL, nothing worth unit testing.
     [ExcludeFromCodeCoverage]
-    public class FileSystem : IFileSystem
+    public sealed class FileSystem : IFileSystem
     {
-        /// <inheritdoc />
-        public string GetApplicationDataPath() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        public string GetApplicationDataPath() =>
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
-        /// <inheritdoc />
-        public string GetApplicationDirectoryPath() => AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        public string GetApplicationDirectoryPath() =>
+            Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
 
-        /// <inheritdoc />
-        public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+        public void CreateDirectory(string path) =>
+            _ = Directory.CreateDirectory(path);
 
-        /// <inheritdoc />
-        public bool FileExists(string path) => File.Exists(path);
+        public bool FileExists(string path) =>
+            File.Exists(path);
 
-        /// <inheritdoc />
-        public string ReadAllText(string path) => File.ReadAllText(path);
+        public string ReadAllText(string path) =>
+            File.ReadAllText(path);
 
-        /// <inheritdoc />
-        public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents);
+        public void WriteAllText(string path, string contents) =>
+            File.WriteAllText(path, contents);
 
-        /// <inheritdoc />
-        public void Replace(string sourcePath, string destinationPath, string backupPath)
-            => File.Replace(sourcePath, destinationPath, backupPath, ignoreMetadataErrors: true);
+        // Metadata errors (e.g. ACLs on some network shares) should not block saving the data itself.
+        public void Replace(string sourcePath, string destinationPath, string backupPath) =>
+            File.Replace(sourcePath, destinationPath, backupPath, true);
 
-        /// <inheritdoc />
-        public void Move(string sourcePath, string destinationPath) => File.Move(sourcePath, destinationPath);
+        public void Move(string sourcePath, string destinationPath) =>
+            File.Move(sourcePath, destinationPath, overwrite: false);
 
-        /// <inheritdoc />
-        public void DeleteFile(string path) => File.Delete(path);
+        public void DeleteFile(string path) =>
+            File.Delete(path);
     }
 }

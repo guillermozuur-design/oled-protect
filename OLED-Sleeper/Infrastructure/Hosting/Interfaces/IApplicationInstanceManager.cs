@@ -1,25 +1,15 @@
 namespace OLED_Sleeper.Infrastructure.Hosting.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for managing single-instance enforcement and inter-process signaling.
-    /// </summary>
+    // Makes sure only one copy of the app runs; a second launch brings the first one's window forward.
     public interface IApplicationInstanceManager : IDisposable
     {
-        /// <summary>
-        /// Indicates whether this is the first instance of the application.
-        /// </summary>
+        // Meaningful only after Initialize.
         bool IsFirstInstance { get; }
 
-        /// <summary>
-        /// Initializes the single-instance check and event signaling.
-        /// </summary>
+        // Claims the single-instance lock, or (when another copy holds it) pokes that copy and exits.
         void Initialize();
 
-        /// <summary>
-        /// Sets the delegate to show the main window when signaled by a second instance.
-        /// Should be called after DI and services are initialized.
-        /// </summary>
-        /// <param name="showMainWindowAction">Action to show the main window.</param>
+        // What to run when another launch pokes us. Supplied later because the window only exists once DI is up.
         void SetShowMainWindowAction(Action showMainWindowAction);
     }
 }

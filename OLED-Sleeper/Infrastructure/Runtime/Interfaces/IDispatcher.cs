@@ -1,35 +1,18 @@
 namespace OLED_Sleeper.Infrastructure.Runtime.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for running an action on the UI thread from any thread.
-    /// </summary>
+    // Abstraction over the WPF dispatcher so services can hop to the UI thread and still be unit tested.
     public interface IDispatcher
     {
-        /// <summary>
-        /// Gets true when the caller is already on the UI thread, false when it is on any other thread.
-        /// </summary>
         bool IsOnUiThread { get; }
 
-        /// <summary>
-        /// Runs the action on the UI thread and waits for it to finish.
-        /// Runs it directly when the caller is already on the UI thread.
-        /// </summary>
-        /// <param name="action">The action to run.</param>
+        // Blocking; executes inline when already on the UI thread.
         void Invoke(Action action);
 
-        /// <summary>
-        /// Hands the action to the UI thread and returns without waiting for it to run.
-        /// </summary>
-        /// <param name="action">The action to run.</param>
-        /// <returns>A task that completes once the action has finished.</returns>
+        // Queues the work; the task completes when it has run.
         Task InvokeAsync(Action action);
 
-        /// <summary>
-        /// Hands the action to the UI thread to run after the input already queued there has been
-        /// processed. A modal dialog opened this way cannot be answered by the click that asked for it.
-        /// </summary>
-        /// <param name="action">The action to run.</param>
-        /// <returns>A task that completes once the action has finished.</returns>
+        // Queues at a priority below input, so pending clicks/keys are handled first. Used before showing a
+        // modal prompt, so the very click that triggered it cannot also dismiss it.
         Task InvokeAfterInputAsync(Action action);
     }
 }

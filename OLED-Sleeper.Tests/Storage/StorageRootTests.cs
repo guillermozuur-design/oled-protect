@@ -5,26 +5,30 @@ namespace OLED_Sleeper.Tests.Storage
 {
     public class StorageRootTests
     {
-        private readonly FakeFileSystem _fileSystem = new();
-
-        [Fact]
-        public void DirectoryPath_WhenNotPortable_IsTheApplicationDataFolder()
+        [Theory]
+        [InlineData(false, @"C:\FakeAppData\OLED-Space-Sleeper")]
+        [InlineData(true, @"C:\FakeApp\Data")]
+        public void Folder_depends_on_distribution(bool portable, string expected)
         {
-            // Act
-            var root = new StorageRoot(_fileSystem, isPortable: false);
+            var root = new StorageRoot(new FakeFileSystem(), portable);
 
-            // Assert
-            Assert.Equal(@"C:\FakeAppData\OLED-Space-Sleeper", root.DirectoryPath);
+            Assert.Equal(expected, root.DirectoryPath);
         }
 
         [Fact]
-        public void DirectoryPath_WhenPortable_IsTheDataFolderBesideTheExecutable()
+        public void Installed_build_follows_the_reported_appdata_folder()
         {
-            // Act
-            var root = new StorageRoot(_fileSystem, isPortable: true);
+            var disk = new FakeFileSystem { AppDataRoot = @"D:\Roaming" };
 
-            // Assert
-            Assert.Equal(@"C:\FakeApp\Data", root.DirectoryPath);
+            Assert.Equal(@"D:\Roaming\OLED-Space-Sleeper", new StorageRoot(disk, false).DirectoryPath);
+        }
+
+        [Fact]
+        public void Portable_build_follows_the_exe_folder()
+        {
+            var disk = new FakeFileSystem { ExeFolder = @"E:\Tools\Sleeper" };
+
+            Assert.Equal(@"E:\Tools\Sleeper\Data", new StorageRoot(disk, true).DirectoryPath);
         }
     }
 }

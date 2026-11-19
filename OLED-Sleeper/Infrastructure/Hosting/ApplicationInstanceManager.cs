@@ -3,151 +3,98 @@ using OLED_Sleeper.Infrastructure.Runtime.Interfaces;
 
 namespace OLED_Sleeper.Infrastructure.Hosting
 {
-    /// <summary>
-    /// Enforces a single running instance of the application.
-    /// If a second instance is launched, it signals the first instance to show its main window and exits silently.
-    /// </summary>
-    public class ApplicationInstanceManager(IDispatcher dispatcher, IApplicationShutdown applicationShutdown)
-        : IApplicationInstanceManager
+    // Single-instance guard built from two named kernel objects: a mutex that marks "a copy is running"
+    // and an auto-reset event that a later launch sets to ask the running copy to show itself.
+    public sealed class ApplicationInstanceManager(IDispatcher dispatcher, IApplicationShutdown exit) : IApplicationInstanceManager
     {
-        #region Constants
+        // Kernel object names shared between processes; left unchanged for now (rename planned separately).
+        private const string LockName = "OLED-Sleeper-Mutex";
+        private const string WakeEventName = "OLED-Sleeper-ShowWindow";
 
-        private const string MutexName = "OLED-Sleeper-Mutex";
-        private const string EventName = "OLED-Sleeper-ShowWindow";
+        private Mutex? _lock;
+        private bool _holdsLock;
+        private EventWaitHandle? _wakeEvent;
+        private RegisteredWaitHandle? _wakeSubscription;
+        private Action? _onWake;
 
-        #endregion Constants
+        public bool IsFirstInstance => _holdsLock;
 
-        #region Fields
-
-        private Mutex? _mutex;
-        private EventWaitHandle? _showWindowEvent;
-        private Action? _showMainWindowAction;
-
-        #endregion Fields
-
-        #region Properties
-
-        /// <summary>
-        /// Indicates whether this is the first instance of the application.
-        /// </summary>
-        public bool IsFirstInstance { get; private set; }
-
-        #endregion Properties
-
-        #region Public Methods
-
-        /// <summary>
-        /// Initializes the single-instance check.
-        /// If another instance is running, signals it to show its main window and exits the current process.
-        /// </summary>
         public void Initialize()
         {
-            _mutex = new Mutex(true, MutexName, out bool isNewInstance);
-            IsFirstInstance = isNewInstance;
+            _lock = new Mutex(initiallyOwned: true, LockName, out _holdsLock);
 
-            if (!IsFirstInstance)
-            {
-                SignalFirstInstanceAndExit();
-                return;
-            }
-
-            CreateEventAndListen();
+            if (_holdsLock)
+                ListenForOtherLaunches();
+            else
+                HandOverToRunningCopy();
         }
 
-        /// <inheritdoc />
         public void SetShowMainWindowAction(Action showMainWindowAction)
         {
-            _showMainWindowAction = showMainWindowAction ?? throw new ArgumentNullException(nameof(showMainWindowAction));
+            ArgumentNullException.ThrowIfNull(showMainWindowAction);
+            Volatile.Write(ref _onWake, showMainWindowAction);
         }
 
-        #endregion Public Methods
-
-        #region Private Methods
-
-        /// <summary>
-        /// Signals the first instance to show its main window and exits the current process.
-        /// </summary>
-        private void SignalFirstInstanceAndExit()
+        // The pool thread waits on the event, so no thread of our own is kept alive for this.
+        private void ListenForOtherLaunches()
         {
+            _wakeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, WakeEventName);
+            _wakeSubscription = ThreadPool.RegisterWaitForSingleObject(
+                _wakeEvent, (_, _) => OnWakeRequested(), null, Timeout.Infinite, executeOnlyOnce: false);
+        }
+
+        private void OnWakeRequested()
+        {
+            var show = Volatile.Read(ref _onWake);
+            if (show is null)
+                return; // Poked before the window existed; nothing to bring forward yet.
+
             try
             {
-                _showWindowEvent = EventWaitHandle.OpenExisting(EventName);
-                _showWindowEvent.Set();
+                dispatcher.Invoke(show);
             }
-            catch
+            catch (Exception)
             {
-                // If first instance hasn't created the event yet, just exit silently
+                // The dispatcher is gone while shutting down. A throw here would kill the process from a pool thread.
             }
-            applicationShutdown.Shutdown();
         }
 
-        /// <summary>
-        /// Creates the event wait handle and starts listening for signals from secondary instances.
-        /// </summary>
-        private void CreateEventAndListen()
+        private void HandOverToRunningCopy()
         {
-            _showWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, EventName);
-            Task.Run(ListenForShowWindowSignal);
+            // The running copy may still be starting and not have created its event yet; then we just leave.
+            if (EventWaitHandle.TryOpenExisting(WakeEventName, out var wake))
+            {
+                using (wake)
+                    wake.Set();
+            }
+
+            exit.Shutdown();
         }
 
-        /// <summary>
-        /// Listens for signals from secondary instances to show the main window.
-        /// </summary>
-        private void ListenForShowWindowSignal()
+        public void Dispose()
         {
-            if (_showWindowEvent == null) return;
+            _wakeSubscription?.Unregister(null);
+            _wakeSubscription = null;
+            _wakeEvent?.Dispose();
+            _wakeEvent = null;
 
-            while (true)
+            if (_lock is null)
+                return;
+
+            if (_holdsLock)
             {
                 try
                 {
-                    _showWindowEvent.WaitOne();
-                    if (_showMainWindowAction != null)
-                    {
-                        dispatcher.Invoke(_showMainWindowAction);
-                    }
+                    _lock.ReleaseMutex();
                 }
-                catch
+                catch (ApplicationException)
                 {
-                    // Ignore exceptions, typically happens during shutdown
-                    break;
+                    // Disposed from a thread that does not own the mutex; Windows frees it at process exit anyway.
                 }
             }
+
+            _lock.Dispose();
+            _lock = null;
         }
-
-        #endregion Private Methods
-
-        #region IDisposable Implementation
-
-        /// <summary>
-        /// Releases resources and mutex when the application exits.
-        /// </summary>
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _showWindowEvent?.Dispose();
-                if (_mutex != null)
-                {
-                    try
-                    {
-                        _mutex.ReleaseMutex();
-                    }
-                    catch
-                    {
-                        // Ignore if already released
-                    }
-                    _mutex.Dispose();
-                }
-            }
-        }
-
-        #endregion IDisposable Implementation
     }
 }
