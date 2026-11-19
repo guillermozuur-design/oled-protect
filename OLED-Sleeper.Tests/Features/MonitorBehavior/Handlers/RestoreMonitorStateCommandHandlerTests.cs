@@ -9,65 +9,49 @@ namespace OLED_Sleeper.Tests.Features.MonitorBehavior.Handlers
 {
     public class RestoreMonitorStateCommandHandlerTests
     {
-        private const string HardwareId = "MON-123";
+        private const string Id = "SCREEN-7";
 
-        private readonly Mock<IMediator> _mediatorMock;
-        private readonly RestoreMonitorStateCommandHandler _handler;
+        private readonly Mock<IMediator> _mediator = new();
 
-        public RestoreMonitorStateCommandHandlerTests()
+        private Task Restore() =>
+            new RestoreMonitorStateCommandHandler(_mediator.Object).HandleAsync(new RestoreMonitorStateCommand { HardwareId = Id });
+
+        [Fact]
+        public async Task RemovesTheOverlayAndUndimsThatScreenOnly()
         {
-            _mediatorMock = new Mock<IMediator>();
-            _handler = new RestoreMonitorStateCommandHandler(_mediatorMock.Object);
+            await Restore();
+
+            _mediator.Verify(m => m.SendAsync(It.Is<HideBlackoutOverlayCommand>(c => c.HardwareId == Id)), Times.Once);
+            _mediator.Verify(m => m.SendAsync(It.Is<ApplyUndimCommand>(c => c.HardwareId == Id)), Times.Once);
+            _mediator.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_SendsHideOverlayAndUndimForTheMonitor()
+        public async Task OverlayFailure_DoesNotStopTheUndim()
         {
-            // Arrange
-            var command = new RestoreMonitorStateCommand { HardwareId = HardwareId };
+            _mediator.Setup(m => m.SendAsync(It.IsAny<HideBlackoutOverlayCommand>())).ThrowsAsync(new InvalidOperationException("stuck"));
 
-            // Act
-            await _handler.HandleAsync(command);
+            var error = await Record.ExceptionAsync(Restore);
 
-            // Assert
-            _mediatorMock.Verify(m => m.SendAsync(It.Is<HideBlackoutOverlayCommand>(c => c.HardwareId == HardwareId)), Times.Once);
-            _mediatorMock.Verify(m => m.SendAsync(It.Is<ApplyUndimCommand>(c => c.HardwareId == HardwareId)), Times.Once);
-            _mediatorMock.VerifyNoOtherCalls();
+            Assert.Null(error);
+            _mediator.Verify(m => m.SendAsync(It.Is<ApplyUndimCommand>(c => c.HardwareId == Id)), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenHideOverlayFails_StillSendsUndim()
+        public async Task UndimFailure_DoesNotEscape()
         {
-            // Arrange
-            var command = new RestoreMonitorStateCommand { HardwareId = HardwareId };
+            _mediator.Setup(m => m.SendAsync(It.IsAny<ApplyUndimCommand>())).ThrowsAsync(new InvalidOperationException("ddc timeout"));
 
-            _mediatorMock
-                .Setup(m => m.SendAsync(It.IsAny<HideBlackoutOverlayCommand>()))
-                .ThrowsAsync(new InvalidOperationException("Overlay teardown failed."));
+            var error = await Record.ExceptionAsync(Restore);
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _mediatorMock.Verify(m => m.SendAsync(It.Is<ApplyUndimCommand>(c => c.HardwareId == HardwareId)), Times.Once);
+            Assert.Null(error);
+            _mediator.Verify(m => m.SendAsync(It.Is<HideBlackoutOverlayCommand>(c => c.HardwareId == Id)), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenUndimFails_DoesNotThrow()
+        public void ACommandWithoutAScreen_IsRejected()
         {
-            // Arrange
-            var command = new RestoreMonitorStateCommand { HardwareId = HardwareId };
-
-            _mediatorMock
-                .Setup(m => m.SendAsync(It.IsAny<ApplyUndimCommand>()))
-                .ThrowsAsync(new InvalidOperationException("Brightness restore failed."));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
+            Assert.Throws<ArgumentNullException>(() => new RestoreMonitorStateCommand { HardwareId = null! });
         }
     }
 }

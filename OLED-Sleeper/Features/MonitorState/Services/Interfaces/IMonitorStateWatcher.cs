@@ -1,18 +1,13 @@
 namespace OLED_Sleeper.Features.MonitorState.Services.Interfaces
 {
-    /// <summary>
-    /// Defines a service that monitors the set of connected displays and dispatches synchronization commands when changes are detected.
-    /// </summary>
+    // Watches for screens being plugged in, unplugged or rearranged and sends a
+    // SynchronizeMonitorStateCommand when that happens.
     public interface IMonitorStateWatcher : IDisposable
     {
-        /// <summary>
-        /// Starts monitoring for monitor state changes. The initial monitor list is retrieved and the timer is started.
-        /// </summary>
+        // Reads the current screens, syncs once, then keeps watching. A second call while running is a no-op.
         void Start();
 
-        /// <summary>
-        /// Stops monitoring for monitor state changes. No synchronization is dispatched after this returns.
-        /// </summary>
+        // After this returns no further synchronisation is sent; a check already running finishes quietly.
         void Stop();
     }
 }

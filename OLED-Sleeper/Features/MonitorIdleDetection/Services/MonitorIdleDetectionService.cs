@@ -5,547 +5,341 @@ using OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Messaging.Interfaces;
-using OLED_Sleeper.Native;
 using Serilog;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows;
 
 namespace OLED_Sleeper.Features.MonitorIdleDetection.Services
 {
-    /// <summary>
-    /// Monitors user activity and determines when managed monitors become idle or active.
-    /// Handles per-monitor state machines and dispatches commands to apply idle/active behaviors.
-    /// </summary>
+    // Five times a second, looks at the desktop and moves every managed screen through
+    // Awake -> Quiet (timer running) -> Asleep, sending the idle / active behaviour commands on the edges.
     public class MonitorIdleDetectionService : IMonitorIdleDetectionService
     {
-        /// <summary>
-        /// Window classes that make up the shell desktop. The desktop spans the whole virtual screen, so
-        /// it never counts as active-window activity for any monitor.
-        /// </summary>
-        private static readonly HashSet<string> DesktopWindowClasses = new(StringComparer.Ordinal)
-        {
-            "Progman",
-            "WorkerW"
-        };
+        private static readonly TimeSpan CheckInterval = TimeSpan.FromMilliseconds(200);
 
-        /// <summary>
-        /// Buffer size, in characters, for a window class name.
-        /// </summary>
-        private const int ClassNameBufferLength = 256;
+        // Scanning every top-level window five times a second would be wasteful; apps do not open or
+        // move that fast.
+        private static readonly TimeSpan AppScanInterval = TimeSpan.FromSeconds(1);
 
-        // === Dependencies & State ===
-        private readonly IMediator _mediator;
-
-        private CancellationTokenSource? _cancellationTokenSource;
-        private List<ManagedMonitorState> _managedMonitors = new();
-        private readonly object _lock = new();
-        private readonly Dictionary<string, MonitorTimerState> _monitorStates = new();
-        private bool _isPaused;
-
-        // === Construction ===
-
+        private readonly IMediator _commands;
         private readonly GlobalIdleSettings _globalIdle;
         private readonly KeepAwakeAppsSettings? _keepAwakeApps;
 
-        // Snapshot of the chosen apps' windows, refreshed about once a second (scanning windows every 200 ms
-        // would be wasteful; apps do not open or move that fast).
-        private DateTime _appsScannedAt = DateTime.MinValue;
-        private bool _appKeepsAllAwake;
-        private IReadOnlyList<Rect> _appAreas = Array.Empty<Rect>();
+        // Guards _screens and _paused: the check loop, settings updates and work mode all touch them.
+        private readonly object _gate = new();
+        private List<TrackedScreen> _screens = [];
+        private bool _paused;
+
+        private CancellationTokenSource? _loopCancel;
+
+        // Last result of the keep-awake app scan; only the loop thread reads or writes these.
+        private DateTime _nextAppScan = DateTime.MinValue;
+        private bool _appKeepsEveryScreenAwake;
+        private IReadOnlyList<Rect> _appScreenAreas = [];
 
         public MonitorIdleDetectionService(IMediator mediator, GlobalIdleSettings? globalIdle = null,
                                            KeepAwakeAppsSettings? keepAwakeApps = null)
         {
-            _mediator = mediator;
+            _commands = mediator;
             _globalIdle = globalIdle ?? new GlobalIdleSettings();
             _keepAwakeApps = keepAwakeApps;
         }
 
-        private void RefreshAppWindows()
+        private enum Phase
         {
-            if (_keepAwakeApps == null || (DateTime.UtcNow - _appsScannedAt).TotalMilliseconds < 1000) return;
-            _appsScannedAt = DateTime.UtcNow;
-
-            var rules = _keepAwakeApps.ActiveRules;
-            if (rules.Count == 0)
-            {
-                _appKeepsAllAwake = false;
-                _appAreas = Array.Empty<Rect>();
-                return;
-            }
-
-            var (all, areas) = KeepAwakeEvaluator.Evaluate(AppWindowScanner.Scan(), rules);
-            _appKeepsAllAwake = all;
-            _appAreas = areas;
+            Awake,
+            Quiet,
+            Asleep
         }
 
-        // === Service Lifecycle ===
+        // A managed screen joined with its geometry, plus where it is in the Awake/Quiet/Asleep cycle.
+        private sealed class TrackedScreen(MonitorSettings settings, MonitorInfo monitor)
+        {
+            public MonitorSettings Settings { get; } = settings;
+            public Rect Bounds { get; } = monitor.Bounds;
+            public int DisplayNumber { get; } = monitor.DisplayNumber;
+            public string Id => Settings.HardwareId;
 
-        /// <summary>
-        /// Starts the idle detection service and begins monitoring. Any previous loop is stopped first.
-        /// </summary>
+            public Phase Phase { get; set; } = Phase.Awake;
+
+            // When the screen last stopped being in use; the idle timer counts from here.
+            public DateTime QuietSince { get; set; }
+        }
+
         public void Start()
         {
             Stop();
 
-            var cancellationTokenSource = new CancellationTokenSource();
-            _cancellationTokenSource = cancellationTokenSource;
-            Task.Run(() => IdleCheckLoop(cancellationTokenSource.Token));
-            Log.Information("MonitorIdleDetectionService started.");
+            var cancel = new CancellationTokenSource();
+            _loopCancel = cancel;
+            _ = Task.Run(() => RunLoopAsync(cancel.Token));
+            Log.Information("Idle detection running.");
         }
 
-        /// <summary>
-        /// Stops the idle detection service and monitoring. A second call does nothing.
-        /// </summary>
         public void Stop()
         {
-            var cancellationTokenSource = Interlocked.Exchange(ref _cancellationTokenSource, null);
-            if (cancellationTokenSource == null) return;
+            CancellationTokenSource? cancel = Interlocked.Exchange(ref _loopCancel, null);
+            if (cancel is null)
+            {
+                return;
+            }
 
-            cancellationTokenSource.Cancel();
-            cancellationTokenSource.Dispose();
-            Log.Information("MonitorIdleDetectionService stopped.");
+            cancel.Cancel();
+            cancel.Dispose();
+            Log.Information("Idle detection stopped.");
         }
 
-        /// <inheritdoc />
         public void SetPaused(bool paused)
         {
-            lock (_lock)
+            lock (_gate)
             {
-                if (_isPaused == paused) return;
-                _isPaused = paused;
-
-                foreach (var monitor in _managedMonitors)
+                if (_paused == paused)
                 {
-                    var state = _monitorStates[monitor.Settings.HardwareId];
-                    // Waking is idempotent (hiding a missing overlay or undimming an undimmed monitor does
-                    // nothing), so every managed monitor is restored, not only the ones we think are idle.
+                    return;
+                }
+
+                _paused = paused;
+                foreach (TrackedScreen screen in _screens)
+                {
+                    // Restoring is harmless for a screen that is not asleep, so wake all of them rather
+                    // than trusting our own idea of which ones are.
                     if (paused)
                     {
-                        _mediator.SendAsync(new RestoreMonitorStateCommand { HardwareId = monitor.Settings.HardwareId });
+                        _commands.SendAsync(new RestoreMonitorStateCommand { HardwareId = screen.Id });
                     }
-                    state.CurrentState = MonitorStateMachine.Active;
+
+                    screen.Phase = Phase.Awake;
                 }
             }
 
-            Log.Information("Idle detection {State}.", paused ? "paused (work mode)" : "resumed");
+            Log.Information(paused ? "Idle detection paused (work mode)." : "Idle detection resumed.");
         }
 
-        /// <summary>
-        /// Updates the settings for all managed monitors.
-        /// </summary>
-        /// <param name="monitorSettings">The list of monitor settings to manage.</param>
-        /// <param name="monitors">The monitors to join the settings against, supplying bounds and display numbers.</param>
-        /// <remarks>
-        /// Callers supply the monitor list; this class never reads the shared cache and does not depend on
-        /// the monitor manager, so no lock that manager owns can be taken while <see cref="_lock"/> is held.
-        /// </remarks>
+        // The caller hands in the screen list it already holds. Not reading the shared monitor cache here
+        // means we never take that cache's lock while holding ours.
         public Task UpdateSettingsAsync(List<MonitorSettings> monitorSettings, IReadOnlyList<MonitorInfo> monitors)
         {
-            var activeSettings = monitorSettings.Where(s => s.IsManaged).ToList();
-
-            int trackedCount;
-            lock (_lock)
+            var tracked = new List<TrackedScreen>();
+            foreach (MonitorSettings setting in monitorSettings.Where(s => s.IsManaged))
             {
-                _managedMonitors = (from setting in activeSettings
-                                    join monitorInfo in monitors on setting.HardwareId equals monitorInfo.HardwareId
-                                    select new ManagedMonitorState
-                                    {
-                                        Settings = setting,
-                                        Bounds = monitorInfo.Bounds,
-                                        DisplayNumber = monitorInfo.DisplayNumber
-                                    }).ToList();
-
-                _monitorStates.Clear();
-                foreach (var monitor in _managedMonitors)
-                {
-                    _monitorStates[monitor.Settings.HardwareId] = new MonitorTimerState();
-                }
-
-                trackedCount = _managedMonitors.Count;
+                tracked.AddRange(monitors.Where(m => m.HardwareId == setting.HardwareId)
+                                         .Select(m => new TrackedScreen(setting, m)));
             }
 
-            Log.Information("MonitorIdleDetectionService settings updated. Now tracking {Count} monitors.", trackedCount);
+            lock (_gate)
+            {
+                _screens = tracked;
+            }
+
+            Log.Information("Idle detection now tracks {Count} screen(s).", tracked.Count);
             return Task.CompletedTask;
         }
 
-        // === Idle Detection Loop ===
+        // ---- the "still" limit, shared with the settings UI tests ----
 
-        /// <summary>
-        /// Main background loop that periodically checks monitor states.
-        /// </summary>
-        /// <param name="token">Cancellation token.</param>
-        private async Task IdleCheckLoop(CancellationToken token)
+        // Whether the pointer resting on a screen keeps it awake. With the "still" limit on, a pointer
+        // that has not moved (and no key pressed) for longer than the limit no longer counts.
+        public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor, uint systemIdleMilliseconds) =>
+            settings.IsActiveOnMousePosition && cursorOnMonitor && WithinStillLimit(settings, systemIdleMilliseconds);
+
+        // The "still" limit used by both the pointer and the focused-window condition: when switched on,
+        // those only count while there was input within the last MouseStillMinutes (at least one).
+        public static bool WithinStillLimit(MonitorSettings settings, uint systemIdleMilliseconds)
         {
-            while (!token.IsCancellationRequested)
+            if (!settings.UseMouseStillLimit)
+            {
+                return true;
+            }
+
+            long limitMs = Math.Max(1, settings.MouseStillMinutes) * 60_000L;
+            return systemIdleMilliseconds < limitMs;
+        }
+
+        // ---- loop ----
+
+        private async Task RunLoopAsync(CancellationToken stop)
+        {
+            while (!stop.IsCancellationRequested)
             {
                 try
                 {
-                    ProcessMonitors();
+                    CheckOnce();
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex, "Error occurred in the idle check loop.");
+                    Log.Error(ex, "Idle check failed; trying again on the next round.");
                 }
-                await Task.Delay(200, token);
-            }
-        }
 
-        /// <summary>
-        /// Gathers system state and processes each managed monitor according to the state machine logic.
-        /// </summary>
-        private void ProcessMonitors()
-        {
-            var systemState = GetSystemState();
-            RefreshAppWindows();
-
-            lock (_lock)
-            {
-                if (_isPaused) return;
-
-                foreach (var monitor in _managedMonitors)
+                try
                 {
-                    ProcessSingleMonitor(monitor, systemState);
+                    await Task.Delay(CheckInterval, stop);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
             }
         }
 
-        /// <summary>
-        /// Processes a single managed monitor according to the state machine logic.
-        /// </summary>
-        /// <param name="monitor">The managed monitor.</param>
-        /// <param name="systemState">Current system state.</param>
-        private void ProcessSingleMonitor(ManagedMonitorState monitor, SystemState systemState)
+        private void CheckOnce()
         {
-            var timerState = _monitorStates[monitor.Settings.HardwareId];
+            DesktopSnapshot desktop = DesktopProbe.Take();
+            RescanKeepAwakeAppsIfDue();
+            DateTime now = DateTime.UtcNow;
 
-            // General timer: after X minutes without any input, nothing keeps any monitor awake and it goes
-            // idle right away (not X minutes plus its own idle timer).
-            // While a video plays (a program asks Windows to keep the display on), the limits step aside: the
-            // monitor with the video in the active window stays awake; the other monitors follow their own timers.
-            bool globalExpired = !systemState.DisplayRequired && _globalIdle.HasExpired(systemState.IdleTimeMilliseconds);
-
-            // A chosen app ("apps die het scherm aan houden") beats every timer, like a playing video.
-            bool appKeepsAwake = _appKeepsAllAwake || KeepAwakeEvaluator.KeepsScreenAwake(monitor.Bounds, _appAreas);
-            if (appKeepsAwake) globalExpired = false;
-
-            var activityReason = appKeepsAwake ? ActivityReason.KeepAwakeApp
-                : globalExpired ? ActivityReason.None
-                : GetActivityReason(monitor, systemState);
-            bool hasActivityNow = activityReason != ActivityReason.None;
-
-            // When a limit is what stopped the activity, the quiet period really began at the last input.
-            bool limitCut = !appKeepsAwake && (globalExpired ||
-                            (!systemState.DisplayRequired && !WithinStillLimit(monitor.Settings, systemState.IdleTimeMilliseconds)));
-            var quietSince = limitCut
-                ? DateTime.UtcNow - TimeSpan.FromMilliseconds(systemState.IdleTimeMilliseconds)
-                : DateTime.UtcNow;
-
-            var eventArgs = new MonitorIdleStateEventArgs(
-                monitor.Settings.HardwareId, monitor.DisplayNumber, monitor.Bounds,
-                monitor.Settings, systemState.ForegroundWindowHandle, activityReason);
-
-            switch (timerState.CurrentState)
+            lock (_gate)
             {
-                case MonitorStateMachine.Active:
-                    HandleActiveState(timerState, hasActivityNow, quietSince);
-                    if (timerState.CurrentState == MonitorStateMachine.Counting)
-                        HandleCountingState(timerState, monitor, hasActivityNow, eventArgs, globalExpired);
+                if (_paused)
+                {
+                    return;
+                }
+
+                foreach (TrackedScreen screen in _screens)
+                {
+                    Step(screen, desktop, now);
+                }
+            }
+        }
+
+        private void RescanKeepAwakeAppsIfDue()
+        {
+            if (_keepAwakeApps is null || DateTime.UtcNow < _nextAppScan)
+            {
+                return;
+            }
+
+            _nextAppScan = DateTime.UtcNow + AppScanInterval;
+
+            var rules = _keepAwakeApps.ActiveRules;
+            if (rules.Count == 0)
+            {
+                _appKeepsEveryScreenAwake = false;
+                _appScreenAreas = [];
+                return;
+            }
+
+            (_appKeepsEveryScreenAwake, _appScreenAreas) = KeepAwakeEvaluator.Evaluate(AppWindowScanner.Scan(), rules);
+        }
+
+        // One tick of one screen's state machine.
+        private void Step(TrackedScreen screen, DesktopSnapshot desktop, DateTime now)
+        {
+            Verdict verdict = Judge(screen, desktop);
+            bool inUse = verdict.Reason != ActivityReason.None;
+
+            // When a limit (not the user) ended the activity, the quiet period really began at the
+            // last input, which can lie well in the past.
+            DateTime quietSince = verdict.CutByLimit
+                ? now - TimeSpan.FromMilliseconds(desktop.MillisecondsSinceInput)
+                : now;
+
+            switch (screen.Phase)
+            {
+                case Phase.Awake when !inUse:
+                    screen.Phase = Phase.Quiet;
+                    screen.QuietSince = quietSince;
+                    SleepIfDue(screen, desktop, verdict, now);
                     break;
 
-                case MonitorStateMachine.Counting:
-                    if (limitCut && quietSince < timerState.ActivityStoppedTimestamp) timerState.ActivityStoppedTimestamp = quietSince;
-                    HandleCountingState(timerState, monitor, hasActivityNow, eventArgs, globalExpired);
+                case Phase.Quiet when inUse:
+                    screen.Phase = Phase.Awake;
                     break;
 
-                case MonitorStateMachine.Idle:
-                    HandleIdleState(timerState, monitor, hasActivityNow, eventArgs);
+                case Phase.Quiet:
+                    if (verdict.CutByLimit && quietSince < screen.QuietSince)
+                    {
+                        screen.QuietSince = quietSince;
+                    }
+
+                    SleepIfDue(screen, desktop, verdict, now);
+                    break;
+
+                case Phase.Asleep when inUse:
+                    TryWake(screen, desktop, verdict);
                     break;
             }
         }
 
-        // === State Machine Handlers ===
-
-        /// <summary>
-        /// Handles the Active state for a monitor. Transitions to Counting if no activity is detected.
-        /// </summary>
-        /// <param name="timerState">The timer state for the monitor.</param>
-        /// <param name="hasActivityNow">Whether activity is currently detected.</param>
-        private void HandleActiveState(MonitorTimerState timerState, bool hasActivityNow, DateTime quietSince)
+        private void SleepIfDue(TrackedScreen screen, DesktopSnapshot desktop, Verdict verdict, DateTime now)
         {
-            if (!hasActivityNow)
+            TimeSpan quietFor = now - screen.QuietSince;
+            if (!verdict.ForceSleep && quietFor.TotalMilliseconds < screen.Settings.IdleTimeMilliseconds)
             {
-                timerState.CurrentState = MonitorStateMachine.Counting;
-                timerState.ActivityStoppedTimestamp = quietSince;
+                return;
             }
+
+            screen.Phase = Phase.Asleep;
+            Log.Information("Screen #{DisplayNumber} goes idle after {Seconds}s without use.",
+                screen.DisplayNumber, Math.Round(quietFor.TotalSeconds));
+            _commands.SendAsync(new ApplyMonitorIdleBehaviorCommand(Describe(screen, desktop, verdict.Reason)));
         }
 
-        /// <summary>
-        /// Handles the Counting state for a monitor. If idle time is reached, transitions to Idle and dispatches idle behavior command.
-        /// </summary>
-        /// <param name="timerState">The timer state for the monitor.</param>
-        /// <param name="monitor">The managed monitor.</param>
-        /// <param name="hasActivityNow">Whether activity is currently detected.</param>
-        /// <param name="eventArgs">Monitor idle state event arguments.</param>
-        private void HandleCountingState(MonitorTimerState timerState, ManagedMonitorState monitor, bool hasActivityNow, MonitorIdleStateEventArgs eventArgs,
-                                         bool forceIdle = false)
+        private void TryWake(TrackedScreen screen, DesktopSnapshot desktop, Verdict verdict)
         {
-            if (hasActivityNow)
+            var wake = Describe(screen, desktop, verdict.Reason);
+            _commands.SendAsync(new ApplyMonitorActiveBehaviorCommand(wake));
+
+            // The handler sets IsIgnored synchronously when the "activity" was only our own overlay
+            // getting focus; then the screen stays asleep.
+            if (wake.IsIgnored)
             {
-                timerState.CurrentState = MonitorStateMachine.Active;
+                return;
             }
-            else
+
+            screen.Phase = Phase.Awake;
+            Log.Information("Screen #{DisplayNumber} is in use again ({Reason}).", screen.DisplayNumber, verdict.Reason);
+        }
+
+        private static MonitorIdleStateEventArgs Describe(TrackedScreen screen, DesktopSnapshot desktop, ActivityReason reason) =>
+            new(screen.Id, screen.DisplayNumber, screen.Bounds, screen.Settings, desktop.FocusedWindow, reason);
+
+        // ---- deciding whether a screen is in use ----
+
+        // Reason: what keeps the screen awake (None = nothing). ForceSleep: the general timer ran out,
+        // so the screen sleeps now instead of starting its own timer. CutByLimit: a limit, not the user,
+        // ended the activity.
+        private readonly record struct Verdict(ActivityReason Reason, bool ForceSleep, bool CutByLimit);
+
+        private Verdict Judge(TrackedScreen screen, DesktopSnapshot desktop)
+        {
+            // A chosen app ("apps die het scherm aan houden") beats every timer and limit, like a video.
+            if (_appKeepsEveryScreenAwake || KeepAwakeEvaluator.KeepsScreenAwake(screen.Bounds, _appScreenAreas))
             {
-                var elapsed = DateTime.UtcNow - timerState.ActivityStoppedTimestamp;
-                if (forceIdle || elapsed.TotalMilliseconds >= monitor.Settings.IdleTimeMilliseconds)
-                {
-                    timerState.CurrentState = MonitorStateMachine.Idle;
-                    Log.Information("Monitor #{DisplayNumber} has become idle after {Seconds}s of inactivity.",
-                        monitor.DisplayNumber, Math.Round(elapsed.TotalSeconds));
-                    _mediator.SendAsync(new ApplyMonitorIdleBehaviorCommand(eventArgs));
-                }
+                return new Verdict(ActivityReason.KeepAwakeApp, ForceSleep: false, CutByLimit: false);
             }
-        }
 
-        /// <summary>
-        /// Handles the Idle state for a monitor. If activity is detected, transitions to Active and dispatches active behavior command.
-        /// </summary>
-        /// <param name="timerState">The timer state for the monitor.</param>
-        /// <param name="monitor">The managed monitor.</param>
-        /// <param name="hasActivityNow">Whether activity is currently detected.</param>
-        /// <param name="eventArgs">Monitor idle state event arguments.</param>
-        private void HandleIdleState(MonitorTimerState timerState, ManagedMonitorState monitor, bool hasActivityNow, MonitorIdleStateEventArgs eventArgs)
-        {
-            if (hasActivityNow)
+            // General timer: after X minutes without any input nothing keeps any screen awake. A playing
+            // video (display required) suspends it; the screen showing the video then stays on through its
+            // focused window, the others follow their own timers.
+            if (!desktop.DisplayRequired && _globalIdle.HasExpired(desktop.MillisecondsSinceInput))
             {
-                _mediator.SendAsync(new ApplyMonitorActiveBehaviorCommand(eventArgs));
-                if (!eventArgs.IsIgnored)
-                {
-                    timerState.CurrentState = MonitorStateMachine.Active;
-                    Log.Information("Monitor #{DisplayNumber} is now ACTIVE.", monitor.DisplayNumber);
-                }
+                return new Verdict(ActivityReason.None, ForceSleep: true, CutByLimit: true);
             }
+
+            bool stillLimitHit = !desktop.DisplayRequired && !WithinStillLimit(screen.Settings, desktop.MillisecondsSinceInput);
+            return new Verdict(FindActivity(screen, desktop), ForceSleep: false, CutByLimit: stillLimitHit);
         }
 
-        // === Activity Detection Helpers ===
-
-        /// <summary>
-        /// Determines the reason for any qualifying activity on a monitor at this moment.
-        /// </summary>
-        /// <param name="monitor">The managed monitor.</param>
-        /// <param name="state">Current system state.</param>
-        /// <returns>The activity reason.</returns>
-        private static ActivityReason GetActivityReason(ManagedMonitorState monitor, SystemState state)
+        // Conditions in priority order; the first that holds names the reason.
+        private static ActivityReason FindActivity(TrackedScreen screen, DesktopSnapshot desktop)
         {
-            if (IsSystemInputActive(monitor, state))
-                return ActivityReason.SystemInput;
-            if (IsMousePositionActive(monitor, state))
-                return ActivityReason.MousePosition;
-            if (IsActiveWindowActive(monitor, state))
-                return ActivityReason.ActiveWindow;
-            return ActivityReason.None;
+            MonitorSettings s = screen.Settings;
+
+            bool typingOrMoving = s.IsActiveOnInput && desktop.MillisecondsSinceInput < s.IdleTimeMilliseconds;
+            bool pointerHere = MousePresenceCounts(s, screen.Bounds.Contains(desktop.Cursor), desktop.EffectiveQuietMilliseconds);
+            bool focusHere = s.IsActiveOnActiveWindow && Overlaps(screen.Bounds, desktop.FocusedWindowArea)
+                             && (desktop.DisplayRequired || WithinStillLimit(s, desktop.MillisecondsSinceInput));
+
+            return typingOrMoving ? ActivityReason.SystemInput
+                 : pointerHere ? ActivityReason.MousePosition
+                 : focusHere ? ActivityReason.ActiveWindow
+                 : ActivityReason.None;
         }
 
-        /// <summary>
-        /// Checks if system input should be considered activity for the monitor.
-        /// </summary>
-        private static bool IsSystemInputActive(ManagedMonitorState monitor, SystemState state)
+        // A shared edge or corner is not overlap; the window has to cover some real area of the screen.
+        private static bool Overlaps(Rect screen, Rect window)
         {
-            return monitor.Settings.IsActiveOnInput && state.IdleTimeMilliseconds < monitor.Settings.IdleTimeMilliseconds;
-        }
-
-        /// <summary>
-        /// Checks if mouse position should be considered activity for the monitor.
-        /// </summary>
-        private static bool IsMousePositionActive(ManagedMonitorState monitor, SystemState state)
-        {
-            return MousePresenceCounts(monitor.Settings, monitor.Bounds.Contains(state.CursorPosition),
-                                       state.DisplayRequired ? 0 : state.IdleTimeMilliseconds);
-        }
-
-        /// <summary>
-        /// Whether the mouse being on a monitor counts as activity. With the "still" limit switched on, a mouse
-        /// that has been parked there without any input for longer than the limit no longer keeps it awake.
-        /// </summary>
-        /// <param name="settings">The monitor's settings.</param>
-        /// <param name="cursorOnMonitor">Whether the cursor is on this monitor.</param>
-        /// <param name="systemIdleMilliseconds">Time since the last mouse movement or key press anywhere.</param>
-        public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor, uint systemIdleMilliseconds)
-        {
-            if (!settings.IsActiveOnMousePosition || !cursorOnMonitor) return false;
-            return WithinStillLimit(settings, systemIdleMilliseconds);
-        }
-
-        /// <summary>
-        /// The "still" limit, shared by the mouse and the focused-window condition: with it switched on, they
-        /// only keep a monitor awake while there was mouse movement or a key press in the last few minutes.
-        /// </summary>
-        public static bool WithinStillLimit(MonitorSettings settings, uint systemIdleMilliseconds)
-        {
-            if (!settings.UseMouseStillLimit) return true;
-            return systemIdleMilliseconds < (long)Math.Max(1, settings.MouseStillMinutes) * 60_000;
-        }
-
-        /// <summary>
-        /// Checks if the active window should be considered activity for the monitor.
-        /// </summary>
-        private static bool IsActiveWindowActive(ManagedMonitorState monitor, SystemState state)
-        {
-            if (monitor.Settings.IsActiveOnActiveWindow)
-            {
-                Rect intersection = Rect.Intersect(monitor.Bounds, state.ForegroundWindowRect);
-                if (!intersection.IsEmpty && intersection.Width > 0 && intersection.Height > 0)
-                    return state.DisplayRequired || WithinStillLimit(monitor.Settings, state.IdleTimeMilliseconds);
-            }
-            return false;
-        }
-
-        // === System State Helpers ===
-
-        /// <summary>
-        /// Gathers all required system-wide state information at once.
-        /// </summary>
-        /// <returns>System state snapshot.</returns>
-        private static SystemState GetSystemState()
-        {
-            uint idleTime = GetSystemIdleTimeMilliseconds();
-            NativeMethods.GetCursorPos(out var nativePoint);
-            Point cursorPosition = new(nativePoint.X, nativePoint.Y);
-            nint foregroundWindowHandle = NativeMethods.GetForegroundWindow();
-            Rect windowRect = IsDesktopWindow(foregroundWindowHandle)
-                ? Rect.Empty
-                : GetForegroundWindowRect(foregroundWindowHandle);
-            return new SystemState(idleTime, cursorPosition, windowRect, foregroundWindowHandle, IsDisplayRequired());
-        }
-
-        /// <summary>
-        /// Determines whether a window is the shell desktop rather than an application window.
-        /// </summary>
-        /// <param name="hwnd">The handle to test.</param>
-        /// <returns>True when the window belongs to one of the <see cref="DesktopWindowClasses"/>; false for a null handle or a class name the shell would not answer.</returns>
-        private static bool IsDesktopWindow(nint hwnd)
-        {
-            if (hwnd == nint.Zero) return false;
-
-            var className = new StringBuilder(ClassNameBufferLength);
-            if (NativeMethods.GetClassName(hwnd, className, className.Capacity) == 0) return false;
-
-            return DesktopWindowClasses.Contains(className.ToString());
-        }
-
-        /// <summary>
-        /// Gets the rectangle of the foreground window.
-        /// </summary>
-        /// <param name="foregroundWindowHandle">The handle to the foreground window.</param>
-        /// <returns>The window rectangle.</returns>
-        private static Rect GetForegroundWindowRect(nint foregroundWindowHandle)
-        {
-            if (NativeMethods.DwmGetWindowAttribute(foregroundWindowHandle, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var nativeWindowRect, Marshal.SizeOf(typeof(NativeMethods.Rect))) == 0)
-            {
-                return nativeWindowRect.ToWindowsRect();
-            }
-            else
-            {
-                NativeMethods.GetWindowRect(foregroundWindowHandle, out nativeWindowRect);
-                return nativeWindowRect.ToWindowsRect();
-            }
-        }
-
-        /// <summary>
-        /// Whether any program currently asks Windows to keep the display on (ES_DISPLAY_REQUIRED), as video
-        /// players and browsers do while playing video. Read from the combined system execution state.
-        /// </summary>
-        private static bool IsDisplayRequired()
-        {
-            const int SystemExecutionState = 16;
-            const uint ES_DISPLAY_REQUIRED = 0x00000002;
-            try
-            {
-                return CallNtPowerInformation(SystemExecutionState, nint.Zero, 0, out uint state, sizeof(uint)) == 0
-                       && (state & ES_DISPLAY_REQUIRED) != 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        [DllImport("powrprof.dll")]
-        private static extern uint CallNtPowerInformation(int informationLevel, nint inputBuffer, uint inputBufferLength,
-                                                          out uint outputBuffer, uint outputBufferLength);
-
-        /// <summary>
-        /// Gets the system-wide user idle time in milliseconds using the GetLastInputInfo API.
-        /// </summary>
-        /// <returns>Idle time in milliseconds.</returns>
-        private static uint GetSystemIdleTimeMilliseconds()
-        {
-            var lastInputInfo = new NativeMethods.LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf(typeof(NativeMethods.LASTINPUTINFO)) };
-            if (NativeMethods.GetLastInputInfo(ref lastInputInfo))
-            {
-                uint lastInputTick = lastInputInfo.dwTime;
-                uint currentTick = (uint)Environment.TickCount;
-                return currentTick - lastInputTick;
-            }
-            return 0;
-        }
-
-        // === Internal Types ===
-
-        /// <summary>
-        /// State machine for per-monitor activity.
-        /// </summary>
-        private enum MonitorStateMachine
-        {
-            Active,
-            Counting,
-            Idle
-        }
-
-        /// <summary>
-        /// Holds state and settings for a managed monitor.
-        /// </summary>
-        private class ManagedMonitorState
-        {
-            public int DisplayNumber { get; set; }
-            public required MonitorSettings Settings { get; set; }
-            public Rect Bounds { get; set; }
-        }
-
-        /// <summary>
-        /// Tracks timer and state for a monitor.
-        /// </summary>
-        private class MonitorTimerState
-        {
-            public MonitorStateMachine CurrentState { get; set; } = MonitorStateMachine.Active;
-            public DateTime ActivityStoppedTimestamp { get; set; }
-        }
-
-        /// <summary>
-        /// Snapshot of system state at a point in time.
-        /// </summary>
-        private readonly struct SystemState
-        {
-            public readonly uint IdleTimeMilliseconds;
-            public readonly Point CursorPosition;
-            public readonly Rect ForegroundWindowRect;
-            public readonly nint ForegroundWindowHandle;
-
-            /// <summary>
-            /// True while some program asks Windows to keep the display on — what video players and browsers do
-            /// while a video plays. The "still" limit and the general timer step aside then.
-            /// </summary>
-            public readonly bool DisplayRequired;
-
-            public SystemState(uint idleTime, Point cursorPosition, Rect windowRect, nint windowHandle, bool displayRequired)
-            {
-                IdleTimeMilliseconds = idleTime;
-                CursorPosition = cursorPosition;
-                ForegroundWindowRect = windowRect;
-                ForegroundWindowHandle = windowHandle;
-                DisplayRequired = displayRequired;
-            }
+            Rect common = Rect.Intersect(screen, window);
+            return !common.IsEmpty && common.Width > 0 && common.Height > 0;
         }
     }
 }

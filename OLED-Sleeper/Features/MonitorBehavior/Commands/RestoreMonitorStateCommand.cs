@@ -2,15 +2,16 @@
 
 namespace OLED_Sleeper.Features.MonitorBehavior.Commands
 {
-    /// <summary>
-    /// Represents a command to restore a monitor to its default state,
-    /// which includes hiding any blackout overlay and restoring its original brightness (undimming).
-    /// </summary>
-    public class RestoreMonitorStateCommand : ICommand
+    // Brings one screen fully back: overlay gone and brightness back where it was. Safe to send for a
+    // screen that is not asleep at all.
+    public sealed class RestoreMonitorStateCommand : ICommand
     {
-        /// <summary>
-        /// The unique hardware identifier of the target monitor.
-        /// </summary>
-        public required string HardwareId { get; init; }
+        private readonly string _hardwareId = string.Empty;
+
+        public required string HardwareId
+        {
+            get => _hardwareId;
+            init => _hardwareId = value ?? throw new ArgumentNullException(nameof(HardwareId));
+        }
     }
 }

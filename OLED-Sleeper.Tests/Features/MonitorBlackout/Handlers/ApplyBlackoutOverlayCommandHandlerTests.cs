@@ -1,6 +1,7 @@
 ﻿using Moq;
 using OLED_Sleeper.Features.MonitorBlackout.Commands;
 using OLED_Sleeper.Features.MonitorBlackout.Handlers;
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Models;
@@ -11,176 +12,101 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Handlers
 {
     public class ApplyBlackoutOverlayCommandHandlerTests
     {
-        private readonly Mock<IMonitorInfoManager> _monitorInfoManagerMock;
-        private readonly Mock<IMonitorBlackoutService> _monitorBlackoutServiceMock;
-        private readonly Mock<IMonitorDimmingService> _monitorDimmingServiceMock;
-        private readonly ApplyBlackoutOverlayCommandHandler _handler;
+        private const string Id = "SCREEN-7";
+        private static readonly Rect Area = new(-1920, 0, 1920, 1080);
 
-        public ApplyBlackoutOverlayCommandHandlerTests()
+        private readonly Mock<IMonitorInfoManager> _screens = new();
+        private readonly Mock<IMonitorBlackoutService> _overlays = new();
+        private readonly Mock<IMonitorDimmingService> _dimmer = new();
+
+        private Task Run(ApplyBlackoutOverlayCommand command) =>
+            new ApplyBlackoutOverlayCommandHandler(_screens.Object, _overlays.Object, _dimmer.Object).HandleAsync(command);
+
+        private void Connect(params MonitorInfo[] monitors) =>
+            _screens.Setup(s => s.GetCurrentMonitorsAsync()).ReturnsAsync(monitors.ToList());
+
+        private static MonitorInfo Screen(bool ddc) =>
+            new() { HardwareId = Id, Bounds = Area, Capabilities = new DdcCiCapabilities(ddc, ddc ? 100u : 0u) };
+
+        [Theory]
+        [InlineData(OverlayScene.Black)]
+        [InlineData(OverlayScene.Stars)]
+        [InlineData(OverlayScene.Flights)]
+        public async Task ShowsTheOverlayWithTheScreensBoundsAndScene(OverlayScene scene)
         {
-            _monitorInfoManagerMock = new Mock<IMonitorInfoManager>();
-            _monitorBlackoutServiceMock = new Mock<IMonitorBlackoutService>();
-            _monitorDimmingServiceMock = new Mock<IMonitorDimmingService>();
+            Connect(Screen(ddc: true));
 
-            _handler = new ApplyBlackoutOverlayCommandHandler(
-                _monitorInfoManagerMock.Object,
-                _monitorBlackoutServiceMock.Object,
-                _monitorDimmingServiceMock.Object);
+            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, Scene = scene });
+
+            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, scene), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenDdcCiSupportedAndLowerBrightnessRequested_CallsOverlayAndDimming()
+        public async Task LowerBrightness_OnADdcScreen_AlsoDimsToZero()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = hardwareId, LowerBrightness = true };
+            Connect(Screen(ddc: true));
 
-            var monitors = new List<MonitorInfo>
-            {
-                new MonitorInfo { HardwareId = hardwareId, Capabilities = new DdcCiCapabilities(true, 100), Bounds = new Rect(0, 0, 1920, 1080) }
-            };
+            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true });
 
-            SetupMonitors(monitors);
-
-            _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
-                .Returns(Task.CompletedTask);
-
-            _monitorDimmingServiceMock
-                .Setup(x => x.DimMonitorAsync(hardwareId, 0))
-                .Returns(Task.CompletedTask);
-
-            // Act
-            await _handler.HandleAsync(command);
-
-            // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(hardwareId, 0), Times.Once);
+            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, OverlayScene.Black), Times.Once);
+            _dimmer.Verify(d => d.DimMonitorAsync(Id, 0), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenLowerBrightnessNotRequested_CallsOverlayOnly()
+        public async Task LowerBrightness_OnAScreenWithoutDdc_OnlyShowsTheOverlay()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = hardwareId };
+            Connect(Screen(ddc: false));
 
-            var monitors = new List<MonitorInfo>
-            {
-                new MonitorInfo { HardwareId = hardwareId, Capabilities = new DdcCiCapabilities(true, 100), Bounds = new Rect(0, 0, 1920, 1080) }
-            };
+            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true });
 
-            SetupMonitors(monitors);
-
-            _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
-                .Returns(Task.CompletedTask);
-
-            // Act
-            await _handler.HandleAsync(command);
-
-            // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, OverlayScene.Black), Times.Once);
+            _dimmer.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_WhenDdcCiNotSupported_CallsOverlayOnly()
+        public async Task WithoutLowerBrightness_NeverTouchesTheBacklight()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = hardwareId };
+            Connect(Screen(ddc: true));
 
-            var monitors = new List<MonitorInfo>
-            {
-                new MonitorInfo { HardwareId = hardwareId, Capabilities = new DdcCiCapabilities(false, 0), Bounds = new Rect(0, 0, 1920, 1080) }
-            };
+            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id });
 
-            SetupMonitors(monitors);
-
-            _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
-                .Returns(Task.CompletedTask);
-
-            // Act
-            await _handler.HandleAsync(command);
-
-            // Assert
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(hardwareId, It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Once);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+            _dimmer.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_WhenMonitorNotFound_CatchesExceptionAndDoesNotThrow()
+        public async Task AnUnknownScreen_IsSkippedQuietly()
         {
-            // Arrange
-            var hardwareId = "MON-UNKNOWN";
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = hardwareId };
-            var monitors = new List<MonitorInfo>();
+            Connect();
 
-            SetupMonitors(monitors);
+            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true }));
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Never);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+            Assert.Null(error);
+            _overlays.VerifyNoOtherCalls();
+            _dimmer.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task HandleAsync_WhenOverlayServiceThrows_CatchesExceptionAndDoesNotThrow()
+        public async Task AFailingOverlay_IsSwallowed()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = hardwareId };
+            Connect(Screen(ddc: false));
+            _overlays.Setup(o => o.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OverlayScene>()))
+                     .ThrowsAsync(new InvalidOperationException("no window"));
 
-            var monitors = new List<MonitorInfo>
-            {
-                new MonitorInfo { HardwareId = hardwareId, Capabilities = new DdcCiCapabilities(false, 0), Bounds = new Rect(0, 0, 1920, 1080) }
-            };
+            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id }));
 
-            SetupMonitors(monitors);
-
-            _monitorBlackoutServiceMock
-                .Setup(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()))
-                .ThrowsAsync(new Exception("Simulated service failure."));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
+            Assert.Null(error);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenMonitorScanFails_CatchesExceptionAndDoesNotThrow()
+        public async Task AFailingScreenScan_IsSwallowedAndNothingHappens()
         {
-            // Arrange
-            var command = new ApplyBlackoutOverlayCommand { HardwareId = "MON-123" };
+            _screens.Setup(s => s.GetCurrentMonitorsAsync()).ThrowsAsync(new InvalidOperationException("enumeration failed"));
 
-            _monitorInfoManagerMock
-                .Setup(m => m.GetCurrentMonitorsAsync())
-                .ThrowsAsync(new InvalidOperationException("Native monitor enumeration failed."));
+            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id }));
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorBlackoutServiceMock.Verify(x => x.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OLED_Sleeper.Features.MonitorBlackout.Models.OverlayScene>()), Times.Never);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
-        }
-
-        /// <summary>
-        /// Makes GetCurrentMonitorsAsync() return the supplied monitor list.
-        /// </summary>
-        private void SetupMonitors(List<MonitorInfo> monitors)
-        {
-            _monitorInfoManagerMock
-                .Setup(m => m.GetCurrentMonitorsAsync())
-                .ReturnsAsync(monitors);
+            Assert.Null(error);
+            _overlays.VerifyNoOtherCalls();
+            _dimmer.VerifyNoOtherCalls();
         }
     }
 }

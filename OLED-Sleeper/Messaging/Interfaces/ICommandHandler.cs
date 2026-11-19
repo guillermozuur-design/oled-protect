@@ -1,15 +1,8 @@
 ﻿namespace OLED_Sleeper.Messaging.Interfaces
 {
-    /// <summary>
-    /// Defines a generic handler for a command.
-    /// </summary>
-    /// <typeparam name="TCommand">The type of command to be handled.</typeparam>
+    // One implementation per command type, resolved from the DI container by the mediator.
     public interface ICommandHandler<TCommand> where TCommand : ICommand
     {
-        /// <summary>
-        /// Handles the specified command asynchronously.
-        /// </summary>
-        /// <param name="command">The command to handle.</param>
         Task HandleAsync(TCommand command);
     }
 }

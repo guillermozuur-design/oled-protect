@@ -5,35 +5,20 @@ using Serilog;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Handlers
 {
-    /// <summary>
-    /// Handles the execution of the <see cref="HideBlackoutOverlayCommand"/>.
-    /// This class contains the business logic for hiding the blackout overlay on a monitor.
-    /// </summary>
-    public class HideBlackoutOverlayCommandHandler : ICommandHandler<HideBlackoutOverlayCommand>
+    // Wake-up path: must never throw, or one broken overlay could stop the rest of a restore.
+    public class HideBlackoutOverlayCommandHandler(IMonitorBlackoutService overlays)
+        : ICommandHandler<HideBlackoutOverlayCommand>
     {
-        private readonly IMonitorBlackoutService _monitorBlackoutService;
-
-        public HideBlackoutOverlayCommandHandler(
-            IMonitorBlackoutService monitorBlackoutService)
-        {
-            _monitorBlackoutService = monitorBlackoutService;
-        }
-
-        /// <summary>
-        /// Executes the logic to hide the blackout overlay asynchronously based on the command's data.
-        /// Exceptions are caught and logged to avoid silent failures.
-        /// </summary>
-        /// <param name="command">The command containing the details of the monitor whose overlay should be hidden.</param>
         public async Task HandleAsync(HideBlackoutOverlayCommand command)
         {
+            Log.Information("Removing overlay from screen {HardwareId}.", command.HardwareId);
             try
             {
-                Log.Information("Executing HideBlackoutOverlayCommand for monitor {HardwareId}.", command.HardwareId);
-                await _monitorBlackoutService.HideBlackoutOverlayAsync(command.HardwareId);
+                await overlays.HideBlackoutOverlayAsync(command.HardwareId);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Failed to hide blackout overlay for monitor {HardwareId}.", command.HardwareId);
+                Log.Error(ex, "Removing the overlay from screen {HardwareId} failed.", command.HardwareId);
             }
         }
     }

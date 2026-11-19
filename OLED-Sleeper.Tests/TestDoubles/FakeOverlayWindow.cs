@@ -3,46 +3,22 @@ using System.Windows;
 
 namespace OLED_Sleeper.Tests.TestDoubles
 {
-    /// <summary>
-    /// An <see cref="IOverlayWindow"/> that records what it was asked to do instead of creating a window.
-    /// Its handle drops back to zero on <see cref="Close"/>, the same as a real overlay.
-    /// </summary>
-    public class FakeOverlayWindow : IOverlayWindow
+    // Stands in for a real overlay: remembers what happened to it and, like the real one, only has a
+    // handle between Show and Close.
+    public sealed class FakeOverlayWindow(nint handleOnceShown) : IOverlayWindow
     {
-        private readonly nint _handleOnceShown;
+        private Rect? _shownAt;
 
-        /// <param name="handleOnceShown">The handle to report after <see cref="Show"/> runs. Zero
-        /// reproduces an overlay that never got a window handle.</param>
-        public FakeOverlayWindow(nint handleOnceShown)
-        {
-            _handleOnceShown = handleOnceShown;
-        }
+        public Rect? ShownBounds => _shownAt;
 
-        /// <summary>
-        /// The bounds passed to <see cref="Show"/>, or null while the overlay has not been shown.
-        /// </summary>
-        public Rect? ShownBounds { get; private set; }
+        public int CloseCalls { get; private set; }
 
-        /// <summary>
-        /// True once <see cref="Close"/> has run.
-        /// </summary>
-        public bool IsClosed { get; private set; }
+        public bool IsClosed => CloseCalls > 0;
 
-        /// <inheritdoc />
-        public nint Handle { get; private set; }
+        public nint Handle => _shownAt.HasValue && !IsClosed ? handleOnceShown : nint.Zero;
 
-        /// <inheritdoc />
-        public void Show(Rect bounds)
-        {
-            ShownBounds = bounds;
-            Handle = _handleOnceShown;
-        }
+        public void Show(Rect bounds) => _shownAt = bounds;
 
-        /// <inheritdoc />
-        public void Close()
-        {
-            IsClosed = true;
-            Handle = nint.Zero;
-        }
+        public void Close() => CloseCalls++;
     }
 }

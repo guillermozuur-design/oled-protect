@@ -3,37 +3,22 @@ using OLED_Sleeper.Features.UserSettings.Models;
 
 namespace OLED_Sleeper.Features.MonitorIdleDetection.Services.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for monitor idle detection services.
-    /// Handles detection of idle/active state transitions and updates settings for managed monitors.
-    /// </summary>
+    // Decides, per managed screen, when it has gone idle and when it is in use again.
     public interface IMonitorIdleDetectionService
     {
-        /// <summary>
-        /// Starts the idle detection service and begins monitoring.
-        /// </summary>
+        // (Re)starts the background check; restarting replaces a running one.
         void Start();
 
-        /// <summary>
-        /// Stops the idle detection service and monitoring.
-        /// </summary>
+        // Ends the background check. Calling it twice is fine.
         void Stop();
 
-        /// <summary>
-        /// Pauses or resumes idle detection (work mode). Pausing wakes every managed monitor at once and
-        /// keeps them awake; resuming starts every idle timer from zero.
-        /// </summary>
+        // Work mode. Pausing wakes every managed screen at once and keeps them awake; resuming starts
+        // every idle timer from zero.
         void SetPaused(bool paused);
 
-        /// <summary>
-        /// Updates the settings for all managed monitors.
-        /// </summary>
-        /// <param name="monitorSettings">The list of monitor settings to manage.</param>
-        /// <param name="monitors">
-        /// The monitors the settings are joined against, supplying the bounds used for hit-testing. The caller
-        /// passes the list it already holds so detection cannot be rebuilt against stale geometry.
-        /// </param>
-        /// <returns>A task that completes once the new settings are in effect.</returns>
+        // Replaces the screens being tracked. Only managed settings with a matching connected screen are
+        // kept; the screen list supplies the geometry, so callers pass the one they already hold instead
+        // of this service reading a possibly stale cache. Completes once the new set is in effect.
         Task UpdateSettingsAsync(List<MonitorSettings> monitorSettings, IReadOnlyList<MonitorInfo> monitors);
     }
 }

@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.MonitorBlackout.Models;
 using OLED_Sleeper.Features.MonitorBlackout.Services;
 using OLED_Sleeper.Tests.TestDoubles;
 using System.Windows;
@@ -6,254 +7,155 @@ namespace OLED_Sleeper.Tests.Features.MonitorBlackout.Services
 {
     public class MonitorBlackoutServiceTests
     {
-        private static readonly Rect PrimaryBounds = new(0, 0, 1920, 1080);
-        private static readonly Rect SecondaryBounds = new(1920, 0, 2560, 1440);
+        private static readonly Rect Left = new(0, 0, 1920, 1080);
+        private static readonly Rect Right = new(1920, 0, 2560, 1440);
 
-        private readonly ImmediateDispatcher _dispatcher;
-        private readonly FakeOverlayWindowFactory _overlayWindowFactory;
-        private readonly MonitorBlackoutService _service;
+        private readonly ImmediateDispatcher _ui = new();
+        private readonly FakeOverlayWindowFactory _windows = new();
+        private readonly MonitorBlackoutService _sut;
 
         public MonitorBlackoutServiceTests()
         {
-            _dispatcher = new ImmediateDispatcher();
-            _overlayWindowFactory = new FakeOverlayWindowFactory();
-
-            _service = new MonitorBlackoutService(_dispatcher, _overlayWindowFactory);
+            _sut = new MonitorBlackoutService(_ui, _windows);
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenMonitorHasNoOverlay_ShowsOverlayAtTheGivenBounds()
+        public async Task Show_PutsOneOverlayOverTheRequestedArea()
         {
-            // Arrange
-            var hardwareId = "MON-123";
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
 
-            // Act
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
-
-            // Assert
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            Assert.Equal(PrimaryBounds, overlay.ShownBounds);
-            Assert.False(overlay.IsClosed);
+            FakeOverlayWindow window = Assert.Single(_windows.Created);
+            Assert.Equal(Left, window.ShownBounds);
+            Assert.False(window.IsClosed);
+            Assert.True(_sut.IsOverlayWindow(window.Handle));
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenCalledFromABackgroundThread_MarshalsOntoTheDispatcher()
+        public async Task Show_PassesTheSceneToTheFactory()
         {
-            // Arrange
-            _dispatcher.IsOnUiThread = false;
+            await _sut.ShowBlackoutOverlayAsync("A", Left, OverlayScene.Flights);
 
-            // Act
-            await _service.ShowBlackoutOverlayAsync("MON-123", PrimaryBounds);
-
-            // Assert
-            Assert.Equal(1, _dispatcher.InvokeAsyncCount);
+            Assert.Equal([OverlayScene.Flights], _windows.RequestedScenes);
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenOverlayIsShown_TracksItsHandle()
+        public async Task ShowAndHide_AlwaysGoThroughTheDispatcher()
         {
-            // Arrange
-            var hardwareId = "MON-123";
+            _ui.IsOnUiThread = false;
 
-            // Act
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            Assert.Equal(1, _ui.InvokeAsyncCount);
 
-            // Assert
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            Assert.True(_service.IsOverlayWindow(overlay.Handle));
+            await _sut.HideBlackoutOverlayAsync("A");
+            Assert.Equal(2, _ui.InvokeAsyncCount);
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenMonitorAlreadyHasAnOverlay_DoesNotCreateASecondOne()
+        public async Task Show_ForACoveredScreen_KeepsTheExistingOverlay()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _sut.ShowBlackoutOverlayAsync("A", Right);
 
-            // Act
-            await _service.ShowBlackoutOverlayAsync(hardwareId, SecondaryBounds);
-
-            // Assert
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            Assert.Equal(PrimaryBounds, overlay.ShownBounds);
+            FakeOverlayWindow window = Assert.Single(_windows.Created);
+            Assert.Equal(Left, window.ShownBounds);
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenMonitorsDiffer_TracksAnOverlayPerMonitor()
+        public async Task Show_ForTwoScreens_TracksBothHandles()
         {
-            // Arrange
-            var firstHardwareId = "MON-123";
-            var secondHardwareId = "MON-456";
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _sut.ShowBlackoutOverlayAsync("B", Right);
 
-            // Act
-            await _service.ShowBlackoutOverlayAsync(firstHardwareId, PrimaryBounds);
-            await _service.ShowBlackoutOverlayAsync(secondHardwareId, SecondaryBounds);
-
-            // Assert
-            Assert.Equal(2, _overlayWindowFactory.Created.Count);
-            Assert.True(_service.IsOverlayWindow(_overlayWindowFactory.Created[0].Handle));
-            Assert.True(_service.IsOverlayWindow(_overlayWindowFactory.Created[1].Handle));
+            Assert.Equal(2, _windows.Created.Count);
+            Assert.All(_windows.Created, w => Assert.True(_sut.IsOverlayWindow(w.Handle)));
+            Assert.NotEqual(_windows.Created[0].Handle, _windows.Created[1].Handle);
         }
 
         [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenOverlayReportsNoHandle_StillCoversTheMonitorOnce()
+        public async Task Show_WithAWindowThatNeverGotAHandle_StillCountsAsCovered()
         {
-            // Arrange
-            var handlelessFactory = new FakeOverlayWindowFactory(nint.Zero);
-            var service = new MonitorBlackoutService(_dispatcher, handlelessFactory);
-            var hardwareId = "MON-123";
+            var handleless = new FakeOverlayWindowFactory(nint.Zero);
+            var sut = new MonitorBlackoutService(_ui, handleless);
 
-            // Act
-            await service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
-            await service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
+            await sut.ShowBlackoutOverlayAsync("A", Left);
+            await sut.ShowBlackoutOverlayAsync("A", Left);
 
-            // Assert
-            Assert.Single(handlelessFactory.Created);
-            Assert.False(service.IsOverlayWindow(nint.Zero));
+            Assert.Single(handleless.Created);
+            Assert.False(sut.IsOverlayWindow(nint.Zero));
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenMonitorHasAnOverlay_ClosesIt()
+        public async Task Hide_ClosesTheOverlayAndForgetsTheHandleItHadWhileShown()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            FakeOverlayWindow window = _windows.Created[0];
+            nint handleWhileShown = window.Handle;
 
-            // Act
-            await _service.HideBlackoutOverlayAsync(hardwareId);
+            await _sut.HideBlackoutOverlayAsync("A");
 
-            // Assert
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            Assert.True(overlay.IsClosed);
+            Assert.True(window.IsClosed);
+            Assert.Equal(nint.Zero, window.Handle);
+            Assert.False(_sut.IsOverlayWindow(handleWhileShown));
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenCalledFromABackgroundThread_MarshalsOntoTheDispatcher()
+        public async Task Hide_OnlyTouchesTheRequestedScreen()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
-            _dispatcher.IsOnUiThread = false;
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _sut.ShowBlackoutOverlayAsync("B", Right);
+            FakeOverlayWindow other = _windows.Created[1];
 
-            // Act
-            await _service.HideBlackoutOverlayAsync(hardwareId);
+            await _sut.HideBlackoutOverlayAsync("A");
 
-            // Assert
-            Assert.Equal(2, _dispatcher.InvokeAsyncCount);
+            Assert.False(other.IsClosed);
+            Assert.True(_sut.IsOverlayWindow(other.Handle));
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenOverlayHandleWentToZeroOnClose_UntracksTheHandleRecordedWhenShowing()
+        public async Task Hide_ForAnUncoveredScreen_IsANoOp()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
+            Exception? error = await Record.ExceptionAsync(() => _sut.HideBlackoutOverlayAsync("nobody"));
 
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            nint handleWhileShown = overlay.Handle;
-
-            // Act
-            await _service.HideBlackoutOverlayAsync(hardwareId);
-
-            // Assert
-            Assert.Equal(nint.Zero, overlay.Handle);
-            Assert.False(_service.IsOverlayWindow(handleWhileShown));
+            Assert.Null(error);
+            Assert.Empty(_windows.Created);
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenOtherMonitorsAreBlackedOut_LeavesTheirOverlaysAlone()
+        public async Task Hide_Twice_ClosesOnlyOnce()
         {
-            // Arrange
-            var hiddenHardwareId = "MON-123";
-            var keptHardwareId = "MON-456";
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
 
-            await _service.ShowBlackoutOverlayAsync(hiddenHardwareId, PrimaryBounds);
-            await _service.ShowBlackoutOverlayAsync(keptHardwareId, SecondaryBounds);
+            await _sut.HideBlackoutOverlayAsync("A");
+            Exception? error = await Record.ExceptionAsync(() => _sut.HideBlackoutOverlayAsync("A"));
 
-            var keptOverlay = _overlayWindowFactory.Created[1];
-            nint keptHandle = keptOverlay.Handle;
-
-            // Act
-            await _service.HideBlackoutOverlayAsync(hiddenHardwareId);
-
-            // Assert
-            Assert.False(keptOverlay.IsClosed);
-            Assert.True(_service.IsOverlayWindow(keptHandle));
+            Assert.Null(error);
+            Assert.Equal(1, Assert.Single(_windows.Created).CloseCalls);
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenMonitorHasNoOverlay_DoesNothing()
+        public async Task Show_AfterHide_BuildsANewOverlay()
         {
-            // Arrange
-            var hardwareId = "MON-UNKNOWN";
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _sut.HideBlackoutOverlayAsync("A");
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _service.HideBlackoutOverlayAsync(hardwareId));
+            await _sut.ShowBlackoutOverlayAsync("A", Right);
 
-            // Assert
-            Assert.Null(exception);
-            Assert.Empty(_overlayWindowFactory.Created);
+            Assert.Equal(2, _windows.Created.Count);
+            FakeOverlayWindow fresh = _windows.Created[1];
+            Assert.Equal(Right, fresh.ShownBounds);
+            Assert.True(_sut.IsOverlayWindow(fresh.Handle));
         }
 
         [Fact]
-        public async Task HideBlackoutOverlayAsync_WhenCalledTwiceForTheSameMonitor_ClosesTheOverlayOnce()
+        public async Task IsOverlayWindow_RejectsZeroAndForeignHandles()
         {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
-            await _service.HideBlackoutOverlayAsync(hardwareId);
+            Assert.False(_sut.IsOverlayWindow(nint.Zero));
 
-            // Act
-            var exception = await Record.ExceptionAsync(() => _service.HideBlackoutOverlayAsync(hardwareId));
+            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            nint ours = _windows.Created[0].Handle;
 
-            // Assert
-            Assert.Null(exception);
-            Assert.Single(_overlayWindowFactory.Created);
-        }
-
-        [Fact]
-        public async Task ShowBlackoutOverlayAsync_WhenTheMonitorWasPreviouslyHidden_CreatesAFreshOverlay()
-        {
-            // Arrange
-            var hardwareId = "MON-123";
-            await _service.ShowBlackoutOverlayAsync(hardwareId, PrimaryBounds);
-            await _service.HideBlackoutOverlayAsync(hardwareId);
-
-            // Act
-            await _service.ShowBlackoutOverlayAsync(hardwareId, SecondaryBounds);
-
-            // Assert
-            Assert.Equal(2, _overlayWindowFactory.Created.Count);
-
-            var newOverlay = _overlayWindowFactory.Created[1];
-            Assert.Equal(SecondaryBounds, newOverlay.ShownBounds);
-            Assert.True(_service.IsOverlayWindow(newOverlay.Handle));
-        }
-
-        [Fact]
-        public void IsOverlayWindow_WhenHandleIsZero_ReturnsFalse()
-        {
-            // Arrange, Act
-            bool isOverlay = _service.IsOverlayWindow(nint.Zero);
-
-            // Assert
-            Assert.False(isOverlay);
-        }
-
-        [Fact]
-        public async Task IsOverlayWindow_WhenHandleBelongsToAnotherWindow_ReturnsFalse()
-        {
-            // Arrange
-            await _service.ShowBlackoutOverlayAsync("MON-123", PrimaryBounds);
-
-            var overlay = Assert.Single(_overlayWindowFactory.Created);
-            nint unrelatedHandle = overlay.Handle + 1;
-
-            // Act
-            bool isOverlay = _service.IsOverlayWindow(unrelatedHandle);
-
-            // Assert
-            Assert.False(isOverlay);
+            Assert.False(_sut.IsOverlayWindow(nint.Zero));
+            Assert.False(_sut.IsOverlayWindow(ours + 1));
         }
     }
 }

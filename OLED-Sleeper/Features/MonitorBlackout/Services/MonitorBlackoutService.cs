@@ -5,105 +5,76 @@ using System.Windows;
 
 namespace OLED_Sleeper.Features.MonitorBlackout.Services
 {
-    /// <summary>
-    /// Manages blackout overlay windows for monitors asynchronously in a WPF application.
-    /// Provides creation, display, and removal of overlay windows, and tracks overlay window handles.
-    /// </summary>
-    public class MonitorBlackoutService : IMonitorBlackoutService
+    // Keeps track of which screen is covered by which overlay. Windows are created and closed on the UI
+    // thread; IsOverlayWindow is asked from the idle-detection thread, hence the lock around the table.
+    public class MonitorBlackoutService(IDispatcher dispatcher, IOverlayWindowFactory overlayWindowFactory) : IMonitorBlackoutService
     {
-        private readonly IDispatcher _dispatcher;
-        private readonly IOverlayWindowFactory _overlayWindowFactory;
+        // The handle is captured right after Show: a closed overlay reports zero, so asking the window
+        // again later would no longer tell us which handle it used to have.
+        private sealed record Cover(IOverlayWindow Window, nint ShownHandle);
 
-        /// <summary>
-        /// Guards <see cref="_overlayWindows"/> and <see cref="_overlayHandles"/>. Overlays are created and
-        /// closed on the dispatcher thread while <see cref="IsOverlayWindow"/> reads from the idle thread.
-        /// Window creation, showing and closing all happen outside this lock.
-        /// </summary>
-        private readonly object _overlayLock = new();
+        private readonly Dictionary<string, Cover> _coversByScreen = new();
+        private readonly object _gate = new();
 
-        /// <summary>
-        /// The overlay currently shown on each monitor, keyed by hardware ID. A monitor with no overlay
-        /// has no entry.
-        /// </summary>
-        private readonly Dictionary<string, OverlayRegistration> _overlayWindows = new();
+        // Both are async so that even a dispatcher that refuses work (app shutting down) fails through the
+        // task; several callers do not await.
+        public async Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, OverlayScene scene = OverlayScene.Black) =>
+            await dispatcher.InvokeAsync(() => PutUp(hardwareId, bounds, scene));
 
-        /// <summary>
-        /// The handles of every overlay currently shown, which is what <see cref="IsOverlayWindow"/>
-        /// answers from. Overlays that never got a handle are absent.
-        /// </summary>
-        private readonly HashSet<nint> _overlayHandles = new();
+        public async Task HideBlackoutOverlayAsync(string hardwareId) =>
+            await dispatcher.InvokeAsync(() => TakeDown(hardwareId));
 
-        public MonitorBlackoutService(IDispatcher dispatcher, IOverlayWindowFactory overlayWindowFactory)
-        {
-            _dispatcher = dispatcher;
-            _overlayWindowFactory = overlayWindowFactory;
-        }
-
-        /// <summary>
-        /// An overlay window paired with the handle it was tracked under.
-        /// </summary>
-        /// <param name="Window">The overlay window.</param>
-        /// <param name="Handle">The handle recorded when the overlay was shown, or zero if none was obtained.</param>
-        private readonly record struct OverlayRegistration(IOverlayWindow Window, nint Handle);
-
-        /// <inheritdoc />
-        public async Task ShowBlackoutOverlayAsync(string hardwareId, Rect bounds, OverlayScene scene = OverlayScene.Black)
-        {
-            await _dispatcher.InvokeAsync(() =>
-            {
-                lock (_overlayLock)
-                {
-                    if (_overlayWindows.ContainsKey(hardwareId)) return;
-                }
-
-                var overlay = _overlayWindowFactory.Create(scene);
-                overlay.Show(bounds);
-
-                nint hwnd = overlay.Handle;
-
-                lock (_overlayLock)
-                {
-                    if (hwnd != nint.Zero)
-                    {
-                        _overlayHandles.Add(hwnd);
-                    }
-
-                    _overlayWindows[hardwareId] = new OverlayRegistration(overlay, hwnd);
-                }
-            });
-        }
-
-        /// <inheritdoc />
-        public async Task HideBlackoutOverlayAsync(string hardwareId)
-        {
-            await _dispatcher.InvokeAsync(() =>
-            {
-                OverlayRegistration registration;
-
-                lock (_overlayLock)
-                {
-                    if (!_overlayWindows.Remove(hardwareId, out registration)) return;
-
-                    // An overlay reports a zero handle once it is closed, so the handle recorded when it
-                    // was shown is used here.
-                    if (registration.Handle != nint.Zero)
-                    {
-                        _overlayHandles.Remove(registration.Handle);
-                    }
-                }
-
-                registration.Window.Close();
-            });
-        }
-
-        /// <inheritdoc />
         public bool IsOverlayWindow(nint windowHandle)
         {
-            if (windowHandle == nint.Zero) return false;
-
-            lock (_overlayLock)
+            // Zero is what a missing or closed window reports; it must never match.
+            if (windowHandle == nint.Zero)
             {
-                return _overlayHandles.Contains(windowHandle);
+                return false;
+            }
+
+            lock (_gate)
+            {
+                return _coversByScreen.Values.Any(cover => cover.ShownHandle == windowHandle);
+            }
+        }
+
+        private void PutUp(string hardwareId, Rect bounds, OverlayScene scene)
+        {
+            if (IsCovered(hardwareId))
+            {
+                return;
+            }
+
+            // Window work stays outside the lock so the idle thread is never held up by it.
+            IOverlayWindow window = overlayWindowFactory.Create(scene);
+            window.Show(bounds);
+            var cover = new Cover(window, window.Handle);
+
+            lock (_gate)
+            {
+                _coversByScreen[hardwareId] = cover;
+            }
+        }
+
+        private void TakeDown(string hardwareId)
+        {
+            Cover? cover;
+            lock (_gate)
+            {
+                if (!_coversByScreen.Remove(hardwareId, out cover))
+                {
+                    return;
+                }
+            }
+
+            cover.Window.Close();
+        }
+
+        private bool IsCovered(string hardwareId)
+        {
+            lock (_gate)
+            {
+                return _coversByScreen.ContainsKey(hardwareId);
             }
         }
     }

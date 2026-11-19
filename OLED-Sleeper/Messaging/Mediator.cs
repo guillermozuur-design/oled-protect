@@ -1,27 +1,39 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using OLED_Sleeper.Messaging.Interfaces;
+﻿using OLED_Sleeper.Messaging.Interfaces;
+using Serilog;
 
 namespace OLED_Sleeper.Messaging
 {
-    public class Mediator(IServiceProvider serviceProvider) : IMediator
+    // Routes each command to the handler registered for its exact type. Handlers are looked up per send, so
+    // transient handlers get a fresh instance every time.
+    public sealed class Mediator : IMediator
     {
-        private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        private readonly IServiceProvider _services;
 
-        /// <inheritdoc />
+        public Mediator(IServiceProvider serviceProvider)
+        {
+            ArgumentNullException.ThrowIfNull(serviceProvider);
+            _services = serviceProvider;
+        }
+
+        // Kept async on purpose: several callers fire and forget, so every failure (bad argument, missing
+        // handler, handler crash) has to surface through the returned task, never as a synchronous throw.
         public async Task SendAsync<TCommand>(TCommand command) where TCommand : ICommand
         {
-            if (command == null)
-                throw new ArgumentNullException(nameof(command));
+            ArgumentNullException.ThrowIfNull(command);
+            await ResolveHandler<TCommand>().HandleAsync(command);
+        }
 
-            var handler = _serviceProvider.GetService<ICommandHandler<TCommand>>();
-            if (handler == null)
+        private ICommandHandler<TCommand> ResolveHandler<TCommand>() where TCommand : ICommand
+        {
+            if (_services.GetService(typeof(ICommandHandler<TCommand>)) is ICommandHandler<TCommand> handler)
             {
-                var errorMessage = $"No handler registered for command type {typeof(TCommand).Name}.";
-                Serilog.Log.Error(errorMessage);
-                throw new InvalidOperationException(errorMessage);
+                return handler;
             }
 
-            await handler.HandleAsync(command);
+            // A missing registration is a wiring bug; make it loud in the log as well as to the caller.
+            string problem = $"Cannot send {typeof(TCommand).Name}: nothing is registered to handle it.";
+            Log.Error(problem);
+            throw new InvalidOperationException(problem);
         }
     }
 }

@@ -6,39 +6,34 @@ using Serilog;
 
 namespace OLED_Sleeper.Features.MonitorBehavior.Handlers
 {
-    /// <summary>
-    /// Handles the execution of the <see cref="ApplyMonitorActiveBehaviorCommand"/>.
-    /// Applies the correct behavior when a monitor becomes active, including filtering out overlay-initiated activations and restoring the monitor's normal state.
-    /// </summary>
-    public class ApplyMonitorActiveBehaviorCommandHandler : ICommandHandler<ApplyMonitorActiveBehaviorCommand>
+    public class ApplyMonitorActiveBehaviorCommandHandler(IMonitorBlackoutService blackout, IMediator mediator)
+        : ICommandHandler<ApplyMonitorActiveBehaviorCommand>
     {
-        private readonly IMonitorBlackoutService _monitorBlackoutService;
-        private readonly IMediator _mediator;
-
-        public ApplyMonitorActiveBehaviorCommandHandler(
-            IMonitorBlackoutService monitorBlackoutService,
-            IMediator mediator)
+        public async Task HandleAsync(ApplyMonitorActiveBehaviorCommand command)
         {
-            _monitorBlackoutService = monitorBlackoutService;
-            _mediator = mediator;
-        }
+            var wake = command.EventArgs;
 
-        /// <summary>
-        /// Handles the monitor activation event, restoring monitor state if not triggered by overlay window.
-        /// </summary>
-        /// <param name="command">The command containing the event arguments for the monitor activation event.</param>
-        public Task HandleAsync(ApplyMonitorActiveBehaviorCommand command)
-        {
-            var e = command.EventArgs;
-            if (e.Reason == ActivityReason.ActiveWindow && _monitorBlackoutService.IsOverlayWindow(e.ForegroundWindowHandle))
+            // Our own overlay becoming the foreground window is not the user coming back. The flag is set
+            // before the first await, so the sender (which does not await) still sees it in time.
+            if (IsCausedByOwnOverlay(wake))
             {
-                Log.Debug("Monitor #{DisplayNumber} became active due to an overlay window. Flagging event as ignored.", e.DisplayNumber);
-                e.IsIgnored = true;
-                return Task.CompletedTask;
+                Log.Debug("Screen #{DisplayNumber}: focus moved to our own overlay; not waking it.", wake.DisplayNumber);
+                wake.IsIgnored = true;
+                return;
             }
-            Log.Information("Monitor became active. Initiating state restore for monitor #{DisplayNumber}.", e.DisplayNumber);
-            _mediator.SendAsync(new RestoreMonitorStateCommand { HardwareId = e.HardwareId });
-            return Task.CompletedTask;
+
+            Log.Information("Screen #{DisplayNumber} sees activity again ({Reason}); restoring it.", wake.DisplayNumber, wake.Reason);
+            try
+            {
+                await mediator.SendAsync(new RestoreMonitorStateCommand { HardwareId = wake.HardwareId });
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Restoring screen #{DisplayNumber} failed.", wake.DisplayNumber);
+            }
         }
+
+        private bool IsCausedByOwnOverlay(MonitorIdleStateEventArgs wake) =>
+            wake.Reason == ActivityReason.ActiveWindow && blackout.IsOverlayWindow(wake.ForegroundWindowHandle);
     }
 }
