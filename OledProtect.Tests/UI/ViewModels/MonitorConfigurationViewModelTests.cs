@@ -47,19 +47,8 @@ namespace OledProtect.Tests.UI.ViewModels
             Assert.True(result.IsActiveOnInput);
             Assert.False(result.IsActiveOnMousePosition);
             Assert.True(result.IsActiveOnActiveWindow);
-            Assert.True(result.UseMouseStillLimit);
-            Assert.Equal(15, result.MouseStillMinutes);
             Assert.True(result.UseBrightnessSchedule);
             Assert.Equal(new[] { ("07:30", 90), ("22:00", 20) }, result.BrightnessSchedule.Select(e => (e.Start, e.Brightness)));
-        }
-
-        [Fact]
-        public void An_empty_still_limit_is_saved_as_ten_minutes()
-        {
-            var sut = Panel();
-            sut.MouseStillMinutes = null;
-
-            Assert.Equal(10, sut.ToSettings().MouseStillMinutes);
         }
 
         [Fact]
@@ -132,8 +121,6 @@ namespace OledProtect.Tests.UI.ViewModels
             p => p.IsActiveOnInput = true,
             p => p.IsActiveOnMousePosition = false,
             p => p.IsActiveOnActiveWindow = true,
-            p => p.UseMouseStillLimit = true,
-            p => p.MouseStillMinutes = 42,
         };
 
         [Fact]
@@ -368,52 +355,6 @@ namespace OledProtect.Tests.UI.ViewModels
         }
 
         [Theory]
-        [InlineData(null, false)]
-        [InlineData(0, false)]
-        [InlineData(601, false)]
-        [InlineData(1, true)]
-        [InlineData(600, true)]
-        public void Still_limit_must_be_between_1_and_600_minutes(int? minutes, bool valid)
-        {
-            var sut = Panel(ddc: true);
-            sut.ApplySettings(Managed());
-
-            sut.MouseStillMinutes = minutes;
-
-            Assert.Equal(valid, sut.IsValid);
-            Assert.Equal(valid ? string.Empty : "Kies 1 tot 600 minuten.", sut.MouseStillError);
-        }
-
-        [Fact]
-        public void Still_limit_is_ignored_when_it_does_not_apply()
-        {
-            var sut = Panel(ddc: true);
-            sut.ApplySettings(Managed());
-            sut.MouseStillMinutes = 0;
-
-            sut.IsActiveOnMousePosition = false;
-            sut.IsActiveOnActiveWindow = false;
-
-            Assert.False(sut.IsStillLimitApplicable);
-            Assert.Equal(string.Empty, sut.MouseStillError);
-        }
-
-        [Fact]
-        public void Still_limit_error_follows_the_managed_switch()
-        {
-            var sut = Panel(ddc: true);
-            sut.ApplySettings(Managed());
-            sut.MouseStillMinutes = 0;
-            var seen = new List<string?>();
-            sut.PropertyChanged += (_, e) => seen.Add(e.PropertyName);
-
-            sut.IsManaged = false;
-
-            Assert.Equal(string.Empty, sut.MouseStillError);
-            Assert.Contains(nameof(sut.MouseStillError), seen);
-        }
-
-        [Theory]
         [InlineData(new string[0], false)]
         [InlineData(new[] { "8 uur" }, false)]
         [InlineData(new[] { "08:00", "8:00" }, false)]
@@ -474,8 +415,6 @@ namespace OledProtect.Tests.UI.ViewModels
             IsActiveOnInput = true,
             IsActiveOnMousePosition = false,
             IsActiveOnActiveWindow = true,
-            UseMouseStillLimit = true,
-            MouseStillMinutes = 15,
         };
     }
 }

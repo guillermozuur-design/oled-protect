@@ -134,25 +134,12 @@ namespace OledProtect.Features.MonitorIdleDetection.Services
             return Task.CompletedTask;
         }
 
-        // ---- the "still" limit, shared with the settings UI tests ----
+        // ---- the pointer rule, shared with the tests ----
 
-        // Whether the pointer resting on a screen keeps it awake. With the "still" limit on, a pointer
-        // that has not moved (and no key pressed) for longer than the limit no longer counts.
-        public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor, uint systemIdleMilliseconds) =>
-            settings.IsActiveOnMousePosition && cursorOnMonitor && WithinStillLimit(settings, systemIdleMilliseconds);
-
-        // The "still" limit used by both the pointer and the focused-window condition: when switched on,
-        // those only count while there was input within the last MouseStillMinutes (at least one).
-        public static bool WithinStillLimit(MonitorSettings settings, uint systemIdleMilliseconds)
-        {
-            if (!settings.UseMouseStillLimit)
-            {
-                return true;
-            }
-
-            long limitMs = Math.Max(1, settings.MouseStillMinutes) * 60_000L;
-            return systemIdleMilliseconds < limitMs;
-        }
+        // Whether the pointer resting on a screen keeps it awake. A pointer left there for long is handled by
+        // the general timer ("alle schermen uit als je weg bent").
+        public static bool MousePresenceCounts(MonitorSettings settings, bool cursorOnMonitor) =>
+            settings.IsActiveOnMousePosition && cursorOnMonitor;
 
         // ---- loop ----
 
@@ -315,8 +302,7 @@ namespace OledProtect.Features.MonitorIdleDetection.Services
                 return new Verdict(ActivityReason.None, ForceSleep: true, CutByLimit: true);
             }
 
-            bool stillLimitHit = !desktop.DisplayRequired && !WithinStillLimit(screen.Settings, desktop.MillisecondsSinceInput);
-            return new Verdict(FindActivity(screen, desktop), ForceSleep: false, CutByLimit: stillLimitHit);
+            return new Verdict(FindActivity(screen, desktop), ForceSleep: false, CutByLimit: false);
         }
 
         // Conditions in priority order; the first that holds names the reason.
@@ -325,9 +311,8 @@ namespace OledProtect.Features.MonitorIdleDetection.Services
             MonitorSettings s = screen.Settings;
 
             bool typingOrMoving = s.IsActiveOnInput && desktop.MillisecondsSinceInput < s.IdleTimeMilliseconds;
-            bool pointerHere = MousePresenceCounts(s, screen.Bounds.Contains(desktop.Cursor), desktop.EffectiveQuietMilliseconds);
-            bool focusHere = s.IsActiveOnActiveWindow && Overlaps(screen.Bounds, desktop.FocusedWindowArea)
-                             && (desktop.DisplayRequired || WithinStillLimit(s, desktop.MillisecondsSinceInput));
+            bool pointerHere = MousePresenceCounts(s, screen.Bounds.Contains(desktop.Cursor));
+            bool focusHere = s.IsActiveOnActiveWindow && Overlaps(screen.Bounds, desktop.FocusedWindowArea);
 
             return typingOrMoving ? ActivityReason.SystemInput
                  : pointerHere ? ActivityReason.MousePosition

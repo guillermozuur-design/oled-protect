@@ -41,8 +41,6 @@ namespace OledProtect.Tests.Features.UserSettings.Models
                 ["IdleUnit"] = TimeUnit.Seconds,
                 ["IsActiveOnInput"] = false,
                 ["IsActiveOnMousePosition"] = true,
-                ["UseMouseStillLimit"] = false,
-                ["MouseStillMinutes"] = 10,
                 ["IsActiveOnActiveWindow"] = false,
                 ["UseBrightnessSchedule"] = false,
             };
@@ -106,7 +104,6 @@ namespace OledProtect.Tests.Features.UserSettings.Models
             Assert.True(screen.IsActiveOnMousePosition);
             Assert.False(screen.IsActiveOnActiveWindow);
             Assert.False(screen.LowerBrightnessOnBlackout);
-            Assert.Equal(10, screen.MouseStillMinutes);
             Assert.Equal(3, screen.BrightnessSchedule.Count);
         }
 
@@ -119,8 +116,7 @@ namespace OledProtect.Tests.Features.UserSettings.Models
                 new[]
                 {
                     "HardwareId", "IsManaged", "Behavior", "DimLevel", "LowerBrightnessOnBlackout", "IdleValue",
-                    "IdleUnit", "IsActiveOnInput", "IsActiveOnMousePosition", "UseMouseStillLimit",
-                    "MouseStillMinutes", "IsActiveOnActiveWindow", "UseBrightnessSchedule", "BrightnessSchedule",
+                    "IdleUnit", "IsActiveOnInput", "IsActiveOnMousePosition", "IsActiveOnActiveWindow", "UseBrightnessSchedule", "BrightnessSchedule",
                     "IdleTimeMilliseconds",
                 }.Order(),
                 keys.Order());
@@ -140,8 +136,6 @@ namespace OledProtect.Tests.Features.UserSettings.Models
                 IdleUnit = TimeUnit.Minutes,
                 IsActiveOnInput = true,
                 IsActiveOnMousePosition = false,
-                UseMouseStillLimit = true,
-                MouseStillMinutes = 25,
                 IsActiveOnActiveWindow = true,
                 UseBrightnessSchedule = true,
                 BrightnessSchedule = [new() { Start = "21:15", Brightness = 5 }, new() { Start = "07:45", Brightness = 90 }],

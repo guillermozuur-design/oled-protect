@@ -97,8 +97,8 @@ namespace OledProtect.UI.Views
                 new("", "Bescherming", !on, () => _workMode.SetEnabled(false)),
                 new("", "Werkmodus", on, () => _workMode.SetEnabled(true),
                     Detail: on && until != null ? $"tot {until.Value.ToLocalTime():HH:mm}" : null),
-                new("", "Sterren", false, _previewScreensaver),
-                new("", "Vliegtuigen", false, _previewFlights),
+                new("", "Sterrenzicht", false, _previewScreensaver),
+                new("", "Vliegtuigradar", false, _previewFlights),
             };
             if (_brightness != null)
                 _options.Add(new("", "Helderheid", false, () => { }, IsBrightness: true));

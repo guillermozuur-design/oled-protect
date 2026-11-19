@@ -32,11 +32,6 @@ namespace OledProtect.Features.UserSettings.Models
         // The cursor resting on this monitor keeps it awake.
         public bool IsActiveOnMousePosition { get; set; } = true;
 
-        // Caps the cursor rule above: after MouseStillMinutes without input a parked cursor stops counting.
-        public bool UseMouseStillLimit { get; set; }
-
-        public int MouseStillMinutes { get; set; } = 10;
-
         // The foreground window sitting on this monitor keeps it awake.
         public bool IsActiveOnActiveWindow { get; set; }
 

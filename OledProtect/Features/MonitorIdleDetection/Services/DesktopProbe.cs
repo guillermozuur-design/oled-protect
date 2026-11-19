@@ -10,11 +10,7 @@ namespace OledProtect.Features.MonitorIdleDetection.Services
         Point Cursor,
         nint FocusedWindow,
         Rect FocusedWindowArea,
-        bool DisplayRequired)
-    {
-        // Seen through the "display required" lens: while a video plays the user is treated as present.
-        public uint EffectiveQuietMilliseconds => DisplayRequired ? 0 : MillisecondsSinceInput;
-    }
+        bool DisplayRequired);
 
     // Reads the desktop state from Win32. Kept apart from the decision logic so that logic stays testable.
     [ExcludeFromCodeCoverage]

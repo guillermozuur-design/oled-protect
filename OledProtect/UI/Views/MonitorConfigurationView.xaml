@@ -324,28 +324,6 @@
                         </StackPanel>
                     </DockPanel>
 
-                    <!-- Belongs to the two options above: an accent line on the left ties it to them. -->
-                    <Border Margin="2,12,0,0" Padding="12,4,0,4" BorderThickness="2,0,0,0" BorderBrush="{StaticResource AccentSoftBrush}"
-                            IsEnabled="{Binding IsStillLimitApplicable}" Background="Transparent"
-                            ToolTipService.ShowOnDisabled="True"
-                            ToolTip="Voor muis en venster hierboven: raak je niets aan, dan rust dit scherm na deze minuten toch. Even bewegen of typen en het is terug. Loopt er een video in je venster, dan blijft het aan.">
-                        <StackPanel>
-                            <WrapPanel>
-                                <CheckBox Style="{StaticResource PanelSwitch}" FontSize="13" Content="Toch rust na"
-                                          IsChecked="{Binding UseMouseStillLimit, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBox Style="{StaticResource Amount}" Width="52" Margin="10,0,0,0" FontSize="13" VerticalAlignment="Center"
-                                         AutomationProperties.Name="Minuten zonder muis of toetsenbord"
-                                         IsEnabled="{Binding UseMouseStillLimit}"
-                                         Text="{Binding MouseStillMinutes, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" />
-                                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13"
-                                           Foreground="{StaticResource SecondaryForegroundColor}"
-                                           Text="minuten niks aanraken" />
-                            </WrapPanel>
-                            <TextBlock Style="{StaticResource ProblemText}" Margin="0,6,0,0"
-                                       Text="{Binding MouseStillError}"
-                                       Visibility="{Binding MouseStillError, Converter={StaticResource ShowWhenText}}" />
-                        </StackPanel>
-                    </Border>
 
                     <Border Style="{StaticResource Divider}" />
 

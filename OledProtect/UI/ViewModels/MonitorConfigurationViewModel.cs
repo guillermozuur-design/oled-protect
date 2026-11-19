@@ -23,7 +23,7 @@ namespace OledProtect.UI.ViewModels
         private const double DimTolerance = 0.0001;
 
         private static readonly string[] ManagedDependents =
-            [nameof(IdleValueError), nameof(ActiveConditionsError), nameof(BehaviorError), nameof(MouseStillError)];
+            [nameof(IdleValueError), nameof(ActiveConditionsError), nameof(BehaviorError)];
 
         private static readonly string[] BehaviorDependents =
             [nameof(IsDimSliderEnabled), nameof(IsLowerBrightnessOptionEnabled), nameof(LowerBrightnessTooltip), nameof(BehaviorError)];
@@ -33,9 +33,7 @@ namespace OledProtect.UI.ViewModels
         private static readonly string[] InputDependents = [nameof(ActiveConditionsError)];
 
         private static readonly string[] LocalWakeDependents =
-            [nameof(MouseStillError), nameof(IsStillLimitApplicable), nameof(ActiveConditionsError)];
-
-        private static readonly string[] StillLimitDependents = [nameof(MouseStillError)];
+            [nameof(ActiveConditionsError)];
 
         private static readonly string[] NoDependents = [];
 
@@ -52,8 +50,6 @@ namespace OledProtect.UI.ViewModels
         private bool _wakeOnInput;
         private bool _wakeOnMouse;
         private bool _wakeOnFocusedWindow;
-        private bool _useStillLimit;
-        private int? _stillMinutes;
 
         // The per-screen brightness schedule is no longer edited here (one shared schedule lives in the
         // Algemeen tab), but older settings files still carry it, so it is passed through untouched.
@@ -139,24 +135,9 @@ namespace OledProtect.UI.ViewModels
             set => Change(ref _wakeOnFocusedWindow, value, LocalWakeDependents);
         }
 
-        public bool UseMouseStillLimit
-        {
-            get => _useStillLimit;
-            set => Change(ref _useStillLimit, value, StillLimitDependents);
-        }
-
-        public int? MouseStillMinutes
-        {
-            get => _stillMinutes;
-            set => Change(ref _stillMinutes, value, StillLimitDependents);
-        }
-
         public bool IsDimSliderEnabled => _mode is MonitorBehaviorType.Dim;
 
         public bool IsLowerBrightnessOptionEnabled => IsDimBehaviorEnabled && Behavior == MonitorBehaviorType.Blackout;
-
-        /// <summary>The "still" limit only refines the mouse and focused-window conditions.</summary>
-        public bool IsStillLimitApplicable => IsActiveOnMousePosition || IsActiveOnActiveWindow;
 
         /// <summary>Hover text for the behaviour choice; ends with a note when dimming is not possible here.</summary>
         public string BehaviorSectionTooltip =>
@@ -191,13 +172,11 @@ namespace OledProtect.UI.ViewModels
 
         public string BehaviorError => this[nameof(Behavior)];
 
-        public string MouseStillError => StillLimitProblem() ?? string.Empty;
-
         public bool IsValid
         {
             get
             {
-                if (ScheduleProblem() is not null || StillLimitProblem() is not null) return false;
+                if (ScheduleProblem() is not null) return false;
                 if (!IsManaged) return true;
                 return IdleProblem() is null && WakeConditionProblem() is null && BehaviorProblem() is null;
             }
@@ -226,12 +205,6 @@ namespace OledProtect.UI.ViewModels
             IsActiveOnInput || IsActiveOnMousePosition || IsActiveOnActiveWindow
                 ? null
                 : "Kies minstens één 'Wakker houden als'-optie.";
-
-        private string? StillLimitProblem()
-        {
-            bool inUse = IsManaged && IsStillLimitApplicable && UseMouseStillLimit;
-            return inUse && MouseStillMinutes is not (>= 1 and <= 600) ? "Kies 1 tot 600 minuten." : null;
-        }
 
         // A stored schedule that is switched on must still make sense, even though it is not shown here.
         private string? ScheduleProblem()
@@ -278,9 +251,6 @@ namespace OledProtect.UI.ViewModels
                 IsActiveOnInput = now.WakeOnInput,
                 IsActiveOnMousePosition = now.WakeOnMouse,
                 IsActiveOnActiveWindow = now.WakeOnFocusedWindow,
-                UseMouseStillLimit = now.UseStillLimit,
-                // An emptied field falls back to the stored default.
-                MouseStillMinutes = now.StillMinutes ?? 10,
                 UseBrightnessSchedule = now.UseSchedule,
                 BrightnessSchedule = now.Schedule
                     .Select(e => new BrightnessScheduleEntry { Start = e.Start?.Trim() ?? string.Empty, Brightness = e.Brightness })
@@ -301,7 +271,7 @@ namespace OledProtect.UI.ViewModels
         private State Capture() => new(
             IsManaged, Behavior, DimLevel, LowerBrightnessOnBlackout, IdleValue, SelectedTimeUnit,
             IsActiveOnInput, IsActiveOnMousePosition, IsActiveOnActiveWindow,
-            UseMouseStillLimit, MouseStillMinutes, _useSchedule, _schedule);
+            _useSchedule, _schedule);
 
         private State StateFrom(MonitorSettings s) => new(
             s.IsManaged, s.Behavior, s.DimLevel,
@@ -309,7 +279,6 @@ namespace OledProtect.UI.ViewModels
             s.LowerBrightnessOnBlackout && IsDimBehaviorEnabled,
             s.IdleValue, s.IdleUnit,
             s.IsActiveOnInput, s.IsActiveOnMousePosition, s.IsActiveOnActiveWindow,
-            s.UseMouseStillLimit, s.MouseStillMinutes,
             // The schedule flag is kept as stored, even when DDC/CI was not detected this time.
             s.UseBrightnessSchedule,
             (s.BrightnessSchedule ?? []).Select(e => new BrightnessScheduleEntry { Start = e.Start, Brightness = e.Brightness }).ToList());
@@ -326,8 +295,6 @@ namespace OledProtect.UI.ViewModels
             IsActiveOnInput = state.WakeOnInput;
             IsActiveOnMousePosition = state.WakeOnMouse;
             IsActiveOnActiveWindow = state.WakeOnFocusedWindow;
-            UseMouseStillLimit = state.UseStillLimit;
-            MouseStillMinutes = state.StillMinutes;
             _useSchedule = state.UseSchedule;
             _schedule = state.Schedule;
             RecomputeDirty();
@@ -344,8 +311,6 @@ namespace OledProtect.UI.ViewModels
             bool WakeOnInput,
             bool WakeOnMouse,
             bool WakeOnFocusedWindow,
-            bool UseStillLimit,
-            int? StillMinutes,
             bool UseSchedule,
             IReadOnlyList<BrightnessScheduleEntry> Schedule)
         {
