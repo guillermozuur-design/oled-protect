@@ -2,111 +2,121 @@
 using OledProtect.Features.MonitorBlackout.Commands;
 using OledProtect.Features.MonitorBlackout.Handlers;
 using OledProtect.Features.MonitorBlackout.Models;
-using OledProtect.Features.MonitorBlackout.Services.Interfaces;
 using OledProtect.Features.MonitorDimming.Services.Interfaces;
 using OledProtect.Features.MonitorInformation.Models;
 using OledProtect.Features.MonitorInformation.Services.Interfaces;
+using OledProtect.Tests.TestDoubles;
 using System.Windows;
+using Request = OledProtect.Tests.TestDoubles.RecordingBlackoutService.Request;
 
 namespace OledProtect.Tests.Features.MonitorBlackout.Handlers
 {
     public class ApplyBlackoutOverlayCommandHandlerTests
     {
-        private const string Id = "SCREEN-7";
-        private static readonly Rect Area = new(-1920, 0, 1920, 1080);
+        private const string Oled = "LG-OLED-42";
+        private static readonly Rect OledArea = new(2560, 0, 3840, 2160);
 
-        private readonly Mock<IMonitorInfoManager> _screens = new();
-        private readonly Mock<IMonitorBlackoutService> _overlays = new();
-        private readonly Mock<IMonitorDimmingService> _dimmer = new();
+        private readonly RecordingBlackoutService _blackout = new();
+        private readonly List<(string? Id, int Percent)> _dims = [];
+        private readonly Mock<IMonitorDimmingService> _dimmer = new(MockBehavior.Strict);
+        private Func<Task<IReadOnlyList<MonitorInfo>>> _scan = () => Task.FromResult<IReadOnlyList<MonitorInfo>>([]);
 
-        private Task Run(ApplyBlackoutOverlayCommand command) =>
-            new ApplyBlackoutOverlayCommandHandler(_screens.Object, _overlays.Object, _dimmer.Object).HandleAsync(command);
+        public ApplyBlackoutOverlayCommandHandlerTests()
+        {
+            // Strict: any dimmer call other than this one fails the test.
+            _dimmer.Setup(d => d.DimMonitorAsync(It.IsAny<string?>(), It.IsAny<int>()))
+                   .Callback((string? id, int percent) => _dims.Add((id, percent)))
+                   .Returns(Task.CompletedTask);
+        }
 
-        private void Connect(params MonitorInfo[] monitors) =>
-            _screens.Setup(s => s.GetCurrentMonitorsAsync()).ReturnsAsync(monitors.ToList());
+        private void Attached(bool speaksDdc) =>
+            _scan = () => Task.FromResult<IReadOnlyList<MonitorInfo>>(
+            [
+                new MonitorInfo { HardwareId = "OTHER", Bounds = new Rect(0, 0, 2560, 1440) },
+                new MonitorInfo { HardwareId = Oled, Bounds = OledArea, Capabilities = new DdcCiCapabilities(speaksDdc, speaksDdc ? 100u : 0u) },
+            ]);
 
-        private static MonitorInfo Screen(bool ddc) =>
-            new() { HardwareId = Id, Bounds = Area, Capabilities = new DdcCiCapabilities(ddc, ddc ? 100u : 0u) };
+        private Task Handle(ApplyBlackoutOverlayCommand command)
+        {
+            var screens = new Mock<IMonitorInfoManager>();
+            screens.Setup(s => s.GetCurrentMonitorsAsync()).Returns(() => _scan());
+            return new ApplyBlackoutOverlayCommandHandler(screens.Object, _blackout, _dimmer.Object).HandleAsync(command);
+        }
 
         [Theory]
         [InlineData(OverlayScene.Black)]
         [InlineData(OverlayScene.Stars)]
         [InlineData(OverlayScene.Flights)]
-        public async Task ShowsTheOverlayWithTheScreensBoundsAndScene(OverlayScene scene)
+        public async Task Covers_the_screen_at_its_own_area_with_the_chosen_scene(OverlayScene scene)
         {
-            Connect(Screen(ddc: true));
+            Attached(speaksDdc: true);
 
-            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, Scene = scene });
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled, Scene = scene });
 
-            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, scene), Times.Once);
+            Assert.Equal([new Request("show", Oled, OledArea, scene)], _blackout.Requests);
         }
 
         [Fact]
-        public async Task LowerBrightness_OnADdcScreen_AlsoDimsToZero()
+        public async Task Lowering_brightness_on_a_ddc_panel_also_dims_it_to_zero()
         {
-            Connect(Screen(ddc: true));
+            Attached(speaksDdc: true);
 
-            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true });
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled, LowerBrightness = true });
 
-            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, OverlayScene.Black), Times.Once);
-            _dimmer.Verify(d => d.DimMonitorAsync(Id, 0), Times.Once);
+            Assert.Equal([new Request("show", Oled, OledArea, OverlayScene.Black)], _blackout.Requests);
+            Assert.Equal([(Oled, 0)], _dims);
         }
 
         [Fact]
-        public async Task LowerBrightness_OnAScreenWithoutDdc_OnlyShowsTheOverlay()
+        public async Task Lowering_brightness_without_ddc_only_covers_the_screen()
         {
-            Connect(Screen(ddc: false));
+            Attached(speaksDdc: false);
 
-            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true });
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled, LowerBrightness = true });
 
-            _overlays.Verify(o => o.ShowBlackoutOverlayAsync(Id, Area, OverlayScene.Black), Times.Once);
-            _dimmer.VerifyNoOtherCalls();
+            Assert.Single(_blackout.Requests);
+            Assert.Empty(_dims);
         }
 
         [Fact]
-        public async Task WithoutLowerBrightness_NeverTouchesTheBacklight()
+        public async Task The_backlight_stays_untouched_unless_asked()
         {
-            Connect(Screen(ddc: true));
+            Attached(speaksDdc: true);
 
-            await Run(new ApplyBlackoutOverlayCommand { HardwareId = Id });
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled });
 
-            _dimmer.VerifyNoOtherCalls();
+            Assert.Empty(_dims);
         }
 
         [Fact]
-        public async Task AnUnknownScreen_IsSkippedQuietly()
+        public async Task A_screen_that_is_not_attached_is_left_alone()
         {
-            Connect();
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled, LowerBrightness = true });
 
-            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id, LowerBrightness = true }));
-
-            Assert.Null(error);
-            _overlays.VerifyNoOtherCalls();
-            _dimmer.VerifyNoOtherCalls();
+            Assert.Empty(_blackout.Requests);
+            Assert.Empty(_dims);
         }
 
         [Fact]
-        public async Task AFailingOverlay_IsSwallowed()
+        public async Task An_overlay_failure_does_not_reach_the_caller()
         {
-            Connect(Screen(ddc: false));
-            _overlays.Setup(o => o.ShowBlackoutOverlayAsync(It.IsAny<string>(), It.IsAny<Rect>(), It.IsAny<OverlayScene>()))
-                     .ThrowsAsync(new InvalidOperationException("no window"));
+            Attached(speaksDdc: false);
+            _blackout.FailWith = new InvalidOperationException("dispatcher shut down");
 
-            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id }));
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled });
 
-            Assert.Null(error);
+            Assert.Single(_blackout.Requests);
         }
 
         [Fact]
-        public async Task AFailingScreenScan_IsSwallowedAndNothingHappens()
+        public async Task A_failing_screen_scan_is_absorbed_and_nothing_is_done()
         {
-            _screens.Setup(s => s.GetCurrentMonitorsAsync()).ThrowsAsync(new InvalidOperationException("enumeration failed"));
+            _scan = () => throw new InvalidOperationException("display enumeration failed");
 
-            Exception? error = await Record.ExceptionAsync(() => Run(new ApplyBlackoutOverlayCommand { HardwareId = Id }));
+            await Handle(new ApplyBlackoutOverlayCommand { HardwareId = Oled, LowerBrightness = true });
 
-            Assert.Null(error);
-            _overlays.VerifyNoOtherCalls();
-            _dimmer.VerifyNoOtherCalls();
+            Assert.Empty(_blackout.Requests);
+            Assert.Empty(_dims);
         }
     }
 }

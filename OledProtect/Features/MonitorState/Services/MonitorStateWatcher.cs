@@ -8,211 +8,155 @@ using Serilog;
 
 namespace OledProtect.Features.MonitorState.Services
 {
-    // Polls the cheap basic screen list every couple of seconds. Only when a difference has been seen on two
-    // polls in a row does it do the expensive full re-scan and send a synchronisation: Windows briefly
-    // reports half-finished arrangements while screens wake up or switch modes.
-    public class MonitorStateWatcher : IMonitorStateWatcher
+    // One background loop per Start: announce the screens once, then sample the quick (unprobed) reading on a
+    // PeriodicTimer. A new arrangement has to be sampled twice in a row before the expensive probed scan runs
+    // and a SynchronizeMonitorStateCommand goes out, because Windows shows in-between layouts while panels
+    // wake up or change mode. All loop state lives in the loop itself, so no locking is needed for it.
+    public sealed class MonitorStateWatcher : IMonitorStateWatcher
     {
-        private readonly IMonitorInfoManager _screenSource;
-        private readonly IMediator _commands;
-        private readonly System.Timers.Timer _ticker;
-        private readonly object _sync = new();
-        private readonly ChangeFilter _filter = new();
+        private const int SamplesToConfirm = 2;
+        private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(2);
 
-        // Full (enriched) list from the last sync; becomes the "old" side of the next one.
-        private IReadOnlyList<MonitorInfo> _syncedMonitors = [];
+        private readonly IMonitorInfoManager _monitors;
+        private readonly IMediator _mediator;
+        private readonly TimeSpan _interval;
+        private readonly object _gate = new();
 
-        private int _busy;              // 1 while a poll runs; overlapping ticks are dropped, not queued
-        private volatile bool _halted;  // set by Stop, checked before every dispatch
+        // Non-null while a loop is alive; cancelling it is how Stop ends that loop.
+        private CancellationTokenSource? _loop;
 
-        public MonitorStateWatcher(IMonitorInfoManager monitorInfoManager, IMediator mediator, double pollIntervalMs = 2000)
+        public MonitorStateWatcher(IMonitorInfoManager monitorInfoManager, IMediator mediator, TimeSpan? pollInterval = null)
         {
-            _screenSource = monitorInfoManager;
-            _commands = mediator;
-            _ticker = new System.Timers.Timer(pollIntervalMs) { AutoReset = true };
-            _ticker.Elapsed += (_, _) => OnTick();
+            _monitors = monitorInfoManager;
+            _mediator = mediator;
+            _interval = pollInterval ?? DefaultInterval;
         }
 
         public void Start()
         {
-            lock (_sync)
+            CancellationTokenSource loop;
+            lock (_gate)
             {
-                if (_ticker.Enabled)
+                if (_loop is not null)
                 {
                     return;
                 }
+
+                loop = _loop = new CancellationTokenSource();
             }
 
-            _halted = false;
-            _ = BeginAsync();
+            _ = RunAsync(loop);
         }
 
         public void Stop()
         {
-            _halted = true;
-            lock (_sync)
+            lock (_gate)
             {
-                _ticker.Stop();
+                _loop?.Cancel();
+                _loop = null;
             }
         }
 
-        public void Dispose() => _ticker.Dispose();
+        public void Dispose() => Stop();
 
-        // First full read and sync, then polling starts.
-        private async Task BeginAsync()
+        private async Task RunAsync(CancellationTokenSource loop)
         {
+            CancellationToken stopped = loop.Token;
             try
             {
-                IReadOnlyList<MonitorInfo> monitors = await _screenSource.GetCurrentMonitorsAsync();
-                if (_halted)
-                {
-                    return;
-                }
-
-                IReadOnlyList<MonitorInfo> baseline = _screenSource.GetLatestMonitorsBasicInfo();
-                lock (_sync)
-                {
-                    _syncedMonitors = monitors;
-                    _filter.Accept(baseline);
-                }
-
-                // Start-up counts as "everything just appeared": nothing before, all of these after.
-                var firstSync = new SynchronizeMonitorStateCommand(oldMonitors: [], newMonitors: monitors);
-                await _commands.SendAsync(firstSync);
-
-                lock (_sync)
-                {
-                    if (!_halted)
-                    {
-                        _ticker.Start();
-                    }
-                }
+                await WatchAsync(stopped);
+            }
+            catch (OperationCanceledException) when (stopped.IsCancellationRequested)
+            {
+                // Normal end after Stop.
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Could not read the screens at start-up; screen changes will not be followed.");
-            }
-        }
-
-        private void OnTick()
-        {
-            if (_halted)
-            {
-                return;
-            }
-
-            if (Interlocked.Exchange(ref _busy, 1) == 1)
-            {
-                Log.Debug("Screen poll still running; skipping this tick.");
-                return;
-            }
-
-            _ = PollAsync();
-        }
-
-        private async Task PollAsync()
-        {
-            try
-            {
-                IReadOnlyList<MonitorInfo> reading = _screenSource.GetLatestMonitorsBasicInfo();
-
-                bool confirmed;
-                lock (_sync)
-                {
-                    confirmed = _filter.IsConfirmedChange(reading);
-                }
-
-                if (!confirmed)
-                {
-                    return;
-                }
-
-                // The heavy part (hardware IDs, DDC/CI) runs outside the lock.
-                IReadOnlyList<MonitorInfo> rescanned = await _screenSource.RefreshMonitorsAsync();
-                if (rescanned.Count == 0)
-                {
-                    Log.Warning("Full screen re-scan came back empty; keeping the previous screen list.");
-                    return;
-                }
-
-                if (_halted)
-                {
-                    Log.Debug("Watcher stopped during the re-scan; not synchronising.");
-                    return;
-                }
-
-                IReadOnlyList<MonitorInfo> previous;
-                lock (_sync)
-                {
-                    previous = _syncedMonitors;
-                    _syncedMonitors = rescanned;
-                    _filter.Accept(reading);
-                }
-
-                await SendSyncAsync(previous, rescanned);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Checking for screen changes failed.");
+                Log.Error(ex, "Display watcher gave up: the initial screen scan or announcement failed.");
             }
             finally
             {
-                Volatile.Write(ref _busy, 0);
+                lock (_gate)
+                {
+                    if (ReferenceEquals(_loop, loop))
+                    {
+                        _loop = null;
+                    }
+                }
+
+                loop.Dispose();
             }
         }
 
-        private async Task SendSyncAsync(IReadOnlyList<MonitorInfo> previous, IReadOnlyList<MonitorInfo> current)
+        private async Task WatchAsync(CancellationToken stopped)
         {
-            try
+            IReadOnlyList<MonitorInfo> announced = await _monitors.GetCurrentMonitorsAsync();
+            if (stopped.IsCancellationRequested)
             {
-                await _commands.SendAsync(new SynchronizeMonitorStateCommand(previous, current));
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Screens changed, but synchronising to the new set failed.");
-            }
-        }
-
-        // Debounces readings: a change counts only when the same new arrangement is read twice in a row.
-        // Not thread-safe on its own; the watcher calls it under its lock.
-        private sealed class ChangeFilter
-        {
-            // Always a complete basic reading, never the enriched list (which drops screens whose
-            // hardware ID did not resolve and would therefore look like a permanent change).
-            private IReadOnlyList<MonitorInfo> _accepted = [];
-            private IReadOnlyList<MonitorInfo>? _candidate;
-
-            public void Accept(IReadOnlyList<MonitorInfo> reading)
-            {
-                _accepted = reading;
-                _candidate = null;
+                return;
             }
 
-            public bool IsConfirmedChange(IReadOnlyList<MonitorInfo> reading)
+            // Compare quick readings with quick readings only: the probed list leaves out screens without a
+            // hardware ID and would never equal a quick reading.
+            IReadOnlyList<MonitorInfo> knownLayout = _monitors.GetLatestMonitorsBasicInfo();
+
+            // At start-up every screen is new.
+            await _mediator.SendAsync(new SynchronizeMonitorStateCommand([], announced));
+
+            IReadOnlyList<MonitorInfo>? suspect = null;
+            int sightings = 0;
+
+            // PeriodicTimer never overlaps: a slow round simply swallows the ticks it missed.
+            using var timer = new PeriodicTimer(_interval);
+            while (await timer.WaitForNextTickAsync(stopped))
             {
-                // An empty set is what Windows reports mid-switch; it also cancels a half-seen change.
-                if (reading.Count == 0)
+                try
                 {
-                    Log.Debug("Screen poll saw no screens at all; ignoring it as a glitch.");
-                    _candidate = null;
-                    return false;
-                }
+                    IReadOnlyList<MonitorInfo> sample = _monitors.GetLatestMonitorsBasicInfo();
 
-                if (DisplaySetComparer.AreEquivalent(_accepted, reading))
+                    if (sample.Count == 0)
+                    {
+                        Log.Debug("Display watcher: blank sample (display switch in progress?), skipped.");
+                        sightings = 0;
+                        continue;
+                    }
+
+                    if (DisplaySetComparer.AreEquivalent(knownLayout, sample))
+                    {
+                        sightings = 0;
+                        continue;
+                    }
+
+                    sightings = sightings > 0 && DisplaySetComparer.AreEquivalent(suspect, sample) ? sightings + 1 : 1;
+                    suspect = sample;
+                    if (sightings < SamplesToConfirm)
+                    {
+                        Log.Debug("Display watcher: layout differs, waiting for sample {Seen} of {Needed}.", sightings + 1, SamplesToConfirm);
+                        continue;
+                    }
+
+                    sightings = 0;
+                    IReadOnlyList<MonitorInfo> probed = await _monitors.RefreshMonitorsAsync();
+                    if (probed.Count == 0)
+                    {
+                        Log.Warning("Display watcher: probed scan found no screens; previous list kept.");
+                        continue;
+                    }
+
+                    if (stopped.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    IReadOnlyList<MonitorInfo> previous = announced;
+                    announced = probed;
+                    knownLayout = sample;
+                    await _mediator.SendAsync(new SynchronizeMonitorStateCommand(previous, probed));
+                }
+                catch (Exception ex)
                 {
-                    _candidate = null;
-                    return false;
+                    Log.Error(ex, "Display watcher: handling a layout sample failed.");
                 }
-
-                if (DisplaySetComparer.AreEquivalent(_candidate, reading))
-                {
-                    _candidate = null;
-                    return true;
-                }
-
-                Log.Debug("Screen arrangement looks different; waiting for one more matching poll.");
-                _candidate = reading;
-                return false;
             }
         }
     }

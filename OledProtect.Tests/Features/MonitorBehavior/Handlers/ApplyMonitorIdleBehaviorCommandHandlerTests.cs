@@ -1,4 +1,3 @@
-using Moq;
 using OledProtect.Features.MonitorBehavior.Commands;
 using OledProtect.Features.MonitorBehavior.Handlers;
 using OledProtect.Features.MonitorBehavior.Models;
@@ -7,81 +6,78 @@ using OledProtect.Features.MonitorBlackout.Models;
 using OledProtect.Features.MonitorDimming.Commands;
 using OledProtect.Features.MonitorIdleDetection.Models;
 using OledProtect.Features.UserSettings.Models;
-using OledProtect.Messaging.Interfaces;
+using OledProtect.Tests.TestDoubles;
 using System.Windows;
 
 namespace OledProtect.Tests.Features.MonitorBehavior.Handlers
 {
     public class ApplyMonitorIdleBehaviorCommandHandlerTests
     {
-        private const string Id = "SCREEN-7";
+        private const string Panel = "ASUS-PG32";
 
-        private readonly Mock<IMediator> _mediator = new();
+        private readonly RecordingMediator _mediator = new();
 
-        private Task GoIdle(MonitorBehaviorType kind, double dimLevel = 15, bool lowerBrightness = false)
+        private Task Idle(MonitorSettings settings)
         {
-            var config = new MonitorSettings
-            {
-                HardwareId = Id,
-                Behavior = kind,
-                DimLevel = dimLevel,
-                LowerBrightnessOnBlackout = lowerBrightness
-            };
-            var idle = new MonitorIdleStateEventArgs(Id, 1, new Rect(0, 0, 1920, 1080), config, nint.Zero, ActivityReason.None);
-            return new ApplyMonitorIdleBehaviorCommandHandler(_mediator.Object).HandleAsync(new ApplyMonitorIdleBehaviorCommand(idle));
+            settings.HardwareId = Panel;
+            var snapshot = new MonitorIdleStateEventArgs(Panel, 2, new Rect(-3840, 0, 3840, 2160), settings, 0, ActivityReason.None);
+            return new ApplyMonitorIdleBehaviorCommandHandler(_mediator).HandleAsync(new ApplyMonitorIdleBehaviorCommand(snapshot));
         }
+
+        private ApplyBlackoutOverlayCommand OnlyCover() => Assert.Single(_mediator.SentOf<ApplyBlackoutOverlayCommand>());
 
         [Theory]
         [InlineData(MonitorBehaviorType.Blackout, OverlayScene.Black)]
         [InlineData(MonitorBehaviorType.Screensaver, OverlayScene.Stars)]
         [InlineData(MonitorBehaviorType.Flights, OverlayScene.Flights)]
-        public async Task OverlayBehaviours_SendTheMatchingScene(MonitorBehaviorType behavior, OverlayScene scene)
+        public async Task Cover_behaviours_ask_for_their_own_scene(MonitorBehaviorType behaviour, OverlayScene scene)
         {
-            await GoIdle(behavior);
+            await Idle(new MonitorSettings { Behavior = behaviour });
 
-            _mediator.Verify(m => m.SendAsync(It.Is<ApplyBlackoutOverlayCommand>(c => c.HardwareId == Id && c.Scene == scene)), Times.Once);
-            _mediator.Verify(m => m.SendAsync(It.IsAny<ApplyDimCommand>()), Times.Never);
+            ApplyBlackoutOverlayCommand cover = OnlyCover();
+            Assert.Equal((Panel, scene), (cover.HardwareId, cover.Scene));
+            Assert.Empty(_mediator.SentOf<ApplyDimCommand>());
         }
 
         [Theory]
-        [InlineData(MonitorBehaviorType.Blackout, true, true)]
         [InlineData(MonitorBehaviorType.Blackout, false, false)]
+        [InlineData(MonitorBehaviorType.Blackout, true, true)]
         [InlineData(MonitorBehaviorType.Screensaver, true, false)]
         [InlineData(MonitorBehaviorType.Flights, true, false)]
-        public async Task OnlyPlainBlackout_PassesOnLowerBrightness(MonitorBehaviorType behavior, bool setting, bool expected)
+        public async Task Only_plain_black_may_switch_the_backlight_down(MonitorBehaviorType behaviour, bool userWantsIt, bool expected)
         {
-            await GoIdle(behavior, lowerBrightness: setting);
+            await Idle(new MonitorSettings { Behavior = behaviour, LowerBrightnessOnBlackout = userWantsIt });
 
-            _mediator.Verify(m => m.SendAsync(It.Is<ApplyBlackoutOverlayCommand>(c => c.LowerBrightness == expected)), Times.Once);
+            Assert.Equal(expected, OnlyCover().LowerBrightness);
         }
 
         [Theory]
-        [InlineData(20, 20)]
-        [InlineData(42.9, 42)]
-        public async Task Dim_SendsTheLevelRoundedTowardZero(double level, int expected)
+        [InlineData(35.0, 35)]
+        [InlineData(7.99, 7)]
+        [InlineData(0.4, 0)]
+        public async Task Dimming_passes_the_level_with_the_fraction_cut_off(double configured, int sent)
         {
-            await GoIdle(MonitorBehaviorType.Dim, dimLevel: level);
+            await Idle(new MonitorSettings { Behavior = MonitorBehaviorType.Dim, DimLevel = configured });
 
-            _mediator.Verify(m => m.SendAsync(It.Is<ApplyDimCommand>(c => c.HardwareId == Id && c.DimLevel == expected)), Times.Once);
-            _mediator.Verify(m => m.SendAsync(It.IsAny<ApplyBlackoutOverlayCommand>()), Times.Never);
+            ApplyDimCommand dim = Assert.Single(_mediator.SentOf<ApplyDimCommand>());
+            Assert.Equal((Panel, sent), (dim.HardwareId, dim.DimLevel));
+            Assert.Single(_mediator.Sent);
         }
 
         [Fact]
-        public async Task None_DoesNothing()
+        public async Task No_behaviour_sends_nothing()
         {
-            await GoIdle(MonitorBehaviorType.None);
+            await Idle(new MonitorSettings { Behavior = MonitorBehaviorType.None });
 
-            _mediator.VerifyNoOtherCalls();
+            Assert.Empty(_mediator.Sent);
         }
 
         [Fact]
-        public async Task AFailingFollowUpCommand_ReachesTheCaller()
+        public async Task A_failing_follow_up_command_is_passed_on()
         {
-            _mediator.Setup(m => m.SendAsync(It.IsAny<ApplyBlackoutOverlayCommand>())).ThrowsAsync(new InvalidOperationException("unregistered"));
+            _mediator.Failing<ApplyDimCommand>(new TimeoutException("ddc"));
 
-            var error = await Record.ExceptionAsync(() => GoIdle(MonitorBehaviorType.Blackout));
-
-            Assert.IsType<InvalidOperationException>(error);
+            await Assert.ThrowsAsync<TimeoutException>(() => Idle(new MonitorSettings { Behavior = MonitorBehaviorType.Dim }));
         }
     }
 }

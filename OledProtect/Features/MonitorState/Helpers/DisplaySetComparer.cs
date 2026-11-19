@@ -1,15 +1,17 @@
 using OledProtect.Features.MonitorInformation.Models;
+using System.Windows;
 
 namespace OledProtect.Features.MonitorState.Helpers
 {
-    // Tells whether two snapshots of the connected screens describe the same arrangement. DDC/CI
-    // capabilities are deliberately not compared: they are probed later and may differ between reads.
+    // Decides whether two screen snapshots show the same desk. Rule:
+    //  * both snapshots exist and hold the same number of screens;
+    //  * every screen has exactly one counterpart under the same GDI device name;
+    //  * counterparts are the same panel: equal hardware IDs, or one side's ID is unknown (lookups fail
+    //    now and then, which must not look like a swap);
+    //  * counterparts are laid out identically (position/size, DPI, primary flag, display number, topology).
+    // DDC/CI capabilities are ignored, they are probed later and may come and go.
     public static class DisplaySetComparer
     {
-        // Matching runs in two rounds. Round one pairs screens by hardware ID, so a panel that Windows
-        // renamed (\\.\DISPLAY1 -> DISPLAY2) still finds itself and the rename shows up as a difference.
-        // Round two handles screens whose hardware ID could not be read in one of the snapshots: those
-        // are paired by device name, so a flaky ID lookup is not mistaken for an unplugged screen.
         public static bool AreEquivalent(IReadOnlyList<MonitorInfo>? first, IReadOnlyList<MonitorInfo>? second)
         {
             if (first is null || second is null || first.Count != second.Count)
@@ -17,60 +19,49 @@ namespace OledProtect.Features.MonitorState.Helpers
                 return false;
             }
 
-            var claimed = new bool[second.Count];
-            var leftOver = new List<MonitorInfo>();
+            // The device name is part of the layout, so a valid counterpart always shares it: join on it.
+            ILookup<string, MonitorInfo> slotsAfter = second.ToLookup(m => m.DeviceName, StringComparer.Ordinal);
 
-            foreach (MonitorInfo screen in first)
+            return first
+                .GroupBy(m => m.DeviceName, StringComparer.Ordinal)
+                .All(slot => SlotMatches([.. slot], [.. slotsAfter[slot.Key]]));
+        }
+
+        // Pairs the screens that share one device name (normally one on each side). Known IDs go first and
+        // look for their exact twin before settling for a partner whose ID is unknown.
+        private static bool SlotMatches(List<MonitorInfo> before, List<MonitorInfo> after)
+        {
+            if (before.Count != after.Count)
             {
-                int partner = screen.HardwareId.Length == 0
-                    ? -1
-                    : Claim(second, claimed, other => other.HardwareId == screen.HardwareId);
+                return false;
+            }
 
-                if (partner < 0)
+            foreach (MonitorInfo screen in before.OrderBy(m => m.HardwareId.Length == 0))
+            {
+                Placement wanted = Placement.Of(screen);
+                int hit = after.FindIndex(o => o.HardwareId == screen.HardwareId && Placement.Of(o) == wanted);
+                if (hit < 0)
                 {
-                    leftOver.Add(screen);
+                    hit = after.FindIndex(o => SamePanel(screen, o) && Placement.Of(o) == wanted);
                 }
-                else if (!LooksTheSame(screen, second[partner]))
+
+                if (hit < 0)
                 {
                     return false;
                 }
+
+                after.RemoveAt(hit);
             }
 
-            foreach (MonitorInfo screen in leftOver)
-            {
-                // Two different resolved IDs under one name are two different panels, never a match.
-                int partner = Claim(second, claimed, other =>
-                    other.DeviceName == screen.DeviceName && (screen.HardwareId.Length == 0 || other.HardwareId.Length == 0));
-
-                if (partner < 0 || !LooksTheSame(screen, second[partner]))
-                {
-                    return false;
-                }
-            }
-
-            // Equal counts and every screen of the first snapshot paired means none of the second is left.
             return true;
         }
 
-        // Marks the first unclaimed entry that fits as taken and returns its index, or -1.
-        private static int Claim(IReadOnlyList<MonitorInfo> pool, bool[] claimed, Func<MonitorInfo, bool> fits)
+        private static bool SamePanel(MonitorInfo a, MonitorInfo b) =>
+            a.HardwareId.Length == 0 || b.HardwareId.Length == 0 || string.Equals(a.HardwareId, b.HardwareId, StringComparison.Ordinal);
+
+        private readonly record struct Placement(Rect Area, uint Dpi, bool Primary, int Number, string Topology)
         {
-            for (int i = 0; i < pool.Count; i++)
-            {
-                if (!claimed[i] && fits(pool[i]))
-                {
-                    claimed[i] = true;
-                    return i;
-                }
-            }
-
-            return -1;
+            public static Placement Of(MonitorInfo m) => new(m.Bounds, m.Dpi, m.IsPrimary, m.DisplayNumber, m.TopologyLabel);
         }
-
-        // Everything about how a paired screen is presented. The device name belongs here because DDC/CI
-        // addresses screens by it: same panel under a new name still needs re-syncing.
-        private static bool LooksTheSame(MonitorInfo a, MonitorInfo b) =>
-            (a.DeviceName, a.Bounds, a.Dpi, a.IsPrimary, a.DisplayNumber, a.TopologyLabel)
-            == (b.DeviceName, b.Bounds, b.Dpi, b.IsPrimary, b.DisplayNumber, b.TopologyLabel);
     }
 }
