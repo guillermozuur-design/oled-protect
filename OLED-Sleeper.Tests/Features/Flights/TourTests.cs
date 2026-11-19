@@ -301,3 +301,20 @@ namespace OLED_Sleeper.Tests.Features.Flights
         }
     }
 }
+
+namespace OLED_Sleeper.Tests.Features.BrightnessSchedule
+{
+    using OLED_Sleeper.Features.BrightnessSchedule.Services;
+
+    public class ManualBrightnessTests
+    {
+        [Theory]
+        [InlineData(70, 1, 75)]
+        [InlineData(70, -2, 60)]
+        [InlineData(72, 1, 75)]   // rounded to a step first
+        [InlineData(98, 3, 100)]  // never above 100
+        [InlineData(10, -5, 5)]   // never below 5 (the screen stays visible)
+        public void Turn_StepsOfFive_WithinLimits(int current, int notches, int expected) =>
+            Assert.Equal(expected, ManualBrightness.Turn(current, notches));
+    }
+}

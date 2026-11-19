@@ -57,6 +57,8 @@ onofficiële versie met veel uitbreidingen.
 **Altijd bij de hand**
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
 - **Snelmenu** zoals Win+P: houd **Alt** vast en tik **`** (toets onder Esc), tik verder om te kiezen, loslaten = toepassen. Sneltoets is instelbaar.
+  In het snelmenu staat ook **Helderheid**: sta op die rij en draai aan het muiswiel om alle schermen per 5% lichter
+  of donkerder te zetten (via het scherm zelf, tot de volgende stap van het helderheidsschema).
 - **Alle schermen uit als je weg bent** na X minuten — behalve het scherm waarop een video speelt.
 - **Apps die het scherm aan houden**: vink apps aan (VLC, Netflix-app, OBS, Zoom, Teams, …) of kies zelf een open programma. Zolang die app openstaat blijft het scherm waar hij op staat aan — of alle schermen — wat de timers ook zeggen.
 - Start verborgen met Windows; staat in het systeemvak.
@@ -82,7 +84,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 320 tests
+dotnet test OLED-Sleeper.sln                       # 325 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

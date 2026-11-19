@@ -32,9 +32,13 @@ namespace OLED_Sleeper.UI.Services
 
         private readonly OLED_Sleeper.Features.Sky.PanoramaSettings _panorama;
 
+        private readonly OLED_Sleeper.Features.BrightnessSchedule.Services.ManualBrightnessService? _brightness;
+
         public TrayIconService(IWorkModeService workModeService, IMonitorInfoManager monitorInfoManager, GlobalHotkeyService hotkeyService,
-                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama, ScreensaverPreview preview)
+                               OLED_Sleeper.Features.Sky.PanoramaSettings panorama, ScreensaverPreview preview,
+                               OLED_Sleeper.Features.BrightnessSchedule.Services.ManualBrightnessService? brightness = null)
         {
+            _brightness = brightness;
             _panorama = panorama;
             _preview = preview;
             _workModeService = workModeService;
@@ -94,7 +98,8 @@ namespace OLED_Sleeper.UI.Services
                 () => _preview.Show(allScreens: true, Features.MonitorBlackout.Models.OverlayScene.Flights),
                 monitor.Bounds,
                 _hotkeyService.HoldKey,
-                $"{modifier} vasthouden + {key} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten");
+                $"{modifier} vasthouden + {key} tikken = volgende · loslaten = kiezen · of klik · Esc = sluiten",
+                _brightness);
             _quickPanel.Closed += (_, _) => _quickPanel = null;
             _quickPanel.Show();
         }

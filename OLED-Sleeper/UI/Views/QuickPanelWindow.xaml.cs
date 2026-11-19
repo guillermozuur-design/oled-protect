@@ -1,3 +1,4 @@
+using OLED_Sleeper.Features.BrightnessSchedule.Services;
 using OLED_Sleeper.Features.WorkMode.Services;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
@@ -26,7 +27,7 @@ namespace OLED_Sleeper.UI.Views
         private static readonly TimeSpan Linger = TimeSpan.FromSeconds(3.5);
         private static readonly TimeSpan CloseAfterChoice = TimeSpan.FromSeconds(0.9);
 
-        private sealed record Option(string Icon, string Title, string Subtitle, bool IsActive, Action Run);
+        private sealed record Option(string Icon, string Title, string Subtitle, bool IsActive, Action Run, bool IsBrightness = false);
 
         private const int VK_ESCAPE = 0x1B;
         private const int GWL_EXSTYLE = -20;
@@ -37,6 +38,10 @@ namespace OLED_Sleeper.UI.Views
         private readonly Action _openApp;
         private readonly Action _previewScreensaver;
         private readonly Action _previewFlights;
+        private readonly ManualBrightnessService? _brightness;
+        private TextBlock? _brightnessTitle;
+        private MouseHook? _mouseHook;
+        private int _wheelRest;
         private readonly Rect _monitorBounds;
         private readonly int _holdKey;
         private readonly DispatcherTimer _poll;
@@ -51,9 +56,10 @@ namespace OLED_Sleeper.UI.Views
         /// <param name="holdKey">Virtual key of the modifier held with the hotkey (e.g. VK_MENU for Alt).</param>
         /// <param name="hint">Short usage hint shown at the bottom.</param>
         public QuickPanelWindow(IWorkModeService workMode, Action openApp, Action previewScreensaver, Action previewFlights, Rect monitorBounds,
-                                int holdKey, string hint)
+                                int holdKey, string hint, ManualBrightnessService? brightness = null)
         {
             InitializeComponent();
+            _brightness = brightness;
             _workMode = workMode;
             _openApp = openApp;
             _previewScreensaver = previewScreensaver;
@@ -66,7 +72,13 @@ namespace OLED_Sleeper.UI.Views
             _index = _indexAtPress = Math.Max(0, _options.FindIndex(o => o.IsActive));
             Highlight();
 
-            SourceInitialized += (_, _) => MakeNonActivating();
+            SourceInitialized += (_, _) =>
+            {
+                MakeNonActivating();
+                // The scroll wheel changes the brightness while that row is selected (wherever the mouse is).
+                if (_brightness != null) _mouseHook = new MouseHook(OnWheel);
+            };
+            Closed += (_, _) => _mouseHook?.Dispose();
             Loaded += (_, _) => PlaceBottomRight();
 
             _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(25) };
@@ -88,6 +100,8 @@ namespace OLED_Sleeper.UI.Views
                 new("", "Vliegtuigen bekijken", "Live kaart op alle schermen; muis of toets = stoppen", false, _previewFlights),
                 new("", "App openen", "Instellingen per scherm", false, _openApp),
             };
+            if (_brightness != null)
+                _options.Insert(_options.Count - 1, new("", BrightnessTitle(), "Scroll met het muiswiel om aan te passen (alle schermen)", false, () => { }, IsBrightness: true));
 
             Rows.Children.Clear();
             _rows.Clear();
@@ -120,7 +134,9 @@ namespace OLED_Sleeper.UI.Views
                 }
 
                 var texts = new StackPanel { Margin = new Thickness(6, 0, 0, 0) };
-                texts.Children.Add(new TextBlock { Text = option.Title, FontSize = 14.5, Foreground = (Brush)FindResource("PrimaryForegroundColor") });
+                var title = new TextBlock { Text = option.Title, FontSize = 14.5, Foreground = (Brush)FindResource("PrimaryForegroundColor") };
+                if (option.IsBrightness) _brightnessTitle = title;
+                texts.Children.Add(title);
                 texts.Children.Add(new TextBlock { Text = option.Subtitle, FontSize = 11, Margin = new Thickness(0, 1, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("SecondaryForegroundColor") });
                 grid.Children.Add(texts);
 
@@ -131,6 +147,22 @@ namespace OLED_Sleeper.UI.Views
                 Rows.Children.Add(row);
                 _rows.Add(row);
             }
+        }
+
+        private string BrightnessTitle() => $"Helderheid {_brightness?.Current ?? 100}%";
+
+        /// <summary>A wheel turn anywhere: on the brightness row it changes the brightness (and goes no further).</summary>
+        private bool OnWheel(int delta)
+        {
+            if (_closing || _brightness == null || !_options[_index].IsBrightness) return false;
+            _wheelRest += delta;
+            int notches = _wheelRest / 120;
+            if (notches == 0) return true;
+            _wheelRest -= notches * 120;
+            _brightness.Turn(notches);
+            if (_brightnessTitle != null) _brightnessTitle.Text = BrightnessTitle();
+            if (!_holding) _closeAt = DateTime.UtcNow + Linger;
+            return true;
         }
 
         /// <summary>The hotkey was tapped again: move the highlight on (and hold-to-choose starts again).</summary>
@@ -170,6 +202,14 @@ namespace OLED_Sleeper.UI.Views
         {
             if (_closing) return;
             var option = _options[index];
+
+            if (option.IsBrightness)
+            {
+                // Nothing to do on choosing: the panel stays a moment so you can scroll.
+                _holding = false;
+                _closeAt = DateTime.UtcNow + Linger;
+                return;
+            }
 
             if (option.IsActive) { CloseNow(); return; }
 
@@ -217,6 +257,47 @@ namespace OLED_Sleeper.UI.Views
         }
 
         private static bool IsDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+        /// <summary>Sees every scroll wheel turn while the panel is open; a turn it handles goes no further.</summary>
+        private sealed class MouseHook : IDisposable
+        {
+            private const int WH_MOUSE_LL = 14, WM_MOUSEWHEEL = 0x020A;
+            private readonly HookProc _proc; // keep the delegate alive while hooked
+            private readonly Func<int, bool> _onWheel;
+            private nint _hook;
+
+            public MouseHook(Func<int, bool> onWheel)
+            {
+                _onWheel = onWheel;
+                _proc = Callback;
+                _hook = SetWindowsHookEx(WH_MOUSE_LL, _proc, GetModuleHandle(null), 0);
+            }
+
+            private nint Callback(int code, nint wParam, nint lParam)
+            {
+                if (code >= 0 && wParam == WM_MOUSEWHEEL)
+                {
+                    // MSLLHOOKSTRUCT: the wheel distance is the high word of mouseData (after the 8-byte point).
+                    int delta = (short)((Marshal.ReadInt32(lParam, 8) >> 16) & 0xFFFF);
+                    if (_onWheel(delta)) return 1;
+                }
+                return CallNextHookEx(_hook, code, wParam, lParam);
+            }
+
+            public void Dispose()
+            {
+                if (_hook == nint.Zero) return;
+                UnhookWindowsHookEx(_hook);
+                _hook = nint.Zero;
+            }
+
+            private delegate nint HookProc(int code, nint wParam, nint lParam);
+
+            [DllImport("user32.dll")] private static extern nint SetWindowsHookEx(int id, HookProc proc, nint module, uint threadId);
+            [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(nint hook);
+            [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nint wParam, nint lParam);
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern nint GetModuleHandle(string? name);
+        }
 
         [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hWnd, int index);
