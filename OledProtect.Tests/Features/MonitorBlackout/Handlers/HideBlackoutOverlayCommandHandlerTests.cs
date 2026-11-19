@@ -1,37 +1,35 @@
-using Moq;
 using OledProtect.Features.MonitorBlackout.Commands;
 using OledProtect.Features.MonitorBlackout.Handlers;
-using OledProtect.Features.MonitorBlackout.Services.Interfaces;
+using OledProtect.Tests.TestDoubles;
+using Request = OledProtect.Tests.TestDoubles.RecordingBlackoutService.Request;
 
 namespace OledProtect.Tests.Features.MonitorBlackout.Handlers
 {
     public class HideBlackoutOverlayCommandHandlerTests
     {
-        private readonly Mock<IMonitorBlackoutService> _overlays = new();
+        private readonly RecordingBlackoutService _blackout = new();
 
-        private Task Run(string id) =>
-            new HideBlackoutOverlayCommandHandler(_overlays.Object).HandleAsync(new HideBlackoutOverlayCommand { HardwareId = id });
+        private Task Handle(string hardwareId) =>
+            new HideBlackoutOverlayCommandHandler(_blackout).HandleAsync(new HideBlackoutOverlayCommand { HardwareId = hardwareId });
 
         [Theory]
-        [InlineData("SCREEN-7")]
+        [InlineData("DEL-01")]
         [InlineData("")]
-        public async Task Hides_TheOverlayOfTheGivenScreen(string id)
+        public async Task Asks_the_service_to_uncover_exactly_that_screen(string hardwareId)
         {
-            await Run(id);
+            await Handle(hardwareId);
 
-            _overlays.Verify(o => o.HideBlackoutOverlayAsync(id), Times.Once);
-            _overlays.VerifyNoOtherCalls();
+            Assert.Equal([new Request("hide", hardwareId)], _blackout.Requests);
         }
 
         [Fact]
-        public async Task AFailingOverlay_IsSwallowed()
+        public async Task A_service_failure_is_logged_not_thrown()
         {
-            _overlays.Setup(o => o.HideBlackoutOverlayAsync("SCREEN-7")).ThrowsAsync(new InvalidOperationException("boom"));
+            _blackout.FailWith = new InvalidOperationException("window already gone");
 
-            Exception? error = await Record.ExceptionAsync(() => Run("SCREEN-7"));
+            await Handle("DEL-01");
 
-            Assert.Null(error);
-            _overlays.Verify(o => o.HideBlackoutOverlayAsync("SCREEN-7"), Times.Once);
+            Assert.Single(_blackout.Requests);
         }
     }
 }

@@ -2,59 +2,72 @@ using OledProtect.Infrastructure.Runtime.Interfaces;
 
 namespace OledProtect.Tests.TestDoubles
 {
-    // Synchronous IDispatcher: work runs inline and every entry point is counted, so tests can check that
-    // code marshalled to the "UI thread" without having one.
-    public class ImmediateDispatcher : IDispatcher
+    // IDispatcher without a UI thread: every call runs on the spot and is written to a journal, so a test can
+    // see which entry point the code under test used and how often.
+    public sealed class ImmediateDispatcher : IDispatcher
     {
-        // Guards against code that keeps re-dispatching itself: fail the test, do not blow the stack.
-        private const int DepthLimit = 8;
-
-        private int _depth;
-        private int _sync;
-        private int _queued;
-        private int _afterInput;
-        private bool _uiThread = true;
-
-        public int InvokeCount => _sync;
-
-        public int InvokeAsyncCount => _queued;
-
-        public int AfterInputCount => _afterInput;
-
-        // Defaults to true. Set false to push the code under test onto its marshalling path; it always
-        // reads true while a dispatched action runs.
-        public bool IsOnUiThread
+        public enum Entry
         {
-            get => _uiThread;
-            set => _uiThread = value;
+            Invoke,
+            InvokeAsync,
+            InvokeAfterInput,
         }
 
-        public void Invoke(Action action) => Dispatch(ref _sync, action);
+        // Code that keeps scheduling itself would otherwise end in a stack overflow instead of a failed test.
+        private const int MaxNesting = 8;
 
-        public Task InvokeAsync(Action action) => Dispatch(ref _queued, action);
+        private readonly List<Entry> _journal = [];
+        private int _nesting;
+        private bool _callerIsUi = true;
 
-        public Task InvokeAfterInputAsync(Action action) => Dispatch(ref _afterInput, action);
+        public IReadOnlyList<Entry> Journal => _journal;
 
-        private Task Dispatch(ref int counter, Action action)
+        public int InvokeCount => CountOf(Entry.Invoke);
+
+        public int InvokeAsyncCount => CountOf(Entry.InvokeAsync);
+
+        public int AfterInputCount => CountOf(Entry.InvokeAfterInput);
+
+        // What the caller looks like (true unless a test says otherwise). Inside dispatched work it is always true.
+        public bool IsOnUiThread
         {
-            counter++;
-            if (_depth == DepthLimit)
-                throw new InvalidOperationException("Dispatcher re-entered " + DepthLimit + " times; likely an endless loop.");
+            get => _nesting > 0 || _callerIsUi;
+            set => _callerIsUi = value;
+        }
 
-            bool callerState = _uiThread;
-            _depth++;
-            _uiThread = true;
+        public void Invoke(Action action) => RunNow(Entry.Invoke, action);
+
+        public Task InvokeAsync(Action action)
+        {
+            RunNow(Entry.InvokeAsync, action);
+            return Task.CompletedTask;
+        }
+
+        public Task InvokeAfterInputAsync(Action action)
+        {
+            RunNow(Entry.InvokeAfterInput, action);
+            return Task.CompletedTask;
+        }
+
+        private int CountOf(Entry entry) => _journal.Count(e => e == entry);
+
+        private void RunNow(Entry entry, Action action)
+        {
+            _journal.Add(entry);
+            if (_nesting >= MaxNesting)
+            {
+                throw new InvalidOperationException($"Dispatched work nested {_nesting} deep; the code under test probably loops.");
+            }
+
+            _nesting++;
             try
             {
                 action();
             }
             finally
             {
-                _uiThread = callerState;
-                _depth--;
+                _nesting--;
             }
-
-            return Task.CompletedTask;
         }
     }
 }

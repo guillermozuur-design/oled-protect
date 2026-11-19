@@ -2,160 +2,176 @@ using OledProtect.Features.MonitorBlackout.Models;
 using OledProtect.Features.MonitorBlackout.Services;
 using OledProtect.Tests.TestDoubles;
 using System.Windows;
+using Phase = OledProtect.Tests.TestDoubles.FakeOverlayWindow.Phase;
 
 namespace OledProtect.Tests.Features.MonitorBlackout.Services
 {
     public class MonitorBlackoutServiceTests
     {
-        private static readonly Rect Left = new(0, 0, 1920, 1080);
-        private static readonly Rect Right = new(1920, 0, 2560, 1440);
+        private static readonly Rect Laptop = new(0, 0, 1920, 1200);
+        private static readonly Rect Ultrawide = new(1920, -240, 3440, 1440);
 
-        private readonly ImmediateDispatcher _ui = new();
-        private readonly FakeOverlayWindowFactory _windows = new();
-        private readonly MonitorBlackoutService _sut;
+        private readonly ImmediateDispatcher _uiQueue = new();
+        private readonly FakeOverlayWindowFactory _factory;
+        private readonly MonitorBlackoutService _covers;
 
-        public MonitorBlackoutServiceTests()
+        public MonitorBlackoutServiceTests() : this(withHandles: true)
         {
-            _sut = new MonitorBlackoutService(_ui, _windows);
+        }
+
+        private MonitorBlackoutServiceTests(bool withHandles)
+        {
+            _factory = new FakeOverlayWindowFactory(withHandles);
+            _covers = new MonitorBlackoutService(_uiQueue, _factory);
+        }
+
+        private FakeOverlayWindow OnlyWindow => Assert.Single(_factory.Built);
+
+        [Fact]
+        public async Task Covering_a_screen_shows_one_window_on_its_area()
+        {
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+
+            Assert.Equal(Phase.Visible, OnlyWindow.State);
+            Assert.Equal(Laptop, OnlyWindow.Area);
+            Assert.True(_covers.IsOverlayWindow(OnlyWindow.AssignedHandle));
+        }
+
+        [Theory]
+        [InlineData(OverlayScene.Black)]
+        [InlineData(OverlayScene.Stars)]
+        [InlineData(OverlayScene.Flights)]
+        public async Task The_requested_scene_reaches_the_window(OverlayScene scene)
+        {
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop, scene);
+
+            Assert.Equal(scene, OnlyWindow.Scene);
         }
 
         [Fact]
-        public async Task Show_PutsOneOverlayOverTheRequestedArea()
+        public async Task Without_a_scene_the_cover_is_plain_black()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
 
-            FakeOverlayWindow window = Assert.Single(_windows.Created);
-            Assert.Equal(Left, window.ShownBounds);
-            Assert.False(window.IsClosed);
-            Assert.True(_sut.IsOverlayWindow(window.Handle));
+            Assert.Equal(OverlayScene.Black, OnlyWindow.Scene);
         }
 
         [Fact]
-        public async Task Show_PassesTheSceneToTheFactory()
+        public async Task Window_work_is_queued_on_the_uiQueue_even_from_a_worker_thread()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left, OverlayScene.Flights);
+            _uiQueue.IsOnUiThread = false;
 
-            Assert.Equal([OverlayScene.Flights], _windows.RequestedScenes);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+            await _covers.HideBlackoutOverlayAsync("left");
+
+            Assert.Equal([ImmediateDispatcher.Entry.InvokeAsync, ImmediateDispatcher.Entry.InvokeAsync], _uiQueue.Journal);
         }
 
         [Fact]
-        public async Task ShowAndHide_AlwaysGoThroughTheDispatcher()
+        public async Task Covering_an_already_covered_screen_leaves_the_first_window_alone()
         {
-            _ui.IsOnUiThread = false;
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop, OverlayScene.Stars);
+            await _covers.ShowBlackoutOverlayAsync("left", Ultrawide, OverlayScene.Flights);
 
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            Assert.Equal(1, _ui.InvokeAsyncCount);
-
-            await _sut.HideBlackoutOverlayAsync("A");
-            Assert.Equal(2, _ui.InvokeAsyncCount);
+            Assert.Equal(Laptop, OnlyWindow.Area);
+            Assert.Equal(OverlayScene.Stars, OnlyWindow.Scene);
         }
 
         [Fact]
-        public async Task Show_ForACoveredScreen_KeepsTheExistingOverlay()
+        public async Task Each_screen_gets_its_own_window_and_handle()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            await _sut.ShowBlackoutOverlayAsync("A", Right);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+            await _covers.ShowBlackoutOverlayAsync("right", Ultrawide);
 
-            FakeOverlayWindow window = Assert.Single(_windows.Created);
-            Assert.Equal(Left, window.ShownBounds);
+            nint[] handles = _factory.Built.Select(w => w.AssignedHandle).ToArray();
+            Assert.Equal(2, handles.Distinct().Count());
+            Assert.All(handles, h => Assert.True(_covers.IsOverlayWindow(h)));
         }
 
         [Fact]
-        public async Task Show_ForTwoScreens_TracksBothHandles()
+        public async Task A_window_without_a_handle_still_marks_the_screen_as_covered()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            await _sut.ShowBlackoutOverlayAsync("B", Right);
+            var handleless = new MonitorBlackoutServiceTests(withHandles: false);
 
-            Assert.Equal(2, _windows.Created.Count);
-            Assert.All(_windows.Created, w => Assert.True(_sut.IsOverlayWindow(w.Handle)));
-            Assert.NotEqual(_windows.Created[0].Handle, _windows.Created[1].Handle);
+            await handleless._covers.ShowBlackoutOverlayAsync("left", Laptop);
+            await handleless._covers.ShowBlackoutOverlayAsync("left", Laptop);
+
+            Assert.Single(handleless._factory.Built);
+            Assert.False(handleless._covers.IsOverlayWindow(0));
         }
 
         [Fact]
-        public async Task Show_WithAWindowThatNeverGotAHandle_StillCountsAsCovered()
+        public async Task Uncovering_closes_the_window_and_its_old_handle_is_no_longer_ours()
         {
-            var handleless = new FakeOverlayWindowFactory(nint.Zero);
-            var sut = new MonitorBlackoutService(_ui, handleless);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+            nint formerHandle = OnlyWindow.Handle;
 
-            await sut.ShowBlackoutOverlayAsync("A", Left);
-            await sut.ShowBlackoutOverlayAsync("A", Left);
+            await _covers.HideBlackoutOverlayAsync("left");
 
-            Assert.Single(handleless.Created);
-            Assert.False(sut.IsOverlayWindow(nint.Zero));
+            Assert.Equal(Phase.Closed, OnlyWindow.State);
+            Assert.Equal(0, OnlyWindow.Handle);
+            Assert.False(_covers.IsOverlayWindow(formerHandle));
         }
 
         [Fact]
-        public async Task Hide_ClosesTheOverlayAndForgetsTheHandleItHadWhileShown()
+        public async Task Uncovering_one_screen_keeps_the_other_covered()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            FakeOverlayWindow window = _windows.Created[0];
-            nint handleWhileShown = window.Handle;
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+            await _covers.ShowBlackoutOverlayAsync("right", Ultrawide);
 
-            await _sut.HideBlackoutOverlayAsync("A");
+            await _covers.HideBlackoutOverlayAsync("right");
 
-            Assert.True(window.IsClosed);
-            Assert.Equal(nint.Zero, window.Handle);
-            Assert.False(_sut.IsOverlayWindow(handleWhileShown));
+            FakeOverlayWindow left = _factory.Built[0];
+            Assert.Equal(Phase.Visible, left.State);
+            Assert.True(_covers.IsOverlayWindow(left.Handle));
+            Assert.Equal(Phase.Closed, _factory.Built[1].State);
         }
 
         [Fact]
-        public async Task Hide_OnlyTouchesTheRequestedScreen()
+        public async Task Uncovering_a_screen_that_was_never_covered_does_nothing()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            await _sut.ShowBlackoutOverlayAsync("B", Right);
-            FakeOverlayWindow other = _windows.Created[1];
+            await _covers.HideBlackoutOverlayAsync("ghost");
 
-            await _sut.HideBlackoutOverlayAsync("A");
-
-            Assert.False(other.IsClosed);
-            Assert.True(_sut.IsOverlayWindow(other.Handle));
+            Assert.Empty(_factory.Built);
         }
 
         [Fact]
-        public async Task Hide_ForAnUncoveredScreen_IsANoOp()
+        public async Task Uncovering_twice_closes_the_window_once()
         {
-            Exception? error = await Record.ExceptionAsync(() => _sut.HideBlackoutOverlayAsync("nobody"));
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
 
-            Assert.Null(error);
-            Assert.Empty(_windows.Created);
+            await _covers.HideBlackoutOverlayAsync("left");
+            await _covers.HideBlackoutOverlayAsync("left");
+
+            Assert.Equal(1, OnlyWindow.Closes);
         }
 
         [Fact]
-        public async Task Hide_Twice_ClosesOnlyOnce()
+        public async Task Covering_again_after_uncovering_builds_a_fresh_window()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
+            await _covers.HideBlackoutOverlayAsync("left");
+            await _covers.ShowBlackoutOverlayAsync("left", Ultrawide);
 
-            await _sut.HideBlackoutOverlayAsync("A");
-            Exception? error = await Record.ExceptionAsync(() => _sut.HideBlackoutOverlayAsync("A"));
-
-            Assert.Null(error);
-            Assert.Equal(1, Assert.Single(_windows.Created).CloseCalls);
+            Assert.Collection(
+                _factory.Built,
+                old => Assert.Equal(Phase.Closed, old.State),
+                fresh =>
+                {
+                    Assert.Equal(Ultrawide, fresh.Area);
+                    Assert.True(_covers.IsOverlayWindow(fresh.Handle));
+                });
         }
 
         [Fact]
-        public async Task Show_AfterHide_BuildsANewOverlay()
+        public async Task Zero_and_unknown_handles_are_never_ours()
         {
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            await _sut.HideBlackoutOverlayAsync("A");
+            Assert.False(_covers.IsOverlayWindow(0));
 
-            await _sut.ShowBlackoutOverlayAsync("A", Right);
+            await _covers.ShowBlackoutOverlayAsync("left", Laptop);
 
-            Assert.Equal(2, _windows.Created.Count);
-            FakeOverlayWindow fresh = _windows.Created[1];
-            Assert.Equal(Right, fresh.ShownBounds);
-            Assert.True(_sut.IsOverlayWindow(fresh.Handle));
-        }
-
-        [Fact]
-        public async Task IsOverlayWindow_RejectsZeroAndForeignHandles()
-        {
-            Assert.False(_sut.IsOverlayWindow(nint.Zero));
-
-            await _sut.ShowBlackoutOverlayAsync("A", Left);
-            nint ours = _windows.Created[0].Handle;
-
-            Assert.False(_sut.IsOverlayWindow(nint.Zero));
-            Assert.False(_sut.IsOverlayWindow(ours + 1));
+            Assert.False(_covers.IsOverlayWindow(0));
+            Assert.False(_covers.IsOverlayWindow(OnlyWindow.AssignedHandle + 7));
         }
     }
 }

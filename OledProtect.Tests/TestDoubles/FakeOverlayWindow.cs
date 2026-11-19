@@ -1,24 +1,46 @@
+using OledProtect.Features.MonitorBlackout.Models;
 using OledProtect.Features.MonitorBlackout.Services.Interfaces;
 using System.Windows;
 
 namespace OledProtect.Tests.TestDoubles
 {
-    // Stands in for a real overlay: remembers what happened to it and, like the real one, only has a
-    // handle between Show and Close.
-    public sealed class FakeOverlayWindow(nint handleOnceShown) : IOverlayWindow
+    // Overlay without a real window. Goes Created -> Visible -> Closed and, like a real window, only reports
+    // its handle while it is visible.
+    public sealed class FakeOverlayWindow(nint handle, OverlayScene scene) : IOverlayWindow
     {
-        private Rect? _shownAt;
+        public enum Phase
+        {
+            Created,
+            Visible,
+            Closed,
+        }
 
-        public Rect? ShownBounds => _shownAt;
+        public OverlayScene Scene { get; } = scene;
 
-        public int CloseCalls { get; private set; }
+        public Phase State { get; private set; } = Phase.Created;
 
-        public bool IsClosed => CloseCalls > 0;
+        public Rect? Area { get; private set; }
 
-        public nint Handle => _shownAt.HasValue && !IsClosed ? handleOnceShown : nint.Zero;
+        public int Closes { get; private set; }
 
-        public void Show(Rect bounds) => _shownAt = bounds;
+        // The handle it gets while visible, readable in any phase.
+        public nint AssignedHandle { get; } = handle;
 
-        public void Close() => CloseCalls++;
+        public nint Handle => State == Phase.Visible ? AssignedHandle : 0;
+
+        public void Show(Rect bounds)
+        {
+            Area = bounds;
+            if (State == Phase.Created)
+            {
+                State = Phase.Visible;
+            }
+        }
+
+        public void Close()
+        {
+            Closes++;
+            State = Phase.Closed;
+        }
     }
 }

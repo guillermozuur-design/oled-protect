@@ -1,79 +1,75 @@
-using Moq;
 using OledProtect.Features.MonitorBehavior.Commands;
 using OledProtect.Features.MonitorBehavior.Handlers;
-using OledProtect.Features.MonitorBlackout.Services.Interfaces;
 using OledProtect.Features.MonitorIdleDetection.Models;
 using OledProtect.Features.UserSettings.Models;
-using OledProtect.Messaging.Interfaces;
+using OledProtect.Tests.TestDoubles;
 using System.Windows;
 
 namespace OledProtect.Tests.Features.MonitorBehavior.Handlers
 {
     public class ApplyMonitorActiveBehaviorCommandHandlerTests
     {
-        private const string Id = "SCREEN-7";
-        private static readonly nint OurOverlay = 0x2A0;
-        private static readonly nint SomeApp = 0x3B0;
+        private const string Panel = "SAM-ODYSSEY";
+        private const nint Overlay = 0x51C0;
+        private const nint Browser = 0x51C4;
 
-        private readonly Mock<IMonitorBlackoutService> _overlays = new();
-        private readonly Mock<IMediator> _mediator = new();
+        private readonly RecordingBlackoutService _blackout = new() { OwnHandles = { Overlay } };
+        private readonly RecordingMediator _mediator = new();
 
-        public ApplyMonitorActiveBehaviorCommandHandlerTests()
-        {
-            _overlays.Setup(o => o.IsOverlayWindow(It.IsAny<nint>())).Returns((nint h) => h == OurOverlay);
-        }
+        private static MonitorIdleStateEventArgs Activity(ActivityReason reason, nint focus) =>
+            new(Panel, 3, new Rect(0, 0, 3440, 1440), new MonitorSettings { HardwareId = Panel, IsManaged = true }, focus, reason);
 
-        private async Task<MonitorIdleStateEventArgs> Wake(ActivityReason reason, nint focused)
-        {
-            var wake = new MonitorIdleStateEventArgs(Id, 2, new Rect(0, 0, 2560, 1440),
-                new MonitorSettings { HardwareId = Id, IsManaged = true }, focused, reason);
-            await new ApplyMonitorActiveBehaviorCommandHandler(_overlays.Object, _mediator.Object)
-                .HandleAsync(new ApplyMonitorActiveBehaviorCommand(wake));
-            return wake;
-        }
+        private Task Handle(MonitorIdleStateEventArgs activity) =>
+            new ApplyMonitorActiveBehaviorCommandHandler(_blackout, _mediator).HandleAsync(new ApplyMonitorActiveBehaviorCommand(activity));
 
-        private void VerifyRestoredOnce() =>
-            _mediator.Verify(m => m.SendAsync(It.Is<RestoreMonitorStateCommand>(c => c.HardwareId == Id)), Times.Once);
+        private string[] RestoredScreens => _mediator.SentOf<RestoreMonitorStateCommand>().Select(c => c.HardwareId).ToArray();
 
         [Fact]
-        public async Task FocusOnOurOwnOverlay_IsVetoedAndNothingIsRestored()
+        public async Task Our_overlay_taking_focus_is_vetoed_and_restores_nothing()
         {
-            var wake = await Wake(ActivityReason.ActiveWindow, OurOverlay);
+            var activity = Activity(ActivityReason.ActiveWindow, Overlay);
 
-            Assert.True(wake.IsIgnored);
-            _mediator.VerifyNoOtherCalls();
+            await Handle(activity);
+
+            Assert.True(activity.IsIgnored);
+            Assert.Empty(_mediator.Sent);
         }
 
         [Fact]
-        public async Task FocusOnAnotherWindow_RestoresTheScreen()
+        public async Task Another_window_taking_focus_wakes_the_screen()
         {
-            var wake = await Wake(ActivityReason.ActiveWindow, SomeApp);
+            var activity = Activity(ActivityReason.ActiveWindow, Browser);
 
-            Assert.False(wake.IsIgnored);
-            VerifyRestoredOnce();
+            await Handle(activity);
+
+            Assert.False(activity.IsIgnored);
+            Assert.Equal([Panel], RestoredScreens);
         }
+
+        public static IEnumerable<object[]> NonFocusReasons =>
+            Enum.GetValues<ActivityReason>().Where(r => r != ActivityReason.ActiveWindow).Select(r => new object[] { r });
 
         [Theory]
-        [InlineData(ActivityReason.None)]
-        [InlineData(ActivityReason.MousePosition)]
-        [InlineData(ActivityReason.SystemInput)]
-        [InlineData(ActivityReason.KeepAwakeApp)]
-        public async Task OtherReasons_RestoreEvenWhileOurOverlayHasFocus(ActivityReason reason)
+        [MemberData(nameof(NonFocusReasons))]
+        public async Task Other_activity_wakes_the_screen_whatever_has_focus(ActivityReason reason)
         {
-            var wake = await Wake(reason, OurOverlay);
+            var activity = Activity(reason, Overlay);
 
-            Assert.False(wake.IsIgnored);
-            VerifyRestoredOnce();
+            await Handle(activity);
+
+            Assert.False(activity.IsIgnored);
+            Assert.Equal([Panel], RestoredScreens);
         }
 
         [Fact]
-        public async Task AFailedRestore_DoesNotEscape()
+        public async Task A_failing_restore_is_contained()
         {
-            _mediator.Setup(m => m.SendAsync(It.IsAny<RestoreMonitorStateCommand>())).ThrowsAsync(new InvalidOperationException("nope"));
+            _mediator.Failing<RestoreMonitorStateCommand>(new InvalidOperationException("handler missing"));
+            var activity = Activity(ActivityReason.SystemInput, Browser);
 
-            var error = await Record.ExceptionAsync(() => Wake(ActivityReason.SystemInput, SomeApp));
+            await Handle(activity);
 
-            Assert.Null(error);
+            Assert.Equal([Panel], RestoredScreens);
         }
     }
 }
