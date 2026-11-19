@@ -66,7 +66,7 @@ namespace OLED_Sleeper
             GlobalIdleBox.Text = _globalIdle.Minutes.ToString();
             StartupCheck.IsChecked = StartupHelper.IsRunAtStartupEnabled();
             ShowFlightSettings();
-            VersionText.Text = "versie " + AppVersion() + " · gebaseerd op OLED Sleeper van Quorthon13";
+            VersionText.Text = "versie " + AppVersion();
 
             _panorama.Changed += () => Dispatcher.BeginInvoke(() => GapBox.Text = FormatCm(_panorama.GapCm));
             _hotkeyService.Changed += () => Dispatcher.BeginInvoke(() => { ShowHotkey(); RefreshHeader(); });
