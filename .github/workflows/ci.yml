@@ -4,31 +4,33 @@ on:
   pull_request:
     branches: [develop, master]
 
+# A newer push to the same pull request makes the running check pointless.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  build:
-    name: Build, test and check formatting
+  verify:
+    name: Build, test, format
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
-      - name: Check out
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          # MinVer derives the version from the nearest v* tag, so it needs the full history.
-          fetch-depth: 0
+          fetch-depth: 0 # full history and tags, MinVer needs them for the version
 
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: 8.0.x
 
-      - name: Restore
-        run: dotnet restore OLED-Sleeper.sln
+      - name: Build (Release)
+        run: dotnet build OLED-Sleeper.sln --configuration Release
 
-      - name: Build
-        run: dotnet build OLED-Sleeper.sln -c Release --no-restore
+      - name: Unit tests
+        run: dotnet test OLED-Sleeper.sln --configuration Release --no-build
 
-      - name: Test
-        run: dotnet test OLED-Sleeper.sln -c Release --no-build
-
-      - name: Check formatting
-        run: dotnet format OLED-Sleeper.sln --verify-no-changes
+      - name: Formatting matches .editorconfig
+        run: dotnet format OLED-Sleeper.sln --verify-no-changes --no-restore

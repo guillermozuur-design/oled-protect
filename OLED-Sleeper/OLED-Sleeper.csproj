@@ -1,51 +1,43 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Target framework, WPF, nullable and implicit usings: see Directory.Build.props.
+       Package versions: see Directory.Packages.props. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
     <RootNamespace>OLED_Sleeper</RootNamespace>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
-  </PropertyGroup>
-
-  <!-- MinVer derives the version from the nearest v* tag. It is the project's only version declaration. -->
-  <PropertyGroup>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Needed for source-generated P/Invoke ([LibraryImport]) and pointer-based interop. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The version is never written down: MinVer takes it from the nearest git tag such as v3.1.0. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
 
-  <!-- Publishing with -p:Portable=true builds the portable distribution, which keeps its state beside the executable. -->
-  <PropertyGroup Condition="'$(Portable)' == 'true'">
-    <DefineConstants>$(DefineConstants);PORTABLE</DefineConstants>
+  <!-- dotnet publish -p:Portable=true: the PORTABLE build keeps its data in a folder beside the exe. -->
+  <PropertyGroup Condition=" '$(Portable)' == 'true' ">
+    <DefineConstants>PORTABLE;$(DefineConstants)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Assets\icon.ico" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="CommandLineParser" />
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.8" />
-    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="All" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.5" />
-    <PackageReference Include="Serilog" Version="4.3.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-  </ItemGroup>
-
+  <!-- The tray and window icon is loaded as a WPF resource (pack URI), not copied as a loose file. -->
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
+    <None Remove="@(Resource)" />
   </ItemGroup>
 
+  <!-- Data compiled into the assembly, plus the licences of that third-party data next to the exe. -->
   <ItemGroup>
-    <EmbeddedResource Include="Assets\Sky\sky.txt" />
-    <EmbeddedResource Include="Assets\Flights\airports.txt" />
-    <EmbeddedResource Include="Assets\Flights\countries.txt" />
-    <None Include="Assets\Flights\LICENSE-OurAirports.txt" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Assets\Sky\LICENSE-d3-celestial.txt" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets\Sky\sky.txt;Assets\Flights\airports.txt;Assets\Flights\countries.txt" />
+    <None Update="Assets\Sky\LICENSE-d3-celestial.txt;Assets\Flights\LICENSE-OurAirports.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

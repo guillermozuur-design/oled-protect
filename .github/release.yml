@@ -1,16 +1,11 @@
+# Sections for GitHub's generated release notes, chosen by pull request label.
 changelog:
   exclude:
-    labels:
-      - duplicate
-      - invalid
-      - wontfix
+    labels: [duplicate, invalid, wontfix]
   categories:
-    - title: 🚀 Improvements
-      labels:
-        - enhancement
-    - title: 🧩 Fixes
-      labels:
-        - bug
-    - title: ⚙️ Changes
-      labels:
-        - '*'
+    - title: ✨ Nieuw en beter / New and improved
+      labels: [enhancement]
+    - title: 🐛 Opgelost / Fixed
+      labels: [bug]
+    - title: 🔧 Overig / Other changes
+      labels: ['*']
