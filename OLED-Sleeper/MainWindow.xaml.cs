@@ -36,6 +36,7 @@ namespace OLED_Sleeper
         private readonly KeepAwakeAppsSettings _keepAwakeApps;
         private readonly FlightsSettings _flights;
         private readonly GlobalBrightnessSchedule _brightnessSchedule;
+        private readonly OLED_Sleeper.Features.TaskbarDim.TaskbarDimSettings _taskbarDim;
         private FlightsView? _flightsPreview;
         private readonly DispatcherTimer _headerTimer;
         private readonly DispatcherTimer _autoSaveTimer;
@@ -43,12 +44,14 @@ namespace OLED_Sleeper
         public MainWindow(GlobalHotkeyService hotkeyService, PanoramaSettings panorama, IMonitorInfoManager monitorInfoManager,
                           GlobalIdleSettings globalIdle, IWorkModeService workMode, IMonitorSettingsFileService settingsFile,
                           ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps, FlightsSettings flights,
-                          GlobalBrightnessSchedule brightnessSchedule)
+                          GlobalBrightnessSchedule brightnessSchedule, OLED_Sleeper.Features.TaskbarDim.TaskbarDimSettings taskbarDim)
         {
             _keepAwakeApps = keepAwakeApps;
             _flights = flights;
             _brightnessSchedule = brightnessSchedule;
+            _taskbarDim = taskbarDim;
             InitializeComponent();
+            TaskbarDimCheck.IsChecked = _taskbarDim.Enabled;
             ScheduleCard.DataContext = new UI.ViewModels.BrightnessScheduleEditorViewModel(_brightnessSchedule);
             _hotkeyService = hotkeyService;
             _panorama = panorama;
@@ -463,6 +466,8 @@ namespace OLED_Sleeper
                 ? $"Aan ✓ — na {minutes} min zonder muis of toets krijgen alle bewaakte schermen hun ingestelde gedrag (behalve het scherm met een video die speelt)."
                 : "Uit — alleen de instellingen per scherm gelden.";
         }
+
+        private void TaskbarDim_Click(object sender, RoutedEventArgs e) => _taskbarDim.SetEnabled(TaskbarDimCheck.IsChecked == true);
 
         private void Startup_Click(object sender, RoutedEventArgs e)
         {

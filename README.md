@@ -54,9 +54,12 @@ onofficiële versie met veel uitbreidingen.
   (alleen het vluchtnummer) van adsbdb.com, en wat je zoekt gaat naar Nominatim. Verder blijft alles op je pc, in
   `%APPDATA%\OLED-Space-Sleeper`. Bij het verwijderen vraagt de installer of die map ook weg mag.
 
+**Taakbalk dimmen** (optie in Algemeen): staat de muis 5 seconden niet bij de taakbalk, dan wordt die donkerder (een
+doorzichtige laag waar je doorheen klikt); met de muis erheen is hij meteen weer gewoon. Niet bij volledig scherm.
+
 **Altijd bij de hand**
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
-- **Snelmenu** zoals Win+P: houd **Alt** vast en tik **`** (toets onder Esc), tik verder om te kiezen, loslaten = toepassen. Sneltoets is instelbaar.
+- **Snelmenu** zoals Win+P (ook met een klik op het pictogram in het systeemvak; dubbelklik = instellingen): houd **Alt** vast en tik **`** (toets onder Esc), tik verder om te kiezen, loslaten = toepassen. Sneltoets is instelbaar.
   In het snelmenu staat ook **Helderheid**: sta op die rij en draai aan het muiswiel om alle schermen per 5% lichter
   of donkerder te zetten (via het scherm zelf, tot de volgende stap van het helderheidsschema).
 - **Alle schermen uit als je weg bent** na X minuten — behalve het scherm waarop een video speelt.
@@ -84,7 +87,7 @@ Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 327 tests
+dotnet test OLED-Sleeper.sln                       # 331 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```

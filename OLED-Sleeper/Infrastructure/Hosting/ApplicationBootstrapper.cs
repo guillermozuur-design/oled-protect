@@ -155,6 +155,8 @@ namespace OLED_Sleeper.Infrastructure.Hosting
                 () => _mainWindowService?.ShowMainWindow(),
                 RequestExit
             );
+            // Dims the taskbar after a few seconds when that is switched on (Algemeen tab).
+            _serviceProvider.GetRequiredService<OLED_Sleeper.Features.TaskbarDim.TaskbarDimmer>().Start();
         }
 
         /// <summary>

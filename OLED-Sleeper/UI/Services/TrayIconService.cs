@@ -83,7 +83,12 @@ namespace OLED_Sleeper.UI.Services
                 _quickPanel.Next();
                 return;
             }
+            OpenQuickPanel();
+        }
 
+        /// <summary>The quick panel on the screen under the mouse (the hotkey, or a click on the tray icon).</summary>
+        private void OpenQuickPanel()
+        {
             NativeMethods.GetCursorPos(out var cursor);
             var monitors = _monitorInfoManager.GetLatestMonitorsBasicInfo();
             var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(new Point(cursor.X, cursor.Y))) ?? monitors.FirstOrDefault();
@@ -147,8 +152,14 @@ namespace OLED_Sleeper.UI.Services
         {
             if (_notifyIcon == null) return;
 
-            _notifyIcon.TrayMouseDoubleClick += (_, _) => _showMainWindowAction?.Invoke();
-            _notifyIcon.TrayLeftMouseUp += (_, _) => _showMainWindowAction?.Invoke();
+            // Like other tray apps in Windows 11: a click opens the quick panel, a double click the settings
+            // (the right click keeps its menu).
+            _notifyIcon.TrayLeftMouseUp += (_, _) => { if (_quickPanel == null) OpenQuickPanel(); };
+            _notifyIcon.TrayMouseDoubleClick += (_, _) =>
+            {
+                _quickPanel?.Close();
+                _showMainWindowAction?.Invoke();
+            };
         }
 
         /// <summary>

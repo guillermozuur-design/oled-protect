@@ -86,6 +86,8 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
             services.AddSingleton<ManualBrightnessService>();
             services.AddSingleton<GlobalBrightnessSchedule>();
+            services.AddSingleton<OLED_Sleeper.Features.TaskbarDim.TaskbarDimSettings>();
+            services.AddSingleton<OLED_Sleeper.Features.TaskbarDim.TaskbarDimmer>();
             services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
             services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();
             services.AddSingleton<IApplicationOrchestrator, ApplicationOrchestrator>();

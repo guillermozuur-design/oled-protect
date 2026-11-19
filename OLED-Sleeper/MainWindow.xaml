@@ -10,7 +10,7 @@
         mc:Ignorable="d"
         Title="OLED Space Sleeper"
         d:DataContext="{d:DesignInstance viewModels1:MainViewModel}"
-        Height="900" Width="860" MinHeight="700" MinWidth="760"
+        Height="900" Width="1060" MinHeight="700" MinWidth="940"
         FontFamily="Bahnschrift"
         Background="{StaticResource PrimaryBackgroundColor}"
         WindowStyle="None"
@@ -177,7 +177,7 @@
                 <TabControl x:Name="MainTabs" Grid.Row="2" Style="{StaticResource Tabs}" SelectionChanged="MainTabs_SelectionChanged">
 
                     <!-- ===== Schermen ===== -->
-                    <TabItem Header="Schermen">
+                    <TabItem Header="Schermen" Tag="&#xE7F4;">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="200" />
@@ -206,7 +206,7 @@
                     </TabItem>
 
                     <!-- ===== Sterrenhemel ===== -->
-                    <TabItem Header="Sterrenhemel">
+                    <TabItem Header="Sterrenhemel" Tag="&#xE708;">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
@@ -251,7 +251,7 @@
                     </TabItem>
 
                     <!-- ===== Vliegtuigen ===== -->
-                    <TabItem Header="Vliegtuigen" x:Name="FlightsTab">
+                    <TabItem Header="Vliegtuigen" Tag="&#xE709;" x:Name="FlightsTab">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
@@ -366,7 +366,7 @@
                     </TabItem>
 
                     <!-- ===== Algemeen ===== -->
-                    <TabItem Header="Algemeen">
+                    <TabItem Header="Algemeen" Tag="&#xE713;">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <Border Style="{StaticResource Card}">
@@ -415,6 +415,18 @@
                                         </DockPanel>
                                         <StackPanel x:Name="AppRows" Margin="0,12,0,0" />
                                     </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="TaskbarDimCheck" AutomationProperties.Name="Taakbalk dimmen" DockPanel.Dock="Right" Style="{StaticResource Switch}"
+                                                  Click="TaskbarDim_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Taakbalk dimmen" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="De taakbalk staat altijd op dezelfde plek en brandt daardoor het snelst in. Staat de muis 5 seconden niet bij de taakbalk, dan wordt hij donkerder; ga je er met de muis heen, dan is hij meteen weer gewoon. Klikken werkt altijd. Niet bij een programma op volledig scherm." />
+                                        </StackPanel>
+                                    </DockPanel>
                                 </Border>
 
                                 <!-- One brightness schedule for all screens -->
