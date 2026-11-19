@@ -1,37 +1,41 @@
 using OledProtect.UI.ViewModels;
-using System.Text;
 
 namespace OledProtect.UI.Helpers
 {
-    // Decides whether the edited monitor settings may be written, and explains to the user why not.
-    // Monitors that are not managed are ignored: their half-filled fields do no harm.
+    /// <summary>
+    /// Checks the edited screens before saving. A screen that is switched off is never judged:
+    /// whatever is half filled in there does no harm.
+    /// </summary>
     public static class MonitorSettingsValidator
     {
-        private const string Intro = "Een of meer schermen zijn nog niet goed ingesteld en kunnen niet worden opgeslagen:";
-        private const string Advice = "Pas de gemarkeerde velden aan, of zet het bewaken van dat scherm uit.";
+        private const string Opening = "Bijna klaar! Bij deze schermen mist nog iets:";
+        private const string Closing = "Vul het aan, of zet de schakelaar van zo'n scherm uit als het geen bewaking hoeft.";
 
-        // Null when everything can be saved; otherwise a ready-to-show message naming each problem.
+        /// <summary>
+        /// Null when all screens can be saved. Otherwise a short message: one paragraph per screen
+        /// with what is missing there, between an opening and a closing line.
+        /// </summary>
         public static string? BuildValidationError(IEnumerable<MonitorLayoutViewModel> monitors)
         {
-            StringBuilder? report = null;
+            var paragraphs = monitors
+                .Where(screen => screen.Configuration is { IsManaged: true, IsValid: false })
+                .Select(Describe)
+                .ToList();
 
-            foreach (var monitor in monitors)
-            {
-                var cfg = monitor.Configuration;
-                if (!cfg.IsManaged || cfg.IsValid)
-                    continue;
+            if (paragraphs.Count == 0)
+                return null;
 
-                report ??= new StringBuilder().AppendLine(Intro);
-                report.Append("• ").Append(monitor.MonitorTitle).AppendLine(":");
+            var blankLine = Environment.NewLine + Environment.NewLine;
+            return Opening + blankLine + string.Join(blankLine, paragraphs) + blankLine + Closing;
+        }
 
-                foreach (var problem in new[] { cfg.BehaviorError, cfg.IdleValueError, cfg.ActiveConditionsError })
-                {
-                    if (!string.IsNullOrWhiteSpace(problem))
-                        report.Append("    – ").AppendLine(problem);
-                }
-            }
-
-            return report?.AppendLine().AppendLine(Advice).ToString();
+        // "Scherm 2 → first problem. Second problem." in the order the panel shows the blocks.
+        private static string Describe(MonitorLayoutViewModel screen)
+        {
+            var c = screen.Configuration;
+            var missing = new[] { c.BehaviorError, c.IdleValueError, c.ActiveConditionsError }
+                .Where(text => !string.IsNullOrWhiteSpace(text));
+            return $"{screen.MonitorTitle} → {string.Join(" ", missing)}";
         }
     }
 }

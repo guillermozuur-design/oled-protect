@@ -80,8 +80,8 @@ namespace OledProtect.Tests.UI.Services
         }
 
         [Theory]
-        [InlineData("window", "voordat het venster sluit")]
-        [InlineData("app", "voordat OLED Protect stopt")]
+        [InlineData("window", "voordat het venster dichtgaat?")]
+        [InlineData("app", "voordat OLED Protect afsluit?")]
         public void The_dialog_says_what_is_about_to_happen(string leaving, string phrase)
         {
             var session = new Session { Reply = MessageBoxResult.No };
@@ -89,8 +89,20 @@ namespace OledProtect.Tests.UI.Services
             session.Run(leaving);
 
             string asked = Assert.Single(session.Questions);
-            Assert.StartsWith("Niet opgeslagen wijzigingen | ", asked);
+            Assert.StartsWith("Even checken | ", asked);
             Assert.Contains(phrase, asked);
+        }
+
+        [Fact]
+        public void The_question_explains_every_button()
+        {
+            var session = new Session { Reply = MessageBoxResult.Cancel };
+
+            session.Run("window");
+
+            string asked = Assert.Single(session.Questions);
+            Assert.All(new[] { "Ja bewaart", "Nee laat ze vallen", "Annuleren brengt je terug" },
+                part => Assert.Contains(part, asked));
         }
     }
 }

@@ -2,10 +2,8 @@
 
 namespace OledProtect.UI.Views
 {
-    /// <summary>
-    /// Per-screen settings panel. Pure data binding against <see cref="ViewModels.MonitorConfigurationViewModel"/>;
-    /// there is no logic in the code-behind.
-    /// </summary>
+    // The settings of one screen. Everything runs through bindings to
+    // MonitorConfigurationViewModel, so this file only loads the XAML.
     public partial class MonitorConfigurationView : UserControl
     {
         public MonitorConfigurationView() => InitializeComponent();

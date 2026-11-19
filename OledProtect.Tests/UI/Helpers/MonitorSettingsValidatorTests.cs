@@ -100,8 +100,19 @@ namespace OledProtect.Tests.UI.Helpers
             string report = Check(Screen(1).Watched())!;
             string[] lines = report.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
 
-            Assert.StartsWith("Een of meer schermen zijn nog niet goed ingesteld", lines[0]);
-            Assert.EndsWith("zet het bewaken van dat scherm uit.", lines[^1]);
+            Assert.StartsWith("Bijna klaar!", lines[0]);
+            Assert.EndsWith("als het geen bewaking hoeft.", lines[^1]);
+        }
+
+        [Fact]
+        public void Every_faulty_screen_gets_one_line_with_all_its_problems()
+        {
+            string report = Check(Screen(1).Watched(), Screen(2).ReadyToSave().Then(Breakages["idle zero"]))!;
+            string[] lines = report.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.Equal(4, lines.Length);
+            Assert.StartsWith("Scherm 1 → ", lines[1]);
+            Assert.Equal("Scherm 2 → " + NoIdleTime, lines[2]);
         }
     }
 }
