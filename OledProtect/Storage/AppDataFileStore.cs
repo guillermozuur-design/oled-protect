@@ -5,26 +5,35 @@ using System.Text.Json;
 
 namespace OledProtect.Storage
 {
-    // Crash-safe JSON files: every save goes to "<name>.tmp" first and is then swapped in, with the
-    // previous version parked in "<name>.bak". Loading falls back to that .bak when the main file is
-    // missing or damaged, so a power cut halfway through a save never costs the user their settings.
+    // Small JSON files in the storage root, saved so that a crash or power cut mid-save never leaves the
+    // user empty-handed: the new text is staged beside the file and swapped in, and the version it
+    // replaces is kept as "<name>.bak", which loading falls back on.
     public sealed class AppDataFileStore(IFileSystem fileSystem, IStorageRoot storageRoot) : IAppDataFileStore
     {
-        private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+        private const string StagedSuffix = ".tmp";
+        private const string PreviousSuffix = ".bak";
 
-        private readonly string _folder = storageRoot.DirectoryPath;
+        private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true };
 
         public T? Read<T>(string fileName)
         {
-            string primary = PathOf(fileName);
+            string current = Locate(fileName);
+            string[] candidates = [current, current + PreviousSuffix];
 
-            if (TryLoad(primary, out T? loaded))
-                return loaded;
-
-            if (TryLoad(BackupOf(primary), out T? recovered))
+            // A file containing just `null` is a successful load; only absent or broken files move on.
+            foreach (string path in candidates.Where(fileSystem.FileExists))
             {
-                Log.Warning("{FileName} was unusable; using its .bak copy instead.", fileName);
-                return recovered;
+                try
+                {
+                    var value = JsonSerializer.Deserialize<T>(fileSystem.ReadAllText(path));
+                    if (path != current)
+                        Log.Warning("{FileName} could not be used; loaded the previous version from {Path}.", fileName, path);
+                    return value;
+                }
+                catch (Exception problem)
+                {
+                    Log.Error(problem, "Skipping unreadable data file {Path}.", path);
+                }
             }
 
             return default;
@@ -32,53 +41,29 @@ namespace OledProtect.Storage
 
         public bool TryWrite<T>(string fileName, T value)
         {
-            string primary = PathOf(fileName);
-            string staging = primary + ".tmp";
+            string current = Locate(fileName);
+            string staged = current + StagedSuffix;
 
             try
             {
-                fileSystem.WriteAllText(staging, JsonSerializer.Serialize(value, Json));
-                SwapIn(staging, primary);
-                return true;
+                // File.Replace only works on an existing target, so the very first save is a plain rename.
+                bool firstSave = !fileSystem.FileExists(current);
+                fileSystem.WriteAllText(staged, JsonSerializer.Serialize(value, Pretty));
+
+                if (firstSave)
+                    fileSystem.Move(staged, current);
+                else
+                    fileSystem.Replace(staged, current, current + PreviousSuffix);
             }
-            catch (Exception failure)
+            catch (Exception problem)
             {
-                Log.Error(failure, "Could not save {Path}; the previous version is kept.", primary);
+                Log.Error(problem, "Saving {Path} failed; whatever was on disk stays as it was.", current);
                 return false;
             }
+
+            return true;
         }
 
-        // Replace needs an existing target; the very first save has none and simply renames.
-        private void SwapIn(string staging, string primary)
-        {
-            if (fileSystem.FileExists(primary))
-                fileSystem.Replace(staging, primary, BackupOf(primary));
-            else
-                fileSystem.Move(staging, primary);
-        }
-
-        // A file holding the JSON literal null counts as read (result null), so it does not
-        // trigger the backup fallback.
-        private bool TryLoad<T>(string path, out T? result)
-        {
-            result = default;
-            if (!fileSystem.FileExists(path))
-                return false;
-
-            try
-            {
-                result = JsonSerializer.Deserialize<T>(fileSystem.ReadAllText(path));
-                return true;
-            }
-            catch (Exception failure)
-            {
-                Log.Error(failure, "Could not load {Path}.", path);
-                return false;
-            }
-        }
-
-        private string PathOf(string fileName) => Path.Combine(_folder, fileName);
-
-        private static string BackupOf(string path) => path + ".bak";
+        private string Locate(string fileName) => Path.Combine(storageRoot.DirectoryPath, fileName);
     }
 }

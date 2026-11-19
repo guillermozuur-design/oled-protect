@@ -5,30 +5,35 @@ namespace OledProtect.Tests.Storage
 {
     public class StorageRootTests
     {
+        private static string RootFor(bool portable, string appData = @"C:\Users\x\AppData\Roaming", string exe = @"C:\Apps\Protect") =>
+            new StorageRoot(new FakeFileSystem { AppDataRoot = appData, ExeFolder = exe }, portable).DirectoryPath;
+
+        [Fact]
+        public void Installed_copy_uses_its_own_folder_in_roaming_appdata()
+        {
+            Assert.Equal(@"C:\Users\x\AppData\Roaming\OledProtect", RootFor(portable: false));
+        }
+
+        [Fact]
+        public void Portable_copy_keeps_its_data_beside_the_program()
+        {
+            Assert.Equal(@"C:\Apps\Protect\Data", RootFor(portable: true));
+        }
+
         [Theory]
-        [InlineData(false, @"C:\FakeAppData\OledProtect")]
-        [InlineData(true, @"C:\FakeApp\Data")]
-        public void Folder_depends_on_distribution(bool portable, string expected)
+        [InlineData(@"D:\Profile\Roaming", @"D:\Profile\Roaming\OledProtect")]
+        [InlineData(@"\\server\home\roam", @"\\server\home\roam\OledProtect")]
+        public void Installed_path_follows_whatever_appdata_the_system_reports(string appData, string expected)
         {
-            var root = new StorageRoot(new FakeFileSystem(), portable);
-
-            Assert.Equal(expected, root.DirectoryPath);
+            Assert.Equal(expected, RootFor(portable: false, appData: appData));
         }
 
-        [Fact]
-        public void Installed_build_follows_the_reported_appdata_folder()
+        [Theory]
+        [InlineData(@"E:\Stick\Tools", @"E:\Stick\Tools\Data")]
+        [InlineData(@"C:\Program Files\OLED Protect", @"C:\Program Files\OLED Protect\Data")]
+        public void Portable_path_follows_the_program_folder(string exe, string expected)
         {
-            var disk = new FakeFileSystem { AppDataRoot = @"D:\Roaming" };
-
-            Assert.Equal(@"D:\Roaming\OledProtect", new StorageRoot(disk, false).DirectoryPath);
-        }
-
-        [Fact]
-        public void Portable_build_follows_the_exe_folder()
-        {
-            var disk = new FakeFileSystem { ExeFolder = @"E:\Tools\Sleeper" };
-
-            Assert.Equal(@"E:\Tools\Sleeper\Data", new StorageRoot(disk, true).DirectoryPath);
+            Assert.Equal(expected, RootFor(portable: true, exe: exe));
         }
     }
 }

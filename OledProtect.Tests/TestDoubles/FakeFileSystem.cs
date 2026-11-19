@@ -3,115 +3,124 @@ using System.IO;
 
 namespace OledProtect.Tests.TestDoubles
 {
-    // Which operations of FakeFileSystem should throw an IOException.
-    [Flags]
-    public enum FakeDiskFault
+    // A RAM-only drive for storage tests. Files are a path -> text map (case-insensitive like NTFS); a
+    // folder exists when it was created or something lies beneath it. Rename-style calls refuse the same
+    // situations Win32 refuses, so picking the wrong call is caught. Any call can be made to fail through
+    // BreakOn, using the IFileSystem member name, e.g. disk.BreakOn(nameof(IFileSystem.Replace)).
+    public sealed class FakeFileSystem : IFileSystem
     {
-        None = 0,
-        Read = 1,
-        Write = 2,
-        Replace = 4,
-        Delete = 8,
-        CreateDirectory = 16,
-    }
+        private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
 
-    // In-memory disk. Replace/Move enforce the same preconditions as the real Win32 calls, so code that
-    // picks the wrong one fails in tests too. Faults simulates I/O errors per operation.
-    public class FakeFileSystem : IFileSystem
-    {
-        private readonly Dictionary<string, string> _disk = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _texts = new(PathComparer);
+        private readonly HashSet<string> _folders = new(PathComparer);
+        private readonly HashSet<string> _broken = new(StringComparer.Ordinal);
 
         public string AppDataRoot { get; init; } = @"C:\FakeAppData";
 
         public string ExeFolder { get; init; } = @"C:\FakeApp";
 
-        public FakeDiskFault Faults { get; set; }
+        // Arguments of every CreateDirectory call that went through, oldest first.
+        public List<string> CreatedFolders { get; } = [];
 
-        // Every folder creation request, in call order.
-        public List<string> Mkdirs { get; } = [];
+        // Text used in the IOException of a broken call; tests look for it in error messages.
+        public const string FailureText = "fake disk refused";
 
-        // Setup/inspection helpers; they bypass Faults on purpose.
-        public void Seed(string path, string contents) => _disk[path] = contents;
-
-        public string? Peek(string path) => _disk.GetValueOrDefault(path);
-
-        string IFileSystem.GetApplicationDataPath() => AppDataRoot;
-
-        string IFileSystem.GetApplicationDirectoryPath() => ExeFolder;
-
-        void IFileSystem.CreateDirectory(string path)
+        public FakeFileSystem BreakOn(params string[] operations)
         {
-            Trip(FakeDiskFault.CreateDirectory, path);
-            Mkdirs.Add(path);
+            _broken.UnionWith(operations);
+            return this;
         }
 
-        public bool FileExists(string path) => _disk.ContainsKey(path);
-
-        string IFileSystem.ReadAllText(string path)
+        // Test-side access that never fails.
+        public FakeFileSystem With(string path, string text)
         {
-            Trip(FakeDiskFault.Read, path);
-            return Existing(path);
+            _texts[path] = text;
+            return this;
         }
 
-        void IFileSystem.WriteAllText(string path, string contents)
+        public string? ContentOf(string path) => _texts.TryGetValue(path, out var text) ? text : null;
+
+        public IReadOnlyCollection<string> AllFiles => _texts.Keys;
+
+        public string GetApplicationDataPath() => AppDataRoot;
+
+        public string GetApplicationDirectoryPath() => ExeFolder;
+
+        public void CreateDirectory(string path)
         {
-            Trip(FakeDiskFault.Write, path);
-            _disk[path] = contents;
+            Guard(nameof(CreateDirectory), path);
+            _folders.Add(path);
+            CreatedFolders.Add(path);
         }
 
-        void IFileSystem.Replace(string sourcePath, string destinationPath, string backupPath)
-        {
-            Trip(FakeDiskFault.Replace, destinationPath);
-            string incoming = Existing(sourcePath);
-            string previous = Existing(destinationPath);
+        public bool FileExists(string path) => _texts.ContainsKey(path);
 
-            _disk.Remove(sourcePath);
-            _disk[backupPath] = previous;
-            _disk[destinationPath] = incoming;
+        public string ReadAllText(string path)
+        {
+            Guard(nameof(ReadAllText), path);
+            return Require(path);
         }
 
-        void IFileSystem.Move(string sourcePath, string destinationPath)
+        public void WriteAllText(string path, string contents)
         {
-            if (_disk.ContainsKey(destinationPath))
-                throw new IOException("Target already exists: " + destinationPath);
-
-            _disk[destinationPath] = Existing(sourcePath);
-            _disk.Remove(sourcePath);
+            Guard(nameof(WriteAllText), path);
+            _texts[path] = contents;
         }
 
-        void IFileSystem.DeleteFile(string path)
+        public void Replace(string sourcePath, string destinationPath, string backupPath)
         {
-            Trip(FakeDiskFault.Delete, path);
-            _disk.Remove(path);
+            Guard(nameof(Replace), destinationPath);
+            (string incoming, string outgoing) = (Require(sourcePath), Require(destinationPath));
+            _texts.Remove(sourcePath);
+            _texts[destinationPath] = incoming;
+            _texts[backupPath] = outgoing;
         }
 
-        // Folders exist when any file lives below them, or when they were created.
-        public bool DirectoryExists(string path)
+        public void Move(string sourcePath, string destinationPath)
         {
-            string prefix = path.TrimEnd('\\') + "\\";
-            return Mkdirs.Contains(path, StringComparer.OrdinalIgnoreCase)
-                   || _disk.Keys.Any(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            Guard(nameof(Move), destinationPath);
+            if (FileExists(destinationPath))
+                throw new IOException($"{destinationPath} is already there");
+            _texts[destinationPath] = Require(sourcePath);
+            _texts.Remove(sourcePath);
         }
 
-        void IFileSystem.MoveDirectory(string sourcePath, string destinationPath)
+        public void DeleteFile(string path)
         {
+            Guard(nameof(DeleteFile), path);
+            _texts.Remove(path);
+        }
+
+        public bool DirectoryExists(string path) =>
+            _folders.Contains(path) || _texts.Keys.Any(file => IsBelow(file, path));
+
+        public void MoveDirectory(string sourcePath, string destinationPath)
+        {
+            Guard(nameof(MoveDirectory), destinationPath);
             if (DirectoryExists(destinationPath))
-                throw new IOException("Target already exists: " + destinationPath);
-            string from = sourcePath.TrimEnd('\\') + "\\", to = destinationPath.TrimEnd('\\') + "\\";
-            foreach (var key in _disk.Keys.Where(k => k.StartsWith(from, StringComparison.OrdinalIgnoreCase)).ToList())
+                throw new IOException($"{destinationPath} is already there");
+
+            foreach (var file in _texts.Keys.Where(f => IsBelow(f, sourcePath)).ToArray())
             {
-                _disk[to + key[from.Length..]] = _disk[key];
-                _disk.Remove(key);
+                string relative = Path.GetRelativePath(sourcePath, file);
+                _texts[Path.Combine(destinationPath, relative)] = _texts[file];
+                _texts.Remove(file);
             }
+
+            if (_folders.Remove(sourcePath))
+                _folders.Add(destinationPath);
         }
 
-        private string Existing(string path) =>
-            _disk.TryGetValue(path, out var text) ? text : throw new FileNotFoundException(null, path);
+        private static bool IsBelow(string file, string folder) =>
+            file.StartsWith(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-        private void Trip(FakeDiskFault operation, string path)
+        private string Require(string path) =>
+            ContentOf(path) ?? throw new FileNotFoundException("no such fake file", path);
+
+        private void Guard(string operation, string path)
         {
-            if (Faults.HasFlag(operation))
-                throw new IOException($"Simulated {operation} failure on {path}");
+            if (_broken.Contains(operation))
+                throw new IOException($"{FailureText}: {operation} {path}");
         }
     }
 }

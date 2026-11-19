@@ -1,81 +1,108 @@
 using OledProtect.Storage;
+using OledProtect.Storage.Interfaces;
 using OledProtect.Tests.TestDoubles;
 
 namespace OledProtect.Tests.Storage
 {
     public class StorageRootPreparerTests
     {
-        private const string Installed = @"C:\FakeAppData\OledProtect";
+        private const string AppData = @"C:\FakeAppData";
+        private const string Target = AppData + @"\OledProtect";
+        private const string Legacy = AppData + @"\" + StorageRootPreparer.FormerFolderName;
 
-        private readonly FakeFileSystem _disk = new();
-
-        private bool Prepare(out string? message, bool portable = false) =>
-            new StorageRootPreparer(_disk, new StorageRoot(_disk, portable)).TryPrepare(out message);
+        private static (bool Ok, string? Error) Run(FakeFileSystem disk, bool portable = false)
+        {
+            var preparer = new StorageRootPreparer(disk, new StorageRoot(disk, portable));
+            bool ok = preparer.TryPrepare(out string? error);
+            return (ok, error);
+        }
 
         [Fact]
-        public void Healthy_folder_is_created_and_reports_no_error()
+        public void A_writable_folder_passes_without_a_message()
         {
-            bool ok = Prepare(out var message);
+            var disk = new FakeFileSystem();
+
+            var (ok, error) = Run(disk);
 
             Assert.True(ok);
-            Assert.Null(message);
-            Assert.Equal([Installed], _disk.Mkdirs);
+            Assert.Null(error);
+            Assert.Equal(new[] { Target }, disk.CreatedFolders);
         }
 
         [Fact]
-        public void Former_app_folder_is_taken_over_on_first_start()
+        public void The_write_check_leaves_no_files_behind()
         {
-            _disk.Seed(@"C:\FakeAppData\OLED-Space-Sleeper\flights.json", "{ }");
-            _disk.Seed(@"C:\FakeAppData\OLED-Space-Sleeper\Logs\log.txt", "x");
+            var disk = new FakeFileSystem();
 
-            Assert.True(Prepare(out _));
+            Run(disk);
 
-            Assert.Equal("{ }", _disk.Peek(Installed + @"\flights.json"));
-            Assert.Equal("x", _disk.Peek(Installed + @"\Logs\log.txt"));
-            Assert.Null(_disk.Peek(@"C:\FakeAppData\OLED-Space-Sleeper\flights.json"));
+            Assert.Empty(disk.AllFiles);
         }
 
         [Fact]
-        public void Former_folder_is_left_alone_once_the_new_one_exists()
+        public void Portable_mode_checks_the_data_folder_next_to_the_program()
         {
-            _disk.Seed(Installed + @"\flights.json", "new");
-            _disk.Seed(@"C:\FakeAppData\OLED-Space-Sleeper\flights.json", "old");
+            var disk = new FakeFileSystem();
 
-            Assert.True(Prepare(out _));
-
-            Assert.Equal("new", _disk.Peek(Installed + @"\flights.json"));
-            Assert.Equal("old", _disk.Peek(@"C:\FakeAppData\OLED-Space-Sleeper\flights.json"));
+            Assert.True(Run(disk, portable: true).Ok);
+            Assert.Equal(new[] { @"C:\FakeApp\Data" }, disk.CreatedFolders);
         }
 
         [Fact]
-        public void Probe_file_is_cleaned_up()
+        public void The_folder_of_the_old_app_name_is_moved_into_place_once()
         {
-            Prepare(out _);
+            var disk = new FakeFileSystem()
+                .With(Legacy + @"\settings.json", "S")
+                .With(Legacy + @"\Logs\today.log", "L");
 
-            Assert.False(_disk.FileExists(Installed + @"\.write-probe"));
+            Assert.True(Run(disk).Ok);
+
+            Assert.Equal("S", disk.ContentOf(Target + @"\settings.json"));
+            Assert.Equal("L", disk.ContentOf(Target + @"\Logs\today.log"));
+            Assert.False(disk.DirectoryExists(Legacy));
         }
 
         [Fact]
-        public void Portable_build_prepares_the_data_folder_next_to_the_exe()
+        public void An_existing_new_folder_wins_over_the_old_one()
         {
-            Assert.True(Prepare(out _, portable: true));
-            Assert.Equal([@"C:\FakeApp\Data"], _disk.Mkdirs);
+            var disk = new FakeFileSystem()
+                .With(Target + @"\settings.json", "current")
+                .With(Legacy + @"\settings.json", "stale");
+
+            Assert.True(Run(disk).Ok);
+
+            Assert.Equal("current", disk.ContentOf(Target + @"\settings.json"));
+            Assert.Equal("stale", disk.ContentOf(Legacy + @"\settings.json"));
+        }
+
+        [Fact]
+        public void A_takeover_that_fails_still_starts_with_a_fresh_folder()
+        {
+            var disk = new FakeFileSystem()
+                .With(Legacy + @"\settings.json", "S")
+                .BreakOn(nameof(IFileSystem.MoveDirectory));
+
+            var (ok, error) = Run(disk);
+
+            Assert.True(ok, error);
+            Assert.Contains(Target, disk.CreatedFolders);
+            Assert.Equal("S", disk.ContentOf(Legacy + @"\settings.json"));
         }
 
         [Theory]
-        [InlineData(FakeDiskFault.CreateDirectory)]
-        [InlineData(FakeDiskFault.Write)]
-        [InlineData(FakeDiskFault.Delete)]
-        public void Any_io_failure_is_reported_with_the_folder_and_cause(FakeDiskFault fault)
+        [InlineData(nameof(IFileSystem.CreateDirectory))]
+        [InlineData(nameof(IFileSystem.WriteAllText))]
+        [InlineData(nameof(IFileSystem.DeleteFile))]
+        public void A_refused_disk_call_fails_with_folder_and_reason(string brokenCall)
         {
-            _disk.Faults = fault;
+            var disk = new FakeFileSystem().BreakOn(brokenCall);
 
-            bool ok = Prepare(out var message);
+            var (ok, error) = Run(disk);
 
             Assert.False(ok);
-            Assert.NotNull(message);
-            Assert.Contains(Installed, message);
-            Assert.Contains("Simulated", message);
+            Assert.NotNull(error);
+            Assert.Contains(Target, error);
+            Assert.Contains(FakeFileSystem.FailureText, error);
         }
     }
 }
