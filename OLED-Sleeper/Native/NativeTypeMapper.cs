@@ -2,22 +2,11 @@
 
 namespace OLED_Sleeper.Native
 {
-    /// <summary>
-    /// Provides simple conversion methods for native Windows types.
-    /// </summary>
+    // Conversions from Win32 value types to their WPF counterparts.
     internal static class NativeTypeMapper
     {
-        /// <summary>
-        /// Converts a native Rect (Left, Top, Right, Bottom) to a WPF Rect (X, Y, Width, Height).
-        /// </summary>
-        public static Rect ToWindowsRect(this NativeMethods.Rect nativeRect)
-        {
-            return new Rect(
-                nativeRect.left,
-                nativeRect.top,
-                nativeRect.right - nativeRect.left,
-                nativeRect.bottom - nativeRect.top
-            );
-        }
+        // Win32 stores the four edges; WPF wants an origin plus a size.
+        public static Rect ToWindowsRect(this NativeMethods.Rect edges) =>
+            new(edges.Left, edges.Top, edges.Right - edges.Left, edges.Bottom - edges.Top);
     }
 }

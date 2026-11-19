@@ -3,19 +3,14 @@ using OLED_Sleeper.Messaging.Interfaces;
 namespace OLED_Sleeper.Features.MonitorDimming.Commands
 {
     /// <summary>
-    /// Represents a command to dim a specific monitor to a given brightness level.
-    /// This is a data-transfer object that carries the necessary information for the handler to perform the action.
+    /// Lowers one monitor's hardware brightness, remembering the level it had so it can be put back.
     /// </summary>
-    public class ApplyDimCommand : ICommand
+    public sealed class ApplyDimCommand : ICommand
     {
-        /// <summary>
-        /// The unique hardware identifier of the target monitor.
-        /// </summary>
+        /// <summary>Monitor to dim.</summary>
         public required string HardwareId { get; init; }
 
-        /// <summary>
-        /// The brightness level to set (0-100).
-        /// </summary>
+        /// <summary>Target level in percent (0-100); the service maps it onto the panel's own range.</summary>
         public int DimLevel { get; init; }
     }
 }

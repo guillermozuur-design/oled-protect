@@ -4,116 +4,103 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Services
 {
-    public class OriginalBrightnessStoreTests
+    public sealed class OriginalBrightnessStoreTests
     {
-        private const string HardwareId = "MON-PRIMARY";
+        private const string Panel = "PNP-OLED";
 
-        private readonly Mock<IMonitorBrightnessStateService> _stateService;
+        private readonly Mock<IMonitorBrightnessStateService> _file = new();
 
-        public OriginalBrightnessStoreTests()
+        public OriginalBrightnessStoreTests() => FileHolds(new Dictionary<string, uint>());
+
+        [Fact]
+        public void Recordings_SavedByAnEarlierRun_AreAvailableRightAway()
         {
-            _stateService = new Mock<IMonitorBrightnessStateService>();
-            _stateService.Setup(s => s.LoadState()).Returns(new Dictionary<string, uint>());
+            FileHolds(new Dictionary<string, uint> { [Panel] = 80 });
+
+            var store = NewStore();
+
+            Assert.True(store.TryGetOriginal(Panel, out uint level));
+            Assert.Equal(80u, level);
         }
 
         [Fact]
-        public void Constructor_WhenBuilt_LoadsTheRecordingsFromDisk()
+        public void TryGetOriginal_UnknownMonitor_IsFalse()
         {
-            // Arrange
-            _stateService.Setup(s => s.LoadState()).Returns(new Dictionary<string, uint> { [HardwareId] = 80 });
-
-            // Act
-            var store = new OriginalBrightnessStore(_stateService.Object);
-
-            // Assert
-            Assert.True(store.TryGetOriginal(HardwareId, out var brightness));
-            Assert.Equal(80u, brightness);
+            Assert.False(NewStore().TryGetOriginal(Panel, out _));
         }
 
         [Fact]
-        public void TryGetOriginal_WhenMonitorHasNoRecording_ReturnsFalse()
+        public void RecordOriginal_FirstTime_KeepsTheLevelAndWritesItToTheFile()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
+            var store = NewStore();
 
-            // Act
-            var found = store.TryGetOriginal(HardwareId, out _);
+            store.RecordOriginal(Panel, 80);
 
-            // Assert
-            Assert.False(found);
+            Assert.True(store.TryGetOriginal(Panel, out uint level));
+            Assert.Equal(80u, level);
+            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved[Panel] == 80)), Times.Once);
         }
 
         [Fact]
-        public void RecordOriginal_WhenMonitorHasNoRecording_RecordsItAndSavesTheState()
+        public void RecordOriginal_AlreadyRecorded_KeepsTheFirstLevelAndSavesNothingMore()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
+            var store = NewStore();
+            store.RecordOriginal(Panel, 80);
 
-            // Act
-            store.RecordOriginal(HardwareId, 80);
+            store.RecordOriginal(Panel, 5);
 
-            // Assert
-            Assert.True(store.TryGetOriginal(HardwareId, out var brightness));
-            Assert.Equal(80u, brightness);
-            _stateService.Verify(s => s.SaveState(It.Is<Dictionary<string, uint>>(d => d[HardwareId] == 80)), Times.Once);
+            store.TryGetOriginal(Panel, out uint level);
+            Assert.Equal(80u, level);
+            _file.Verify(f => f.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Once);
         }
 
         [Fact]
-        public void RecordOriginal_WhenMonitorAlreadyHasARecording_KeepsTheFirstAndDoesNotSaveAgain()
+        public void ReplaceOriginal_AlreadyRecorded_OverwritesAndSaves()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
-            store.RecordOriginal(HardwareId, 80);
+            var store = NewStore();
+            store.RecordOriginal(Panel, 80);
 
-            // Act
-            store.RecordOriginal(HardwareId, 5);
+            store.ReplaceOriginal(Panel, 40);
 
-            // Assert
-            Assert.True(store.TryGetOriginal(HardwareId, out var brightness));
-            Assert.Equal(80u, brightness);
-            _stateService.Verify(s => s.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Once);
+            store.TryGetOriginal(Panel, out uint level);
+            Assert.Equal(40u, level);
+            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved[Panel] == 40)), Times.Once);
         }
 
         [Fact]
-        public void RemoveOriginal_WhenMonitorHasARecording_RemovesItAndSavesTheState()
+        public void RemoveOriginal_Recorded_ForgetsItAndSavesTheEmptyMap()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
-            store.RecordOriginal(HardwareId, 80);
+            var store = NewStore();
+            store.RecordOriginal(Panel, 80);
 
-            // Act
-            store.RemoveOriginal(HardwareId);
+            store.RemoveOriginal(Panel);
 
-            // Assert
-            Assert.False(store.TryGetOriginal(HardwareId, out _));
-            _stateService.Verify(s => s.SaveState(It.Is<Dictionary<string, uint>>(d => d.Count == 0)), Times.Once);
+            Assert.False(store.TryGetOriginal(Panel, out _));
+            _file.Verify(f => f.SaveState(It.Is<Dictionary<string, uint>>(saved => saved.Count == 0)), Times.Once);
         }
 
         [Fact]
-        public void RemoveOriginal_WhenMonitorHasNoRecording_DoesNotSave()
+        public void RemoveOriginal_NothingRecorded_DoesNotTouchTheFile()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
+            NewStore().RemoveOriginal(Panel);
 
-            // Act
-            store.RemoveOriginal(HardwareId);
-
-            // Assert
-            _stateService.Verify(s => s.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Never);
+            _file.Verify(f => f.SaveState(It.IsAny<Dictionary<string, uint>>()), Times.Never);
         }
 
         [Fact]
-        public void GetAll_WhenTheResultIsMutated_LeavesTheStoreUnchanged()
+        public void GetAll_ReturnsACopyThatCannotChangeTheStore()
         {
-            // Arrange
-            var store = new OriginalBrightnessStore(_stateService.Object);
-            store.RecordOriginal(HardwareId, 80);
+            var store = NewStore();
+            store.RecordOriginal(Panel, 80);
 
-            // Act
-            store.GetAll().Clear();
+            var copy = store.GetAll();
+            copy.Clear();
 
-            // Assert
-            Assert.True(store.TryGetOriginal(HardwareId, out _));
+            Assert.True(store.TryGetOriginal(Panel, out _));
         }
+
+        private OriginalBrightnessStore NewStore() => new(_file.Object);
+
+        private void FileHolds(Dictionary<string, uint> content) => _file.Setup(f => f.LoadState()).Returns(content);
     }
 }

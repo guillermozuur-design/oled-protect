@@ -3,53 +3,41 @@ using System.Windows;
 namespace OLED_Sleeper.Features.MonitorInformation.Models
 {
     /// <summary>
-    /// Represents a physical or logical monitor attached to the system.
-    /// Contains identifying information, geometry, and capabilities.
+    /// A snapshot of one attached monitor: who it is, where it sits and what it can do.
     /// </summary>
-    public class MonitorInfo
+    public sealed class MonitorInfo
     {
         /// <summary>
-        /// Gets or sets the device name (e.g., \\.\DISPLAY1). Windows reassigns these between panels when
-        /// the display set changes.
+        /// Stable identity of the panel (its PnP hardware ID). Settings are keyed on this, never on
+        /// <see cref="DeviceName"/>. Empty when no attached display device could be matched.
         /// </summary>
-        public string DeviceName { get; set; } = string.Empty;
+        public string HardwareId { get; set; } = "";
 
         /// <summary>
-        /// Gets or sets the unique hardware ID for the monitor.
-        /// Empty when no attached display device matched.
+        /// GDI name such as <c>\\.\DISPLAY2</c>. Windows may hand these to other panels when the set of
+        /// displays changes, so it only serves to address the monitor right now.
         /// </summary>
-        public string HardwareId { get; set; } = string.Empty;
+        public string DeviceName { get; set; } = "";
 
-        /// <summary>
-        /// Gets or sets how Windows numbers the panels showing this desktop surface, such as <c>1|2</c> for a
-        /// duplicated one. Empty when the surface is not duplicated.
-        /// </summary>
-        public string TopologyLabel { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the bounding rectangle of the monitor in screen coordinates.
-        /// </summary>
-        public Rect Bounds { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether this monitor is the primary display.
-        /// </summary>
-        public bool IsPrimary { get; set; }
-
-        /// <summary>
-        /// Gets or sets the DPI (dots per inch) of the monitor.
-        /// </summary>
-        public uint Dpi { get; set; }
-
-        /// <summary>
-        /// Gets or sets the display number (e.g., 1 for DISPLAY1).
-        /// </summary>
+        /// <summary>The n in <c>DISPLAYn</c>, or -1 when the device name does not end in a number.</summary>
         public int DisplayNumber { get; set; }
 
         /// <summary>
-        /// Gets or sets what a DDC/CI probe of this monitor reported.
-        /// Null until the monitor has been probed.
+        /// For a duplicated desktop surface, the display numbers sharing it as Windows shows them (<c>1|2</c>);
+        /// empty otherwise.
         /// </summary>
+        public string TopologyLabel { get; set; } = "";
+
+        /// <summary>Desktop area covered by the monitor, in physical pixels.</summary>
+        public Rect Bounds { get; set; }
+
+        /// <summary>Effective DPI the monitor's content is scaled to.</summary>
+        public uint Dpi { get; set; }
+
+        /// <summary>True for the monitor holding the primary desktop.</summary>
+        public bool IsPrimary { get; set; }
+
+        /// <summary>DDC/CI probe result; null as long as the monitor was not probed.</summary>
         public DdcCiCapabilities? Capabilities { get; set; }
     }
 }

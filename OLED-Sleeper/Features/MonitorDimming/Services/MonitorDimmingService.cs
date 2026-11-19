@@ -1,5 +1,6 @@
 using OLED_Sleeper.Features.MonitorDimming.Helpers;
 using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
+using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using Serilog;
 using System.Collections.Concurrent;
@@ -7,358 +8,282 @@ using System.Collections.Concurrent;
 namespace OLED_Sleeper.Features.MonitorDimming.Services
 {
     /// <summary>
-    /// Provides services for dimming and restoring monitor brightness using DDC/CI.
-    /// Every public method is safe to call from any thread.
+    /// Dims, restores and schedules monitor brightness over DDC/CI. Operations on one monitor are serialised;
+    /// different monitors proceed in parallel. Safe to call from any thread.
     /// </summary>
-    public class MonitorDimmingService : IMonitorDimmingService
+    public sealed class MonitorDimmingService : IMonitorDimmingService
     {
-        private readonly IMonitorInfoManager _monitorManager;
-        private readonly IDdcCiAccess _ddcCiAccess;
-        private readonly IOriginalBrightnessStore _originalBrightnessStore;
+        // A restore is only trusted once the panel reads back the value; a panel that is still waking up may need
+        // a few tries before it takes the write.
+        private const int MaxRestoreTries = 3;
+        private static readonly TimeSpan RestoreRetryPause = TimeSpan.FromMilliseconds(200);
 
-        /// <summary>Number of times a restore write is attempted before the recording is kept and the attempt abandoned.</summary>
-        private const int RestoreAttempts = 3;
+        // Panels quantise their brightness steps, so a read-back this close to the written value counts as applied.
+        private const uint ReadBackTolerance = 2;
 
-        /// <summary>Delay between restore attempts.</summary>
-        private const int RestoreRetryDelayMs = 200;
-
-        /// <summary>Largest difference between the requested and read-back brightness that still counts as applied.</summary>
-        private const uint BrightnessReadBackTolerance = 2;
-
-        /// <summary>
-        /// One gate per hardware ID. Dim, undim and restore for the same monitor run one at a time.
-        /// </summary>
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _monitorGates = new();
+        private readonly IMonitorInfoManager _monitors;
+        private readonly IDdcCiAccess _bus;
+        private readonly IOriginalBrightnessStore _originals;
+        private readonly BrightnessFadeOptions _fade;
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _monitorLocks = new();
 
         public MonitorDimmingService(
-            IMonitorInfoManager monitorManager,
-            IDdcCiAccess ddcCiAccess,
+            IMonitorInfoManager monitorInfoManager,
+            IDdcCiAccess bus,
             IOriginalBrightnessStore originalBrightnessStore,
             BrightnessFadeOptions? fadeOptions = null)
         {
-            _monitorManager = monitorManager;
-            _ddcCiAccess = ddcCiAccess;
-            _originalBrightnessStore = originalBrightnessStore;
+            _monitors = monitorInfoManager;
+            _bus = bus;
+            _originals = originalBrightnessStore;
             _fade = fadeOptions ?? BrightnessFadeOptions.None;
         }
 
-        private readonly BrightnessFadeOptions _fade;
-
-        /// <summary>
-        /// Sets a monitor to a brightness picked by the schedule. When the monitor is dimmed or blacked
-        /// out right now, only the brightness it will return to is changed, so waking it lands on the
-        /// scheduled level instead of the old one.
-        /// </summary>
-        /// <param name="hardwareId">The monitor.</param>
-        /// <param name="percent">Brightness in percent, 0-100.</param>
-        /// <returns>True when the scheduled level is in place (or will be on wake-up); false when the monitor did not answer.</returns>
-        public async Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent)
+        private enum ChannelResult
         {
-            if (string.IsNullOrEmpty(hardwareId)) return false;
-
-            bool ok = false;
-            // DDC/CI writes and the fade's pauses are slow: never run them on the caller's thread.
-            await Task.Run(() => WithMonitorGateAsync(hardwareId, async () =>
-            {
-                var target = await ScaleToMonitorRangeAsync(hardwareId, percent);
-
-                if (_originalBrightnessStore.TryGetOriginal(hardwareId, out _))
-                {
-                    _originalBrightnessStore.ReplaceOriginal(hardwareId, target);
-                    Log.Information("Monitor {HardwareId} is dimmed; it will wake to scheduled brightness {Brightness}.", hardwareId, target);
-                    ok = true;
-                    return;
-                }
-
-                var outcome = await WithSessionAsync(hardwareId, session =>
-                {
-                    var current = session.GetBrightness();
-                    if (current is null) return false;
-                    if (current.Value == target) return true;
-                    Log.Information("Schedule: monitor {HardwareId} brightness {From} -> {To}.", hardwareId, current.Value, target);
-                    return FadeBrightness(session, hardwareId, current.Value, target);
-                });
-                ok = outcome == MonitorAccessOutcome.Succeeded;
-            }));
-            return ok;
+            Unreachable, // no channel could be opened, so nothing was written
+            Failed,      // the channel opened but the work did not succeed
+            Succeeded,
         }
 
-        /// <inheritdoc />
-        public async Task DimMonitorAsync(string? hardwareId, int dimLevel)
+        public async Task DimMonitorAsync(string? hardwareId, int percent)
         {
-            if (string.IsNullOrEmpty(hardwareId))
+            if (hardwareId is not { Length: > 0 })
             {
-                Log.Warning("DimMonitorAsync called without a hardware ID.");
+                Log.Warning("Dim request without a hardware ID ignored.");
                 return;
             }
 
-            // DDC/CI writes and the fade's pauses are slow: never run them on the caller's thread
-            // (the idle loop calls this while holding its lock; work mode calls it from the UI thread).
-            await Task.Run(() => WithMonitorGateAsync(hardwareId, () => DimCoreAsync(hardwareId, dimLevel)));
+            await RunExclusiveAsync(hardwareId, async () =>
+            {
+                await DimAsync(hardwareId, percent);
+                return true;
+            });
         }
 
-        /// <inheritdoc />
-        public async Task UndimMonitorAsync(string hardwareId)
+        public Task UndimMonitorAsync(string hardwareId)
         {
-            if (string.IsNullOrEmpty(hardwareId))
+            if (hardwareId is not { Length: > 0 })
             {
-                Log.Warning("UndimMonitorAsync called without a hardware ID.");
-                return;
+                Log.Warning("Undim request without a hardware ID ignored.");
+                return Task.CompletedTask;
             }
 
-            await Task.Run(() => WithMonitorGateAsync(hardwareId, () => UndimCoreAsync(hardwareId)));
-        }
-
-        /// <inheritdoc />
-        public Dictionary<string, uint> GetDimmedMonitors()
-        {
-            return _originalBrightnessStore.GetAll();
-        }
-
-        #region Private Helpers
-
-        /// <summary>
-        /// Result of an operation that needs a physical monitor handle.
-        /// </summary>
-        private enum MonitorAccessOutcome
-        {
-            /// <summary>The monitor handle could not be found or opened. Nothing was written.</summary>
-            Unavailable,
-
-            /// <summary>The operation ran against the monitor and did not succeed.</summary>
-            Failed,
-
-            /// <summary>The operation ran against the monitor and succeeded.</summary>
-            Succeeded
-        }
-
-        /// <summary>
-        /// Scales the dim level into the monitor's brightness range, reads the current brightness,
-        /// records it as the original, then writes the scaled value.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="dimLevel">The dim level as a percentage.</param>
-        private async Task DimCoreAsync(string hardwareId, int dimLevel)
-        {
-            var targetBrightness = await ScaleToMonitorRangeAsync(hardwareId, dimLevel);
-
-            await WithSessionAsync(hardwareId, session =>
+            return RunExclusiveAsync(hardwareId, async () =>
             {
-                var currentBrightness = GetCurrentBrightness(session, hardwareId);
-                if (currentBrightness is null) return false;
-
-                _originalBrightnessStore.RecordOriginal(hardwareId, currentBrightness.Value);
-                return FadeBrightness(session, hardwareId, currentBrightness.Value, targetBrightness);
+                await UndimAsync(hardwareId);
+                return true;
             });
         }
 
         /// <summary>
-        /// Converts a dim level percentage into a raw brightness value using the range the monitor reported
-        /// when it was last probed.
+        /// While the monitor is dimmed or blacked out only the level it will wake to is changed, so waking it lands
+        /// on the scheduled brightness rather than the stale one.
         /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="dimLevel">The dim level as a percentage.</param>
-        /// <returns>The value to write to the monitor.</returns>
-        private async Task<uint> ScaleToMonitorRangeAsync(string hardwareId, int dimLevel)
+        public Task<bool> SetScheduledBrightnessAsync(string hardwareId, int percent)
         {
-            var monitors = await _monitorManager.GetCurrentMonitorsAsync();
-            var maxBrightness = monitors.FirstOrDefault(m => m.HardwareId == hardwareId)?.Capabilities?.MaxBrightness ?? 0;
+            if (hardwareId is not { Length: > 0 }) return Task.FromResult(false);
 
-            var targetBrightness = BrightnessScale.ToRawBrightness(dimLevel, maxBrightness);
-            if (targetBrightness != dimLevel)
-            {
-                Log.Debug("Dim level {DimLevel}% scales to brightness {TargetBrightness} on monitor {HardwareId}, whose range is 0-{MaxBrightness}.",
-                    dimLevel, targetBrightness, hardwareId, maxBrightness);
-            }
-
-            return targetBrightness;
+            return RunExclusiveAsync(hardwareId, () => ApplyScheduledAsync(hardwareId, percent));
         }
 
-        /// <summary>
-        /// Sets the monitor back to its recorded original brightness and drops the recording.
-        /// Does nothing if there is no recording. The recording is kept when the restore could not be confirmed,
-        /// so a later reconnect, settings save, or the next launch retries it.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        private async Task UndimCoreAsync(string hardwareId)
-        {
-            if (!_originalBrightnessStore.TryGetOriginal(hardwareId, out var originalBrightness)) return;
+        public Dictionary<string, uint> GetDimmedMonitors() => _originals.GetAll();
 
-            if (await RestoreCoreAsync(hardwareId, originalBrightness))
+        // ----- Operations; each runs while holding the monitor's lock -----
+
+        private async Task DimAsync(string hardwareId, int percent)
+        {
+            var monitor = await FindMonitorAsync(hardwareId);
+            uint target = ScaleForMonitor(monitor, hardwareId, percent);
+
+            UseChannel(monitor, hardwareId, channel =>
             {
-                _originalBrightnessStore.RemoveOriginal(hardwareId);
+                uint? before = ReadBrightness(channel, hardwareId);
+                if (before is not uint current) return false;
+
+                // Recorded before the first write, so a crash halfway through the fade can still be undone.
+                _originals.RecordOriginal(hardwareId, current);
+                return FadeTo(channel, hardwareId, current, target);
+            });
+        }
+
+        private async Task UndimAsync(string hardwareId)
+        {
+            if (!_originals.TryGetOriginal(hardwareId, out uint original)) return;
+
+            // An unconfirmed restore keeps the recording, so a reconnect, a settings save or the next start retries it.
+            if (await TryRestoreAsync(hardwareId, original))
+            {
+                _originals.RemoveOriginal(hardwareId);
             }
         }
 
-        /// <summary>
-        /// Writes the given brightness value to the monitor and reads it back to confirm it was applied.
-        /// Retries up to <see cref="RestoreAttempts"/> times while the monitor is reachable.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="originalBrightness">The brightness value to restore.</param>
-        /// <returns>True when the monitor reported the restored value; otherwise, false.</returns>
-        private async Task<bool> RestoreCoreAsync(string hardwareId, uint originalBrightness)
+        private async Task<bool> ApplyScheduledAsync(string hardwareId, int percent)
         {
-            for (var attempt = 1; attempt <= RestoreAttempts; attempt++)
-            {
-                var outcome = await WithSessionAsync(hardwareId, session =>
-                    SetMonitorBrightness(session, hardwareId, originalBrightness, isRestore: true)
-                    && BrightnessWasApplied(session, hardwareId, originalBrightness));
+            var monitor = await FindMonitorAsync(hardwareId);
+            uint target = ScaleForMonitor(monitor, hardwareId, percent);
 
-                if (outcome == MonitorAccessOutcome.Succeeded)
+            if (_originals.TryGetOriginal(hardwareId, out _))
+            {
+                _originals.ReplaceOriginal(hardwareId, target);
+                Log.Information("Monitor {HardwareId} is dimmed now; it will wake up at the scheduled brightness {Brightness}.", hardwareId, target);
+                return true;
+            }
+
+            var result = UseChannel(monitor, hardwareId, channel =>
+            {
+                if (channel.GetBrightness() is not uint current) return false;
+                if (current == target) return true;
+
+                Log.Information("Brightness schedule: monitor {HardwareId} goes from {From} to {To}.", hardwareId, current, target);
+                return FadeTo(channel, hardwareId, current, target);
+            });
+
+            return result == ChannelResult.Succeeded;
+        }
+
+        private async Task<bool> TryRestoreAsync(string hardwareId, uint original)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                var monitor = await FindMonitorAsync(hardwareId);
+                var result = UseChannel(monitor, hardwareId, channel =>
+                    WriteRestore(channel, hardwareId, original) && ReadsBackAs(channel, hardwareId, original));
+
+                if (result == ChannelResult.Succeeded)
                 {
-                    Log.Information("Restored original brightness {OriginalBrightness} for monitor {HardwareId}.", originalBrightness, hardwareId);
+                    Log.Information("Monitor {HardwareId} is back at its original brightness {Brightness}.", hardwareId, original);
                     return true;
                 }
 
-                if (outcome == MonitorAccessOutcome.Unavailable)
+                if (result == ChannelResult.Unreachable)
                 {
-                    Log.Warning("Monitor {HardwareId} is unreachable. Keeping its recorded brightness {OriginalBrightness} for a later attempt.",
-                        hardwareId, originalBrightness);
+                    Log.Warning("Monitor {HardwareId} cannot be reached; its original brightness {Brightness} stays recorded for a later try.",
+                        hardwareId, original);
                     return false;
                 }
 
-                if (attempt < RestoreAttempts)
+                if (attempt >= MaxRestoreTries)
                 {
-                    await Task.Delay(RestoreRetryDelayMs);
+                    Log.Warning("Monitor {HardwareId} did not take brightness {Brightness} in {Tries} tries; the recording is kept.",
+                        hardwareId, original, MaxRestoreTries);
+                    return false;
                 }
+
+                await Task.Delay(RestoreRetryPause);
             }
-
-            Log.Warning("Brightness {OriginalBrightness} was not applied on monitor {HardwareId} after {Attempts} attempts. Keeping the recording.",
-                originalBrightness, hardwareId, RestoreAttempts);
-            return false;
         }
 
-        /// <summary>
-        /// Reads the monitor's brightness back and compares it against the value that was written.
-        /// </summary>
-        /// <param name="session">The open channel to the monitor.</param>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="expectedBrightness">The brightness value that was written.</param>
-        /// <returns>True when the read-back is within <see cref="BrightnessReadBackTolerance"/> of the written value.</returns>
-        private static bool BrightnessWasApplied(IDdcCiSession session, string hardwareId, uint expectedBrightness)
-        {
-            var actualBrightness = GetCurrentBrightness(session, hardwareId);
-            if (actualBrightness is null) return false;
+        // ----- Building blocks -----
 
-            var difference = actualBrightness.Value > expectedBrightness
-                ? actualBrightness.Value - expectedBrightness
-                : expectedBrightness - actualBrightness.Value;
-
-            if (difference <= BrightnessReadBackTolerance) return true;
-
-            Log.Warning("Monitor {HardwareId} reports brightness {ActualBrightness} after being set to {ExpectedBrightness}.",
-                hardwareId, actualBrightness.Value, expectedBrightness);
-            return false;
-        }
-
-        /// <summary>
-        /// Runs an operation while holding the monitor's gate.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="operation">The operation to run.</param>
-        private async Task WithMonitorGateAsync(string hardwareId, Func<Task> operation)
-        {
-            var gate = _monitorGates.GetOrAdd(hardwareId, _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync();
-            try
+        // DDC/CI transactions and fade pauses take a while, and callers include the idle loop (holding its own lock)
+        // and the UI thread, so the work always moves to the thread pool before it queues on the monitor's lock.
+        private Task<T> RunExclusiveAsync<T>(string hardwareId, Func<Task<T>> work) =>
+            Task.Run(async () =>
             {
-                await operation();
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }
+                var monitorLock = _monitorLocks.GetOrAdd(hardwareId, static _ => new SemaphoreSlim(1, 1));
+                await monitorLock.WaitAsync();
+                try
+                {
+                    return await work();
+                }
+                finally
+                {
+                    monitorLock.Release();
+                }
+            });
 
-        /// <summary>
-        /// Opens a DDC/CI channel to the monitor for the duration of the operation and closes it afterwards.
-        /// This is the only place a channel is opened.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="operation">The operation to perform on the channel. Returns whether it succeeded.</param>
-        /// <returns><see cref="MonitorAccessOutcome.Unavailable"/> when the monitor could not be reached and the operation never ran.</returns>
-        private async Task<MonitorAccessOutcome> WithSessionAsync(string hardwareId, Func<IDdcCiSession, bool> operation)
+        private async Task<MonitorInfo?> FindMonitorAsync(string hardwareId)
         {
-            var monitors = await _monitorManager.GetCurrentMonitorsAsync();
-            var targetMonitor = monitors.FirstOrDefault(m => m.HardwareId == hardwareId);
-
-            using var session = targetMonitor is null ? null : _ddcCiAccess.OpenSession(targetMonitor.DeviceName);
-            if (session is null)
-            {
-                Log.Warning("Could not find monitor handle for HardwareId {HardwareId}.", hardwareId);
-                return MonitorAccessOutcome.Unavailable;
-            }
-
-            return operation(session) ? MonitorAccessOutcome.Succeeded : MonitorAccessOutcome.Failed;
+            var attached = await _monitors.GetCurrentMonitorsAsync();
+            return attached.FirstOrDefault(monitor => monitor.HardwareId == hardwareId);
         }
 
-        /// <summary>
-        /// Gets the current brightness of the monitor.
-        /// </summary>
-        /// <param name="session">The open channel to the monitor.</param>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <returns>The current brightness, or null if the read failed.</returns>
-        /// <summary>
-        /// Walks the brightness from <paramref name="from"/> to <paramref name="to"/> in a few steps so
-        /// the change is a smooth fade instead of a jump. With fading switched off it is a single write.
-        /// </summary>
-        private bool FadeBrightness(IDdcCiSession session, string hardwareId, uint from, uint to)
+        // Percent to the panel's own units, using the range it reported when it was last probed.
+        private static uint ScaleForMonitor(MonitorInfo? monitor, string hardwareId, int percent)
+        {
+            uint range = monitor?.Capabilities?.MaxBrightness ?? 0;
+            uint raw = BrightnessScale.ToRawBrightness(percent, range);
+            if (raw != percent)
+            {
+                Log.Debug("{Percent}% is brightness {Raw} on monitor {HardwareId} (range 0-{Range}).", percent, raw, hardwareId, range);
+            }
+
+            return raw;
+        }
+
+        // The only place a channel is opened; it is always disposed again before returning.
+        private ChannelResult UseChannel(MonitorInfo? monitor, string hardwareId, Func<IDdcCiSession, bool> work)
+        {
+            using var channel = monitor is null ? null : _bus.OpenSession(monitor.DeviceName);
+            if (channel is null)
+            {
+                Log.Warning("No DDC/CI channel to monitor {HardwareId}.", hardwareId);
+                return ChannelResult.Unreachable;
+            }
+
+            return work(channel) ? ChannelResult.Succeeded : ChannelResult.Failed;
+        }
+
+        // Walks from one level to the other in _fade.Steps writes, so the change is a fade instead of a jump.
+        // An intermediate write that is refused ends the walk early; the final value is always attempted.
+        private bool FadeTo(IDdcCiSession channel, string hardwareId, uint from, uint to)
         {
             int steps = Math.Max(1, _fade.Steps);
-            if (steps > 1 && from != to)
+            if (from != to)
             {
-                for (int i = 1; i < steps; i++)
+                double distance = (double)to - from;
+                for (int step = 1; step < steps; step++)
                 {
-                    var level = (uint)Math.Round(from + ((double)to - from) * i / steps);
-                    if (!session.SetBrightness(level)) break;
+                    uint level = (uint)Math.Round(from + distance * step / steps);
+                    if (!channel.SetBrightness(level)) break;
+
                     Thread.Sleep(_fade.StepDelay);
                 }
             }
 
-            return SetMonitorBrightness(session, hardwareId, to);
-        }
-
-        private static uint? GetCurrentBrightness(IDdcCiSession session, string hardwareId)
-        {
-            var currentBrightness = session.GetBrightness();
-            if (currentBrightness is null)
+            if (!channel.SetBrightness(to))
             {
-                Log.Warning("Failed to get current brightness for monitor {HardwareId}.", hardwareId);
-            }
-
-            return currentBrightness;
-        }
-
-        /// <summary>
-        /// Sets the brightness of the monitor and logs the operation.
-        /// </summary>
-        /// <param name="session">The open channel to the monitor.</param>
-        /// <param name="hardwareId">The hardware ID of the monitor.</param>
-        /// <param name="brightness">The brightness value to set.</param>
-        /// <param name="isRestore">True if restoring, false if dimming.</param>
-        /// <returns>True when the monitor accepted the write; otherwise, false.</returns>
-        private static bool SetMonitorBrightness(IDdcCiSession session, string hardwareId, uint brightness, bool isRestore = false)
-        {
-            if (!session.SetBrightness(brightness))
-            {
-                var action = isRestore ? "restore brightness on" : "dim";
-                Log.Warning("Failed to {Action} monitor {HardwareId}.", action, hardwareId);
+                Log.Warning("Monitor {HardwareId} refused brightness {Brightness}.", hardwareId, to);
                 return false;
             }
 
-            if (isRestore)
-            {
-                Log.Debug("Wrote original brightness {OriginalBrightness} to monitor {HardwareId}, pending read-back.", brightness, hardwareId);
-            }
-            else
-            {
-                Log.Information("Successfully dimmed monitor {HardwareId} to brightness {Brightness}.", hardwareId, brightness);
-            }
-
+            Log.Information("Monitor {HardwareId} set to brightness {Brightness}.", hardwareId, to);
             return true;
         }
 
-        #endregion Private Helpers
+        private static bool WriteRestore(IDdcCiSession channel, string hardwareId, uint original)
+        {
+            if (!channel.SetBrightness(original))
+            {
+                Log.Warning("Monitor {HardwareId} refused its original brightness {Brightness}.", hardwareId, original);
+                return false;
+            }
+
+            Log.Debug("Original brightness {Brightness} written to monitor {HardwareId}; checking the read-back.", original, hardwareId);
+            return true;
+        }
+
+        private static bool ReadsBackAs(IDdcCiSession channel, string hardwareId, uint expected)
+        {
+            if (ReadBrightness(channel, hardwareId) is not uint actual) return false;
+
+            uint gap = actual >= expected ? actual - expected : expected - actual;
+            if (gap <= ReadBackTolerance) return true;
+
+            Log.Warning("Monitor {HardwareId} reads back brightness {Actual} after being set to {Expected}.", hardwareId, actual, expected);
+            return false;
+        }
+
+        private static uint? ReadBrightness(IDdcCiSession channel, string hardwareId)
+        {
+            uint? value = channel.GetBrightness();
+            if (value is null)
+            {
+                Log.Warning("Could not read the brightness of monitor {HardwareId}.", hardwareId);
+            }
+
+            return value;
+        }
     }
 }

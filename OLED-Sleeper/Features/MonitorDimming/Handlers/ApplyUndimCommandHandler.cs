@@ -6,34 +6,21 @@ using Serilog;
 namespace OLED_Sleeper.Features.MonitorDimming.Handlers
 {
     /// <summary>
-    /// Handles the execution of the <see cref="ApplyUndimCommand"/>.
-    /// This class contains the business logic for restoring a monitor's brightness to its original value (undimming).
+    /// Hands an undim request to the dimming service. A failure is logged, not thrown, so waking one monitor
+    /// cannot break the activity handling of the others.
     /// </summary>
-    public class ApplyUndimCommandHandler : ICommandHandler<ApplyUndimCommand>
+    public sealed class ApplyUndimCommandHandler(IMonitorDimmingService dimming) : ICommandHandler<ApplyUndimCommand>
     {
-        private readonly IMonitorDimmingService _monitorDimmingService;
-
-        public ApplyUndimCommandHandler(
-            IMonitorDimmingService monitorDimmingService)
+        public async Task HandleAsync(ApplyUndimCommand request)
         {
-            _monitorDimmingService = monitorDimmingService;
-        }
-
-        /// <summary>
-        /// Executes the undimming logic asynchronously based on the command's data.
-        /// Exceptions are caught and logged to avoid silent failures.
-        /// </summary>
-        /// <param name="command">The command containing the details of the monitor to undim.</param>
-        public async Task HandleAsync(ApplyUndimCommand command)
-        {
+            Log.Information("Restoring the brightness of monitor {HardwareId}.", request.HardwareId);
             try
             {
-                Log.Information("Executing UndimMonitorCommand for monitor {HardwareId}.", command.HardwareId);
-                await _monitorDimmingService.UndimMonitorAsync(command.HardwareId);
+                await dimming.UndimMonitorAsync(request.HardwareId);
             }
-            catch (Exception ex)
+            catch (Exception error)
             {
-                Log.Error(ex, "Failed to undim monitor {HardwareId}.", command.HardwareId);
+                Log.Error(error, "Restoring the brightness of monitor {HardwareId} failed.", request.HardwareId);
             }
         }
     }

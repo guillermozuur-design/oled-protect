@@ -5,47 +5,28 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Handlers
 {
-    public class ApplyUndimCommandHandlerTests
+    public sealed class ApplyUndimCommandHandlerTests
     {
-        private const string HardwareId = "MON-123";
+        private readonly Mock<IMonitorDimmingService> _dimming = new();
+        private readonly ApplyUndimCommand _undim = new() { HardwareId = "PNP-OLED" };
 
-        private readonly Mock<IMonitorDimmingService> _monitorDimmingServiceMock;
-        private readonly ApplyUndimCommandHandler _handler;
-
-        public ApplyUndimCommandHandlerTests()
+        [Fact]
+        public async Task AsksTheDimmingServiceToRestoreThatMonitor()
         {
-            _monitorDimmingServiceMock = new Mock<IMonitorDimmingService>();
-            _handler = new ApplyUndimCommandHandler(_monitorDimmingServiceMock.Object);
+            await new ApplyUndimCommandHandler(_dimming.Object).HandleAsync(_undim);
+
+            _dimming.Verify(d => d.UndimMonitorAsync("PNP-OLED"), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenCommandIsHandled_UndimsTheMonitor()
+        public async Task FailureInTheDimmingService_IsLoggedNotThrown()
         {
-            // Arrange
-            var command = new ApplyUndimCommand { HardwareId = HardwareId };
+            _dimming.Setup(d => d.UndimMonitorAsync("PNP-OLED")).ThrowsAsync(new InvalidOperationException("bus error"));
 
-            // Act
-            await _handler.HandleAsync(command);
+            var thrown = await Record.ExceptionAsync(() => new ApplyUndimCommandHandler(_dimming.Object).HandleAsync(_undim));
 
-            // Assert
-            _monitorDimmingServiceMock.Verify(x => x.UndimMonitorAsync(HardwareId), Times.Once);
-        }
-
-        [Fact]
-        public async Task HandleAsync_WhenTheServiceThrows_SwallowsTheException()
-        {
-            // Arrange
-            var command = new ApplyUndimCommand { HardwareId = HardwareId };
-            _monitorDimmingServiceMock
-                .Setup(x => x.UndimMonitorAsync(HardwareId))
-                .ThrowsAsync(new Exception("Simulated failure"));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorDimmingServiceMock.Verify(x => x.UndimMonitorAsync(HardwareId), Times.Once);
+            Assert.Null(thrown);
+            _dimming.Verify(d => d.UndimMonitorAsync("PNP-OLED"), Times.Once);
         }
     }
 }

@@ -3,14 +3,11 @@ using OLED_Sleeper.Messaging.Interfaces;
 namespace OLED_Sleeper.Features.MonitorDimming.Commands
 {
     /// <summary>
-    /// Represents a command to restore a monitor's brightness to its original value (undim).
-    /// This is a data-transfer object that carries the necessary information for the handler to perform the action.
+    /// Puts a dimmed monitor back on the brightness it had before it was dimmed.
     /// </summary>
-    public class ApplyUndimCommand : ICommand
+    public sealed class ApplyUndimCommand : ICommand
     {
-        /// <summary>
-        /// The unique hardware identifier of the target monitor.
-        /// </summary>
+        /// <summary>Monitor to restore.</summary>
         public required string HardwareId { get; init; }
     }
 }

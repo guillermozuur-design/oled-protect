@@ -3,24 +3,20 @@
 namespace OLED_Sleeper.Features.MonitorInformation.Services.Interfaces
 {
     /// <summary>
-    /// Defines the contract for reading the attached monitors and probing them over DDC/CI.
-    /// Reading and probing are separate calls: the first is cheap, the second is a bus round trip.
+    /// Reads monitors from Windows. Listing them is quick; probing one over DDC/CI talks to the panel and is slow,
+    /// so the two are kept apart.
     /// </summary>
     public interface IMonitorInfoProvider
     {
         /// <summary>
-        /// Enumerates the attached monitors, resolving names, geometry and hardware IDs in one pass.
-        /// No DDC/CI probing is performed.
+        /// Lists every attached monitor with its name, geometry, DPI and identity, without touching DDC/CI.
+        /// A monitor whose hardware ID could not be worked out is listed with an empty one.
         /// </summary>
-        /// <returns>One entry per attached monitor, with no capabilities. A monitor whose hardware ID
-        /// could not be resolved is still returned, with <see cref="MonitorInfo.HardwareId"/> empty.</returns>
         List<MonitorInfo> GetAllMonitorsBasicInfo();
 
         /// <summary>
-        /// Probes the given monitor over DDC/CI for its support and its brightness range.
+        /// Asks the panel behind <paramref name="target"/> whether it speaks DDC/CI and what its brightness range is.
         /// </summary>
-        /// <param name="monitor">The monitor to probe.</param>
-        /// <returns>What the probe reported. Both fields are unset when the monitor did not answer.</returns>
-        DdcCiCapabilities GetDdcCiCapabilities(MonitorInfo monitor);
+        DdcCiCapabilities GetDdcCiCapabilities(MonitorInfo target);
     }
 }

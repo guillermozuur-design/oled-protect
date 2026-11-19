@@ -5,47 +5,28 @@ using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Handlers
 {
-    public class ApplyDimCommandHandlerTests
+    public sealed class ApplyDimCommandHandlerTests
     {
-        private const string HardwareId = "MON-123";
+        private readonly Mock<IMonitorDimmingService> _dimming = new();
+        private readonly ApplyDimCommand _dimTo15 = new() { HardwareId = "PNP-OLED", DimLevel = 15 };
 
-        private readonly Mock<IMonitorDimmingService> _monitorDimmingServiceMock;
-        private readonly ApplyDimCommandHandler _handler;
-
-        public ApplyDimCommandHandlerTests()
+        [Fact]
+        public async Task PassesTheMonitorAndLevelToTheDimmingService()
         {
-            _monitorDimmingServiceMock = new Mock<IMonitorDimmingService>();
-            _handler = new ApplyDimCommandHandler(_monitorDimmingServiceMock.Object);
+            await new ApplyDimCommandHandler(_dimming.Object).HandleAsync(_dimTo15);
+
+            _dimming.Verify(d => d.DimMonitorAsync("PNP-OLED", 15), Times.Once);
         }
 
         [Fact]
-        public async Task HandleAsync_WhenCommandIsHandled_DimsTheMonitorAtTheCommandedLevel()
+        public async Task FailureInTheDimmingService_IsLoggedNotThrown()
         {
-            // Arrange
-            var command = new ApplyDimCommand { HardwareId = HardwareId, DimLevel = 15 };
+            _dimming.Setup(d => d.DimMonitorAsync("PNP-OLED", 15)).ThrowsAsync(new InvalidOperationException("bus error"));
 
-            // Act
-            await _handler.HandleAsync(command);
+            var thrown = await Record.ExceptionAsync(() => new ApplyDimCommandHandler(_dimming.Object).HandleAsync(_dimTo15));
 
-            // Assert
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(HardwareId, 15), Times.Once);
-        }
-
-        [Fact]
-        public async Task HandleAsync_WhenTheServiceThrows_SwallowsTheException()
-        {
-            // Arrange
-            var command = new ApplyDimCommand { HardwareId = HardwareId, DimLevel = 15 };
-            _monitorDimmingServiceMock
-                .Setup(x => x.DimMonitorAsync(HardwareId, 15))
-                .ThrowsAsync(new Exception("Simulated failure"));
-
-            // Act
-            var exception = await Record.ExceptionAsync(() => _handler.HandleAsync(command));
-
-            // Assert
-            Assert.Null(exception);
-            _monitorDimmingServiceMock.Verify(x => x.DimMonitorAsync(HardwareId, 15), Times.Once);
+            Assert.Null(thrown);
+            _dimming.Verify(d => d.DimMonitorAsync("PNP-OLED", 15), Times.Once);
         }
     }
 }

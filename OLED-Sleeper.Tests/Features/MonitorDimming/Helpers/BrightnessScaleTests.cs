@@ -2,62 +2,46 @@ using OLED_Sleeper.Features.MonitorDimming.Helpers;
 
 namespace OLED_Sleeper.Tests.Features.MonitorDimming.Helpers
 {
-    public class BrightnessScaleTests
+    public sealed class BrightnessScaleTests
     {
         [Theory]
-        [InlineData(0, 0u)]
-        [InlineData(15, 38u)]
-        [InlineData(80, 204u)]
-        [InlineData(100, 255u)]
-        public void ToRawBrightness_WhenMonitorHasItsOwnRange_ScalesThePercentageOntoIt(int dimLevelPercentage, uint expected)
+        [InlineData(1, 3u)]     // 2.55
+        [InlineData(15, 38u)]   // 38.25
+        [InlineData(50, 128u)]  // 127.5: halves round up
+        [InlineData(60, 153u)]
+        [InlineData(99, 252u)]  // 252.45
+        public void PanelWithItsOwnRange_GetsThePercentOfThatRange(int percent, uint expected)
         {
-            // Act
-            var raw = BrightnessScale.ToRawBrightness(dimLevelPercentage, 255);
-
-            // Assert
-            Assert.Equal(expected, raw);
-        }
-
-        [Fact]
-        public void ToRawBrightness_WhenMonitorReportedNoRange_ReturnsThePercentageUnchanged()
-        {
-            // Act
-            var raw = BrightnessScale.ToRawBrightness(15, 0);
-
-            // Assert
-            Assert.Equal(15u, raw);
-        }
-
-        [Fact]
-        public void ToRawBrightness_WhenMonitorRunsOnThePercentageScale_ReturnsThePercentageUnchanged()
-        {
-            // Act
-            var raw = BrightnessScale.ToRawBrightness(15, 100);
-
-            // Assert
-            Assert.Equal(15u, raw);
-        }
-
-        [Fact]
-        public void ToRawBrightness_WhenTheScaledValueLandsOnAHalf_RoundsAwayFromZero()
-        {
-            // Act
-            var raw = BrightnessScale.ToRawBrightness(50, 255);
-
-            // Assert
-            Assert.Equal(128u, raw);
+            Assert.Equal(expected, BrightnessScale.ToRawBrightness(percent, 255));
         }
 
         [Theory]
-        [InlineData(-10, 0u)]
-        [InlineData(150, 255u)]
-        public void ToRawBrightness_WhenTheDimLevelIsOutsideThePercentageScale_ClampsIt(int dimLevelPercentage, uint expected)
+        [InlineData(0u)]   // the panel never reported a range
+        [InlineData(100u)] // the panel already counts in percent
+        public void PanelWithoutAUsableRange_GetsThePercentUnchanged(uint maxBrightness)
         {
-            // Act
-            var raw = BrightnessScale.ToRawBrightness(dimLevelPercentage, 255);
+            Assert.Equal(15u, BrightnessScale.ToRawBrightness(15, maxBrightness));
+        }
 
-            // Assert
-            Assert.Equal(expected, raw);
+        [Theory]
+        [InlineData(-1, 0u)]
+        [InlineData(101, 255u)]
+        public void PercentOutsideZeroToHundred_IsClampedFirst(int percent, uint expected)
+        {
+            Assert.Equal(expected, BrightnessScale.ToRawBrightness(percent, 255));
+        }
+
+        [Fact]
+        public void TheEndsOfThePercentScale_MapToTheEndsOfTheRange()
+        {
+            Assert.Equal(0u, BrightnessScale.ToRawBrightness(0, 255));
+            Assert.Equal(255u, BrightnessScale.ToRawBrightness(100, 255));
+        }
+
+        [Fact]
+        public void VeryLargeRange_DoesNotOverflow()
+        {
+            Assert.Equal(uint.MaxValue, BrightnessScale.ToRawBrightness(100, uint.MaxValue));
         }
     }
 }

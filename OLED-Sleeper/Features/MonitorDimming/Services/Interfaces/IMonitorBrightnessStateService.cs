@@ -1,22 +1,15 @@
 ﻿namespace OLED_Sleeper.Features.MonitorDimming.Services.Interfaces
 {
     /// <summary>
-    /// Provides methods for loading and saving the brightness state of monitors.
+    /// Persists the pre-dim brightness of dimmed monitors, so a crash or shutdown while dimmed can be undone
+    /// on the next start.
     /// </summary>
     public interface IMonitorBrightnessStateService
     {
-        /// <summary>
-        /// Loads the brightness state for all monitors from persistent storage.
-        /// </summary>
-        /// <returns>
-        /// A dictionary mapping monitor hardware IDs to their brightness values, empty when no state could be read.
-        /// </returns>
+        /// <summary>Hardware ID to raw pre-dim brightness, as last saved. Empty when nothing could be read.</summary>
         Dictionary<string, uint> LoadState();
 
-        /// <summary>
-        /// Saves the brightness state for all monitors to persistent storage.
-        /// </summary>
-        /// <param name="state">A dictionary mapping monitor hardware IDs to their brightness values.</param>
-        void SaveState(Dictionary<string, uint> state);
+        /// <summary>Replaces what is saved with <paramref name="snapshot"/>.</summary>
+        void SaveState(Dictionary<string, uint> snapshot);
     }
 }
