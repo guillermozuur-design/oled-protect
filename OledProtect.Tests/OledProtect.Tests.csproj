@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared settings come from Directory.Build.props, package versions from Directory.Packages.props. -->
+  <PropertyGroup>
+    <RootNamespace>OledProtect.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OledProtect\OledProtect.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- [StaFact]/[WpfFact] for tests that touch WPF objects. -->
+    <PackageReference Include="Xunit.StaFact" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Every test file gets 'using Xunit;' implicitly. -->
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

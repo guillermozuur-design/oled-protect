@@ -1,7 +1,7 @@
 """Zet de d3-celestial catalogus (BSD-3, Olaf Frohn) om naar het compacte sky.txt dat in de app zit.
 
 Gebruik (vanuit de projectroot, met de bronbestanden in .tmp/sky):
-    python -I tools/make_sky_data.py .tmp/sky OLED-Sleeper/Assets/Sky/sky.txt
+    python -I tools/make_sky_data.py .tmp/sky OledProtect/Assets/Sky/sky.txt
 
 Formaat van sky.txt (RA/Dec in graden, J2000):
     S ra dec mag bv              een ster

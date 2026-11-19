@@ -1,6 +1,6 @@
-# OLED Space Sleeper 🌙
+# OledProtect 🌙
 
-> **English:** OLED Space Sleeper protects OLED monitors against burn-in on multi-monitor setups. When a screen
+> **English:** OledProtect protects OLED monitors against burn-in on multi-monitor setups. When a screen
 > sits idle it fades to black, dims, or shows a real-time **night sky** screensaver (real stars, constellations,
 > planets and the Moon) that spans all your screens as one panorama. Includes a work mode, a Win+P-style quick
 > panel (Alt+`), brightness schedules and a video-aware general timer. The UI is in Dutch.
@@ -52,7 +52,7 @@ onofficiële versie met veel uitbreidingen.
   elke 8 seconden de vliegtuigen op rond je speldje of het vliegveld in beeld. Die plek gaat **afgerond op ongeveer
   1 km** naar adsb.fi (of adsb.lol als reserve). De kaarttegels rond die plek komen van OpenFreeMap, vluchtroutes
   (alleen het vluchtnummer) van adsbdb.com, en wat je zoekt gaat naar Nominatim. Verder blijft alles op je pc, in
-  `%APPDATA%\OLED-Space-Sleeper`. Bij het verwijderen vraagt de installer of die map ook weg mag.
+  `%APPDATA%\OledProtect`. Bij het verwijderen vraagt de installer of die map ook weg mag.
 
 **Taakbalk dimmen** (optie in Algemeen): staat de muis 5 seconden niet bij de taakbalk, dan wordt die donkerder (een
 doorzichtige laag waar je doorheen klikt); met de muis erheen is hij meteen weer gewoon. Niet bij volledig scherm.
@@ -72,22 +72,22 @@ Download de nieuwste versie bij [Releases](../../releases):
 
 | Bestand | Wat |
 |---|---|
-| `OLED-Space-Sleeper-…-Setup.exe` | Installatieprogramma (klein; haalt zo nodig de .NET 8 Desktop Runtime op) |
-| `OLED-Space-Sleeper-…-Portable.exe` | Eén bestand: dubbelklikken en klaar, niets installeren; instellingen in `Data\` naast de exe |
-| `OLED-Space-Sleeper-…-Portable-x64.zip` | Hetzelfde als map: uitpakken en starten |
+| `OledProtect-…-Setup.exe` | Installatieprogramma (klein; haalt zo nodig de .NET 8 Desktop Runtime op) |
+| `OledProtect-…-Portable.exe` | Eén bestand: dubbelklikken en klaar, niets installeren; instellingen in `Data\` naast de exe |
+| `OledProtect-…-Portable-x64.zip` | Hetzelfde als map: uitpakken en starten |
 
 De bestanden zijn niet digitaal ondertekend. Waarschuwt Windows SmartScreen, kies dan **Meer info → Toch uitvoeren**.
 
 Windows 10 of 11. Dimmen en helderheid op tijden werken met schermen die DDC/CI ondersteunen (de meeste moderne schermen).
 
-**Tip:** zet in Windows (Instellingen → Systeem → Energie) *Scherm uitschakelen* op **Nooit** of veel langer; OLED Space Sleeper regelt het dan per scherm.
+**Tip:** zet in Windows (Instellingen → Systeem → Energie) *Scherm uitschakelen* op **Nooit** of veel langer; OledProtect regelt het dan per scherm.
 
 ## Zelf bouwen
 
 Nodig: de [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-dotnet test OLED-Sleeper.sln                       # 331 tests
+dotnet test OledProtect.sln                       # 331 tests
 dotnet run --project OLED-Sleeper                  # starten
 .\build.ps1                                        # installer + portable zip (Inno Setup nodig voor de installer)
 ```
@@ -97,26 +97,26 @@ en zet een concept-release klaar.
 
 Sterrendata opnieuw genereren: download `stars.6.json`, `constellations.lines.json` en `constellations.json` uit
 [d3-celestial](https://github.com/ofrohn/d3-celestial/tree/master/data) en draai
-`python tools/make_sky_data.py <map> OLED-Sleeper/Assets/Sky/sky.txt`. Het icoon komt uit `tools/make_icon.ps1`.
+`python tools/make_sky_data.py <map> OledProtect/Assets/Sky/sky.txt`. Het icoon komt uit `tools/make_icon.ps1`.
 
 ## Waar zit wat
 
 | Onderdeel | Map |
 |---|---|
-| Sterrenhemel (catalogus, astronomie, weergave, panorama) | `OLED-Sleeper/Features/Sky/` |
-| Vliegtuigen (kaarttegels, vliegtuigdata, drift, weergave) | `OLED-Sleeper/Features/Flights/` |
-| Wanneer is een scherm stil (incl. limieten, video-uitzondering) | `OLED-Sleeper/Features/MonitorIdleDetection/` |
-| Apps die het scherm aan houden | `OLED-Sleeper/Features/KeepAwakeApps/` |
-| Zwart / fade | `OLED-Sleeper/Features/MonitorBlackout/` |
-| Dimmen en helderheid (DDC/CI) | `OLED-Sleeper/Features/MonitorDimming/`, `Features/BrightnessSchedule/` |
-| Werkmodus en sneltoets | `OLED-Sleeper/Features/WorkMode/` |
-| Vensters (hoofdvenster, snelmenu, kalibratie) | `OLED-Sleeper/MainWindow.xaml`, `OLED-Sleeper/UI/` |
+| Sterrenhemel (catalogus, astronomie, weergave, panorama) | `OledProtect/Features/Sky/` |
+| Vliegtuigen (kaarttegels, vliegtuigdata, drift, weergave) | `OledProtect/Features/Flights/` |
+| Wanneer is een scherm stil (incl. limieten, video-uitzondering) | `OledProtect/Features/MonitorIdleDetection/` |
+| Apps die het scherm aan houden | `OledProtect/Features/KeepAwakeApps/` |
+| Zwart / fade | `OledProtect/Features/MonitorBlackout/` |
+| Dimmen en helderheid (DDC/CI) | `OledProtect/Features/MonitorDimming/`, `Features/BrightnessSchedule/` |
+| Werkmodus en sneltoets | `OledProtect/Features/WorkMode/` |
+| Vensters (hoofdvenster, snelmenu, kalibratie) | `OledProtect/MainWindow.xaml`, `OledProtect/UI/` |
 
 ## Licenties
 
 - Code: MIT — origineel © Diego Demétrio (Quorthon13), zie [`LICENSE`](LICENSE). Uitbreidingen vallen onder dezelfde licentie.
 - Sterrendata: [d3-celestial](https://github.com/ofrohn/d3-celestial) © Olaf Frohn, BSD-3-Clause — zie
-  [`OLED-Sleeper/Assets/Sky/LICENSE-d3-celestial.txt`](OLED-Sleeper/Assets/Sky/LICENSE-d3-celestial.txt).
+  [`OledProtect/Assets/Sky/LICENSE-d3-celestial.txt`](OledProtect/Assets/Sky/LICENSE-d3-celestial.txt).
 
 - Kaartdata: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-bijdragers (ODbL), tegels via
   [OpenFreeMap](https://openfreemap.org) / [OpenMapTiles](https://openmaptiles.org). Plaatsen zoeken: Nominatim.

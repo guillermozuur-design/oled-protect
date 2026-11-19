@@ -1,5 +1,5 @@
 # Tekent het app-icoon (maansikkel met sterretjes) en schrijft een .ico met PNG-lagen in meerdere formaten.
-# Gebruik (vanuit de projectroot):  powershell -NoProfile -File tools\make_icon.ps1 OLED-Sleeper\Assets\icon.ico
+# Gebruik (vanuit de projectroot):  powershell -NoProfile -File tools\make_icon.ps1 OledProtect\Assets\icon.ico
 param([Parameter(Mandatory = $true)][string]$OutFile)
 
 Add-Type -AssemblyName System.Drawing

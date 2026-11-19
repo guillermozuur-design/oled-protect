@@ -84,7 +84,7 @@ _ReSharper*/
 CLAUDE.md
 .claude/
 
-# Lokaal (oled-sleeper fork)
+# Lokaal
 .tmp/
 .venv/
 node_modules/

@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Produces the OLED Space Sleeper release files.
+    Produces the OLED Protect release files.
 
 .DESCRIPTION
-    Output (all named OLED-Space-Sleeper-<version>-...):
+    Output (all named OledProtect-<version>-...):
       Setup.exe             per-user installer with x64 and x86 framework-dependent payloads
       Portable-x64.zip      self-contained build in its own folder
       Portable.exe          self-contained build packed into a single exe
@@ -35,8 +35,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$AppProject = Join-Path $PSScriptRoot 'OLED-Sleeper\OLED-Sleeper.csproj'
-$SetupScript = Join-Path $PSScriptRoot 'installer\OLED-Sleeper.iss'
+$AppProject = Join-Path $PSScriptRoot 'OledProtect\OledProtect.csproj'
+$SetupScript = Join-Path $PSScriptRoot 'installer\OledProtect.iss'
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 # Intermediate publish folders; the .iss reads its payload from <output>\publish\x64 and \x86.
 $PublishRoot = Join-Path $OutputDirectory 'publish'
@@ -131,7 +131,7 @@ Show-Stage 'Determining the version'
 $version = Get-MinVerVersion
 Write-Host "Building $version"
 if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$version" -Encoding utf8 }
-$prefix = "OLED-Space-Sleeper-$version"
+$prefix = "OledProtect-$version"
 
 Show-Stage 'Removing files from a previous build'
 # Leftovers would end up in this build's checksum list.
@@ -152,8 +152,8 @@ if ($SkipPortable) {
 }
 else {
     Show-Stage 'Building the portable zip'
-    # The zip holds a top-level OLED-Space-Sleeper folder so unpacking it stays tidy.
-    $zipSource = Join-Path $PublishRoot 'portable\OLED-Space-Sleeper'
+    # The zip holds a top-level OledProtect folder so unpacking it stays tidy.
+    $zipSource = Join-Path $PublishRoot 'portable\OledProtect'
     Publish-Portable $zipSource
     $zipFile = Join-Path $OutputDirectory "$prefix-Portable-x64.zip"
     Compress-Archive -Path $zipSource -DestinationPath $zipFile -Force
@@ -161,7 +161,7 @@ else {
     Show-Stage 'Building the single-file portable exe'
     $singleFolder = Join-Path $PublishRoot 'onefile'
     Publish-Portable $singleFolder -Bundled
-    Copy-Item -LiteralPath (Join-Path $singleFolder 'OLED-Sleeper.exe') -Destination (Join-Path $OutputDirectory "$prefix-Portable.exe") -Force
+    Copy-Item -LiteralPath (Join-Path $singleFolder 'OledProtect.exe') -Destination (Join-Path $OutputDirectory "$prefix-Portable.exe") -Force
 }
 
 Show-Stage 'Writing SHA-256 checksums'

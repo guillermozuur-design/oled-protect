@@ -1,0 +1,39 @@
+<Window x:Class="OledProtect.UI.Views.QuickPanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OLED Protect snelmenu" Width="370" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" ShowActivated="False"
+        WindowStartupLocation="Manual" FontFamily="Bahnschrift">
+
+    <Window.Resources>
+        <!-- One row. Tag="sel" = highlighted (what happens when you let go / what the mouse is on). -->
+        <Style x:Key="Row" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="sel">
+                    <Setter Property="Background" Value="#1E3A5F" />
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Card" Background="{StaticResource PrimaryBackgroundColor}" BorderBrush="{StaticResource SeparatorColorBrush}"
+            BorderThickness="1" CornerRadius="12" Padding="10" Margin="12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="26" ShadowDepth="0" Opacity="0.65" />
+        </Border.Effect>
+        <StackPanel>
+            <TextBlock Text="OLED Protect" Margin="8,2,0,8" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource SecondaryForegroundColor}" />
+            <StackPanel x:Name="Rows" />
+            <TextBlock x:Name="HintText" Margin="8,6,8,2" FontSize="11.5" TextWrapping="Wrap" Foreground="#8B91A1" />
+        </StackPanel>
+    </Border>
+</Window>

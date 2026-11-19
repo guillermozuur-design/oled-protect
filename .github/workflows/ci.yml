@@ -27,10 +27,10 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Build (Release)
-        run: dotnet build OLED-Sleeper.sln --configuration Release
+        run: dotnet build OledProtect.sln --configuration Release
 
       - name: Unit tests
-        run: dotnet test OLED-Sleeper.sln --configuration Release --no-build
+        run: dotnet test OledProtect.sln --configuration Release --no-build
 
       - name: Formatting matches .editorconfig
-        run: dotnet format OLED-Sleeper.sln --verify-no-changes --no-restore
+        run: dotnet format OledProtect.sln --verify-no-changes --no-restore

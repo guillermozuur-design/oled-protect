@@ -1,0 +1,497 @@
+<Window x:Class="OledProtect.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:OledProtect.UI.Converters" xmlns:ui="clr-namespace:OledProtect.UI.Views"
+        xmlns:sky="clr-namespace:OledProtect.Features.Sky"
+        Title="OLED Protect" Icon="/Assets/icon.ico" FontFamily="Bahnschrift"
+        Width="1060" Height="900" MinWidth="940" MinHeight="700"
+        WindowStyle="None" AllowsTransparency="True" Background="{StaticResource PrimaryBackgroundColor}">
+
+    <Window.Resources>
+        <conv:BooleanToVisibilityConverter x:Key="VisibleWhenTrue" />
+        <conv:NullToVisibilityConverter x:Key="VisibleWhenNull" />
+        <conv:NullToVisibilityConverter x:Key="VisibleWhenSet" IsReversed="True" />
+
+        <!-- Caption buttons of the frameless window: a Segoe MDL2 glyph (the button's Content) on a 46x34 face. -->
+        <ControlTemplate x:Key="CaptionButtonTemplate" TargetType="Button">
+            <Border x:Name="Face" Width="46" Height="34" Background="Transparent">
+                <TextBlock x:Name="Glyph" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
+                           FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{StaticResource SecondaryForegroundColor}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Face" Property="Background" Value="{StaticResource TertiaryBackgroundColor}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource PrimaryForegroundColor}" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- Same face, but the close button turns red like the Windows one. -->
+        <ControlTemplate x:Key="CaptionCloseTemplate" TargetType="Button">
+            <Border x:Name="Face" Width="46" Height="34" Background="Transparent">
+                <TextBlock x:Name="Glyph" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
+                           FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{StaticResource SecondaryForegroundColor}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Face" Property="Background" Value="{StaticResource DestructiveColorBrush}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+        <Style x:Key="ModernSlider" TargetType="Slider">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid>
+                            <Border x:Name="Track" Height="4" Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="2" />
+                            <Canvas>
+                                <Border x:Name="PART_SelectionRange" Background="{StaticResource AccentColorBrush}" Height="4" CornerRadius="2" />
+                            </Canvas>
+                            <Track x:Name="PART_Track">
+                                <Track.Thumb>
+                                    <Thumb x:Name="Thumb" Width="16" Height="16" Background="{StaticResource PrimaryForegroundColor}" BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Thumb" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="1">
+        <Grid>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- ===== Title bar: drag to move, caption buttons on the right ===== -->
+                <DockPanel Grid.Row="0" Background="Transparent" MouseDown="OnTitleBarPressed">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Template="{StaticResource CaptionButtonTemplate}" Content="&#xE921;" ToolTip="Minimaliseren" Click="OnMinimizeClicked" />
+                        <Button Template="{StaticResource CaptionButtonTemplate}" Content="&#xE922;" ToolTip="Maximaliseren" Click="OnMaximizeToggled" />
+                        <Button Template="{StaticResource CaptionCloseTemplate}" Content="&#xE8BB;" ToolTip="Naar het systeemvak (blijft actief)" Click="OnCloseClicked" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                        <Image Source="/Assets/icon.ico" Width="16" Height="16" />
+                        <TextBlock Text="OLED Protect" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12.5" Margin="9,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- ===== Personal header ===== -->
+                <Grid Grid.Row="1" Margin="22,6,22,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="GreetingText" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource PrimaryForegroundColor}" Text="Bescherming actief" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource AccentColorBrush}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StatusText" FontSize="13.5" Margin="8,0,0,0" Foreground="{StaticResource SecondaryForegroundColor}" />
+                        </StackPanel>
+                        <TextBlock x:Name="ScheduleText" FontSize="12.5" Margin="16,3,0,0" Foreground="{StaticResource SecondaryForegroundColor}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Button x:Name="WorkModeButton" Style="{StaticResource SubtleButton}" Click="WorkMode_Click" Padding="16,9">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="WorkModeIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock x:Name="WorkModeLabel" Text="Werkmodus starten" Margin="9,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock x:Name="HotkeyHint" FontSize="11.5" Margin="0,6,0,0" HorizontalAlignment="Center" Foreground="{StaticResource SecondaryForegroundColor}" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- ===== Tabs ===== -->
+                <TabControl x:Name="MainTabs" Grid.Row="2" Style="{StaticResource Tabs}" SelectionChanged="MainTabs_SelectionChanged">
+
+                    <!-- ===== Schermen ===== -->
+                    <TabItem Header="Schermen" Tag="&#xE7F4;">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="200" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="8">
+                                <ui:MonitorLayoutView />
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0" Margin="0,0,0,12"
+                                    Visibility="{Binding SelectedMonitor, Converter={StaticResource VisibleWhenSet}}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ui:MonitorConfigurationView DataContext="{Binding SelectedMonitor.Configuration}" />
+                                </ScrollViewer>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}"
+                                    Visibility="{Binding SelectedMonitor, Converter={StaticResource VisibleWhenNull}}">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="28" HorizontalAlignment="Center" Foreground="{StaticResource AccentColorBrush}" />
+                                    <TextBlock Text="Kies hierboven een scherm om in te stellen" FontSize="15" Margin="0,10,0,0" HorizontalAlignment="Center" Foreground="{StaticResource SecondaryForegroundColor}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== Sterrenhemel ===== -->
+                    <TabItem Header="Sterrenhemel" Tag="&#xE708;">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
+                                    <Grid>
+                                        <sky:SkyView x:Name="SkyPreview" />
+                                        <TextBlock Text="Live: de hemel van vandaag boven Nederland" Margin="16,12,0,0" FontSize="12" Foreground="#8B91A1" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op alle schermen" Click="PreviewSky_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Sterrenhemel als screensaver" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="Kies bij een scherm 'Sterren' als gedrag. De echte sterrenhemel van vandaag: sterren, sterrenbeelden, planeten en de maan. Alles beweegt heel langzaam, dus er kan niets inbranden. Muis bewegen of een toets stopt het voorbeeld." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Sterrendata: d3-celestial (© Olaf Frohn). De sterrenhemel wordt helemaal op deze pc berekend; er gaat niets naar internet." />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- ===== Vliegtuigen ===== -->
+                    <TabItem Header="Vliegtuigen" Tag="&#xE709;" x:Name="FlightsTab">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}" Padding="0" Height="230" ClipToBounds="True" Background="Black">
+                                    <Grid>
+                                        <ContentControl x:Name="FlightsPreviewHost" />
+                                        <TextBlock x:Name="FlightsPreviewCaption" Margin="16,12,0,0" FontSize="12" Foreground="#8B91A1" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Bekijk op alle schermen" Click="PreviewFlights_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Vliegtuigen als screensaver" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="Kies bij een scherm 'Vliegtuigen' als gedrag. Een donkere kaart met de echte vliegtuigen van dit moment erboven. Alles beweegt heel langzaam, dus er kan niets inbranden. Muis bewegen of een toets stopt het voorbeeld." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <CheckBox x:Name="TourCheck" AutomationProperties.Name="Rondreis langs drukke vliegvelden" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Tour_Click" VerticalAlignment="Center" />
+                                            <StackPanel>
+                                                <TextBlock Text="Rondreis langs drukke vliegvelden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}" Text="Het beeld gaat steeds over naar een ander druk vliegveld in de landen of plekken hieronder, het liefst waar op dat moment vliegtuigen landen en opstijgen. Staat dit uit, dan blijft de kaart rond je speldje." />
+                                            </StackPanel>
+                                        </DockPanel>
+
+                                        <StackPanel x:Name="TourOptions" Margin="0,14,0,0">
+                                            <DockPanel>
+                                                <TextBox x:Name="CountriesBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="330" HorizontalContentAlignment="Left" VerticalAlignment="Center"
+                                                         TextChanged="CountriesBox_TextChanged" ToolTip="Landen, eilanden, plaatsen of vliegveldcodes, bijvoorbeeld: Nederland, Spanje, Tenerife, Mallorca, JFK" />
+                                                <StackPanel>
+                                                    <TextBlock Text="Landen of plekken" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock x:Name="CountriesStatus" Style="{StaticResource CardText}" />
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <DockPanel Margin="0,14,0,0">
+                                                <CheckBox x:Name="FollowCheck" AutomationProperties.Name="Af en toe een vlucht volgen" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Follow_Click" VerticalAlignment="Center" />
+                                                <StackPanel>
+                                                    <TextBlock Text="Af en toe een vlucht volgen" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock Style="{StaticResource CardText}" Text="Na elke twee vliegvelden volgt de kaart een tijdje één vliegtuig van daar, met vluchtnummer, route, type, hoogte en snelheid." />
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <DockPanel Margin="0,14,0,0">
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Slider x:Name="SceneSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="10" Maximum="60" TickFrequency="5" IsSnapToTickEnabled="True"
+                                                            VerticalAlignment="Center" ValueChanged="SceneSlider_ValueChanged" />
+                                                    <TextBlock x:Name="SceneText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="Tijd per beeld" Style="{StaticResource CardTitle}" />
+                                                    <TextBlock Style="{StaticResource CardText}" Text="Hoe lang een vliegveld of vlucht in beeld blijft." />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock x:Name="PinOptionsNote" Margin="6,4,6,6" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Speldje en afstand worden niet gebruikt zolang de rondreis aan staat." />
+                                <StackPanel x:Name="PinOptions">
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="PlaceBox" Style="{StaticResource Field}" Width="210" HorizontalContentAlignment="Left" KeyDown="PlaceBox_KeyDown"
+                                                         ToolTip="Een plaats, adres of postcode, of coördinaten zoals 52.09, 5.12" />
+                                                <Button x:Name="PlaceSearchButton" Content="Zoeken" Style="{StaticResource SubtleButton}" Margin="10,0,0,0" Click="PlaceSearch_Click" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Plek van je speldje" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="PlaceStatus" Style="{StaticResource CardText}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Slider x:Name="RadiusSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="15" Maximum="80" TickFrequency="5" IsSnapToTickEnabled="True"
+                                                    VerticalAlignment="Center" ValueChanged="RadiusSlider_ValueChanged" />
+                                            <TextBlock x:Name="RadiusText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Hoe ver om het speldje heen" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Kleiner = meer details en grotere plaatsnamen; groter = meer vliegtuigen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                                </StackPanel>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="FlightLabelsCheck" AutomationProperties.Name="Vluchtnummer, route en hoogte bij elk vliegtuig" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="FlightLabels_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Vluchtnummer, route en hoogte bij elk vliegtuig" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}" Text="Kleur van het vliegtuig: geel = in de lucht, oranje = laag (opstijgen of landen), grijs = aan de grond." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,2,6,14" FontSize="11.5" TextWrapping="Wrap" Foreground="{StaticResource SecondaryForegroundColor}"
+                                           Text="Kaart: © OpenStreetMap-bijdragers, via OpenFreeMap / OpenMapTiles. Vliegtuigen: adsb.fi en adsb.lol (open ADS-B-data), routes: adsbdb.com, vliegvelden: OurAirports. Zoeken: Nominatim (OpenStreetMap). Zolang er vliegtuigen in beeld zijn (de screensaver of het voorbeeld hierboven) vraagt de app elke 8 seconden de vliegtuigen op rond je speldje of het vliegveld in beeld; die plek gaat afgerond op ongeveer 1 km naar adsb.fi (of adsb.lol als reserve). Wat je zoekt gaat naar Nominatim. Verder blijft alles alleen op deze pc." />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- ===== Algemeen ===== -->
+                    <TabItem Header="Algemeen" Tag="&#xE713;">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <TextBox x:Name="HotkeyBox" DockPanel.Dock="Right" Style="{StaticResource Field}" Width="150" IsReadOnly="True" Cursor="Hand"
+                                                 CaretBrush="Transparent" VerticalAlignment="Center"
+                                                 GotKeyboardFocus="HotkeyBox_GotFocus" LostKeyboardFocus="HotkeyBox_LostFocus"
+                                                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                                 ToolTip="Klik hier en druk de combinatie die je wilt gebruiken (met Ctrl, Alt, Shift of Win)." />
+                                        <StackPanel>
+                                            <TextBlock Text="Sneltoets snelmenu" Style="{StaticResource CardTitle}" />
+                                            <TextBlock x:Name="HotkeyStatus" Style="{StaticResource CardText}"
+                                                       Text="Ingedrukt houden, tikken = volgende keuze, loslaten = kiezen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="GlobalIdleBox" Style="{StaticResource Field}" Width="56"
+                                                         LostKeyboardFocus="GlobalIdleBox_LostFocus" KeyDown="GlobalIdleBox_KeyDown" />
+                                                <TextBlock Text="min" Margin="8,0,16,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                <CheckBox x:Name="GlobalIdleCheck" AutomationProperties.Name="Alle schermen uit als je weg bent" Style="{StaticResource Switch}" Click="GlobalIdle_Changed" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Alle schermen uit als je weg bent" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="GlobalIdleStatus" Style="{StaticResource CardText}"
+                                                           Text="Na deze tijd zonder muis of toets krijgen alle bewaakte schermen hun ingestelde gedrag (zwart, dimmen, sterren of vliegtuigen). Speelt er een video, dan blijft het scherm met die video aan." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" x:Name="AddAppButton" Content="+ Andere app kiezen" Style="{StaticResource SubtleButton}"
+                                                    Click="AddApp_Click" VerticalAlignment="Top" />
+                                            <StackPanel>
+                                                <TextBlock Text="Apps die het scherm aan houden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}"
+                                                           Text="Zolang een aangevinkte app openstaat, blijft het scherm waar hij op staat aan (of alle schermen) — ook als een timer verloopt." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <StackPanel x:Name="AppRows" Margin="0,12,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="TaskbarDimCheck" AutomationProperties.Name="Taakbalk dimmen" DockPanel.Dock="Right" Style="{StaticResource Switch}"
+                                                  Click="TaskbarDim_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Taakbalk dimmen" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource CardText}"
+                                                       Text="De taakbalk staat altijd op dezelfde plek en brandt daardoor het snelst in. Staat de muis 5 seconden niet bij de taakbalk, dan wordt hij donkerder; ga je er met de muis heen, dan is hij meteen weer gewoon. Klikken werkt altijd. Niet bij een programma op volledig scherm." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <!-- One brightness schedule for all screens -->
+                                <Border x:Name="ScheduleCard" Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <CheckBox AutomationProperties.Name="Helderheid op tijden" DockPanel.Dock="Right" Style="{StaticResource Switch}"
+                                                      IsChecked="{Binding Enabled}" VerticalAlignment="Center" />
+                                            <StackPanel>
+                                                <TextBlock Text="Helderheid op tijden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}"
+                                                           Text="Voor alle schermen. Vanaf elke tijd geldt die helderheid, tot de volgende tijd. Wat je zelf verandert (snelmenu of knoppen op het scherm) blijft staan tot het volgende tijdstip." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <WrapPanel Margin="0,12,0,0" IsEnabled="{Binding Enabled}">
+                                            <ItemsControl ItemsSource="{Binding Entries}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="6" Padding="8,5" Margin="0,0,8,6">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="vanaf" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                                <TextBox x:Name="StartBox" Style="{StaticResource Field}" Width="62" Text="{Binding Start, UpdateSourceTrigger=PropertyChanged}"
+                                                                         AutomationProperties.Name="Tijd" />
+                                                                <TextBox Style="{StaticResource Field}" Width="48" Margin="6,0,0,0" Text="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}"
+                                                                         AutomationProperties.Name="Helderheid in procent" />
+                                                                <TextBlock Text="%" Foreground="{StaticResource PrimaryForegroundColor}" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                                                <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Width="24" Height="24" Margin="6,0,0,0"
+                                                                        Style="{StaticResource FlatButton}" Foreground="{StaticResource SecondaryForegroundColor}" ToolTip="Verwijderen"
+                                                                        AutomationProperties.Name="Tijd verwijderen"
+                                                                        Command="{Binding DataContext.RemoveEntryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                        CommandParameter="{Binding}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding IsStartValid}" Value="False">
+                                                                <Setter TargetName="StartBox" Property="BorderBrush" Value="{StaticResource DestructiveColorBrush}" />
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <Button Content="+ tijd" Style="{StaticResource SubtleButton}" Margin="0,0,0,6" Command="{Binding AddEntryCommand}" />
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding Error}" Foreground="{StaticResource DestructiveColorBrush}" FontSize="12" Margin="0,4,0,0" />
+                                        <TextBlock Text="{Binding Status}" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBox x:Name="GapBox" Style="{StaticResource Field}" Width="64"
+                                                         LostKeyboardFocus="GapBox_LostFocus" KeyDown="GapBox_KeyDown"
+                                                         ToolTip="De afstand tussen het beeld van het ene en het andere scherm (beide randen samen)." />
+                                                <TextBlock Text="cm" Margin="8,0,14,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
+                                                <Button Content="Kalibreren" Style="{StaticResource SubtleButton}" Click="Calibrate_Click"
+                                                        ToolTip="Schuine lijnen over beide schermen: schuif tot ze recht doorlopen over de rand." />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Ruimte tussen de schermen" Style="{StaticResource CardTitle}" />
+                                                <TextBlock x:Name="GapStatus" Style="{StaticResource CardText}"
+                                                           Text="Voor de sterren en de vliegtuigen over twee schermen: zo loopt het beeld 'achter de rand langs' van het ene naar het andere scherm, zonder sprong." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <DockPanel>
+                                        <CheckBox x:Name="StartupCheck" AutomationProperties.Name="Starten met Windows" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />
+                                        <StackPanel>
+                                            <TextBlock Text="Starten met Windows" Style="{StaticResource CardTitle}" />
+                                            <TextBlock x:Name="StartupStatus" Style="{StaticResource CardText}" Text="Start verborgen in het systeemvak bij het inloggen." />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Text="Tip" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Style="{StaticResource CardText}"
+                                                   Text="Zet in Windows (Instellingen → Systeem → Energie) 'Scherm uitschakelen' op Nooit of veel langer; OLED Protect regelt het dan per scherm." />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+
+                <!-- ===== Footer ===== -->
+                <Border Grid.Row="3" BorderBrush="{StaticResource SeparatorColorBrush}" BorderThickness="0,1,0,0" Padding="22,9">
+                    <DockPanel>
+                        <TextBlock x:Name="VersionText" DockPanel.Dock="Right" FontSize="11.5" Foreground="{StaticResource SecondaryForegroundColor}" />
+                        <TextBlock x:Name="SaveStatusText" FontSize="12" Foreground="{StaticResource SecondaryForegroundColor}"
+                                   Text="Wijzigingen worden automatisch opgeslagen" />
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <!-- Dims the window while the monitors are being enumerated. -->
+            <Grid Background="#C008090C"
+                  Visibility="{Binding Path=IsLoading, FallbackValue=Collapsed, Converter={StaticResource VisibleWhenTrue}}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <!-- Indeterminate loader: an accent segment sliding through a rounded track. -->
+                    <Border Width="220" Height="6" CornerRadius="3" ClipToBounds="True" Background="{StaticResource TertiaryBackgroundColor}">
+                        <Rectangle Width="90" HorizontalAlignment="Left" RadiusX="3" RadiusY="3" Fill="{StaticResource AccentColorBrush}">
+                            <Rectangle.RenderTransform>
+                                <TranslateTransform x:Name="LoaderShift" X="-90" />
+                            </Rectangle.RenderTransform>
+                            <Rectangle.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard Storyboard.TargetName="LoaderShift" RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="X" From="-90" To="300" Duration="0:0:1.6" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Rectangle.Triggers>
+                        </Rectangle>
+                    </Border>
+                    <TextBlock Text="Schermen zoeken…" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="14"
+                               Margin="0,14,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
