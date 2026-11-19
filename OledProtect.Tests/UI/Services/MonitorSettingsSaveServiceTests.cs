@@ -1,85 +1,115 @@
-using Moq;
 using OledProtect.Features.UserSettings.Models;
 using OledProtect.Features.UserSettings.Services.Interfaces;
-using OledProtect.Tests.UI.Helpers;
 using OledProtect.UI.Services;
 using OledProtect.UI.Services.Interfaces;
 using OledProtect.UI.ViewModels;
+using System.IO;
+using System.Windows;
+using static OledProtect.Tests.UI.Helpers.ScreenTileBuilder;
 
 namespace OledProtect.Tests.UI.Services
 {
     public class MonitorSettingsSaveServiceTests
     {
-        private readonly Mock<IMonitorSettingsFileService> _file = new();
-        private readonly Mock<IDialogService> _dialogs = new();
-        private readonly List<List<MonitorSettings>> _writes = new();
-        private readonly MonitorSettingsSaveService _sut;
+        private readonly SettingsFileSpy _disk = new();
+        private readonly ErrorDialogSpy _dialogs = new();
 
-        public MonitorSettingsSaveServiceTests()
+        private bool Save(params MonitorLayoutViewModel[] tiles) =>
+            new MonitorSettingsSaveService(_disk, _dialogs).TrySave(tiles);
+
+        [Fact]
+        public void Complete_screens_go_to_disk_in_a_single_write()
         {
-            _file.Setup(f => f.SaveSettings(It.IsAny<List<MonitorSettings>>()))
-                 .Callback<List<MonitorSettings>>(_writes.Add);
-            _sut = new MonitorSettingsSaveService(_file.Object, _dialogs.Object);
+            Assert.True(Save(Screen(1).ReadyToSave().Then(c => c.DimLevel = 35), Screen(2).ReadyToSave()));
+
+            var batch = Assert.Single(_disk.Writes);
+            Assert.Equal(new[] { "PANEL-01", "PANEL-02" }, batch.Select(s => s.HardwareId));
+            Assert.Equal(35, batch[0].DimLevel);
+            Assert.Equal(90, batch[1].IdleValue);
+            Assert.Empty(_dialogs.Errors);
         }
 
         [Fact]
-        public void A_valid_configuration_is_written_once_with_its_values()
+        public void After_a_write_no_screen_has_pending_edits()
         {
-            var tile = TestMonitors.ValidManagedTile(1);
-            tile.Configuration.DimLevel = 50;
+            MonitorLayoutViewModel edited = Screen(1).ReadyToSave().Then(c => c.DimLevel = 35);
+            MonitorLayoutViewModel untouched = Screen(2).ReadyToSave();
+            Assert.True(edited.IsDirty);
 
-            Assert.True(_sut.TrySave(new[] { tile }));
+            Save(edited, untouched);
 
-            var written = Assert.Single(Assert.Single(_writes));
-            Assert.Equal("MON-1", written.HardwareId);
-            Assert.Equal(50, written.DimLevel);
+            Assert.False(edited.IsDirty || untouched.IsDirty);
         }
 
         [Fact]
-        public void Every_monitor_is_clean_after_a_save()
+        public void A_faulty_watched_screen_stops_the_write_and_tells_the_user()
         {
-            var edited = TestMonitors.ValidManagedTile(1);
-            var untouched = TestMonitors.ValidManagedTile(2);
-            edited.Configuration.DimLevel = 50;
-            Assert.True(edited.Configuration.IsDirty);
+            MonitorLayoutViewModel faulty = Screen(3).ReadyToSave().Then(c => c.IdleValue = 0);
 
-            _sut.TrySave(new[] { edited, untouched });
+            Assert.False(Save(Screen(1).ReadyToSave(), faulty));
 
-            Assert.False(edited.Configuration.IsDirty);
-            Assert.False(untouched.Configuration.IsDirty);
+            Assert.Empty(_disk.Writes);
+            var (text, title) = Assert.Single(_dialogs.Errors);
+            Assert.Equal("Instellingen niet compleet", title);
+            Assert.Contains("Scherm 3", text);
+            Assert.True(faulty.IsDirty);
         }
 
         [Fact]
-        public void An_invalid_managed_monitor_blocks_the_write_and_is_reported()
+        public void A_faulty_screen_that_is_not_watched_is_still_written()
         {
-            var tile = TestMonitors.ValidManagedTile(1);
-            tile.Configuration.IdleValue = 0;
+            var ignored = Screen(1).ReadyToSave().Then(c => c.IdleValue = 0).Then(c => c.IsManaged = false);
 
-            Assert.False(_sut.TrySave(new[] { tile }));
+            Assert.True(Save(ignored));
 
-            Assert.Empty(_writes);
-            _dialogs.Verify(d => d.ShowError(It.Is<string>(m => m.Contains("Scherm 1")), "Instellingen niet compleet"), Times.Once);
-            Assert.True(tile.Configuration.IsDirty);
+            Assert.Single(_disk.Writes);
+            Assert.Empty(_dialogs.Errors);
         }
 
         [Fact]
-        public void An_invalid_unmanaged_monitor_does_not_block_the_write()
+        public void No_screens_still_produce_one_empty_write()
         {
-            var tile = TestMonitors.Tile(1);
-            tile.Configuration.IdleValue = 0;
+            Assert.True(Save());
 
-            Assert.True(_sut.TrySave(new[] { tile }));
-
-            Assert.Single(_writes);
-            _dialogs.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            Assert.Empty(Assert.Single(_disk.Writes));
         }
 
         [Fact]
-        public void Saving_no_monitors_writes_an_empty_list()
+        public void A_write_that_blows_up_leaves_the_edits_pending()
         {
-            Assert.True(_sut.TrySave(Array.Empty<MonitorLayoutViewModel>()));
+            _disk.Failure = new IOException("disk gone");
+            MonitorLayoutViewModel edited = Screen(1).ReadyToSave().Then(c => c.DimLevel = 35);
 
-            Assert.Empty(Assert.Single(_writes));
+            Assert.Throws<IOException>(() => Save(edited));
+
+            Assert.True(edited.IsDirty);
+        }
+
+        private sealed class SettingsFileSpy : IMonitorSettingsFileService
+        {
+            public List<List<MonitorSettings>> Writes { get; } = [];
+
+            public Exception? Failure { get; set; }
+
+            public event Action<List<MonitorSettings>>? SettingsChanged { add { } remove { } }
+
+            public List<MonitorSettings> LoadSettings() => [];
+
+            public void SaveSettings(List<MonitorSettings> settings)
+            {
+                if (Failure is not null) throw Failure;
+                Writes.Add(settings);
+            }
+        }
+
+        private sealed class ErrorDialogSpy : IDialogService
+        {
+            public List<(string Text, string Title)> Errors { get; } = [];
+
+            public void ShowError(string text, string title) => Errors.Add((text, title));
+
+            public MessageBoxResult AskYesNoCancel(string question, string title) =>
+                throw new InvalidOperationException("Saving never asks a question.");
         }
     }
 }

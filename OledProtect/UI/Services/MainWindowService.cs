@@ -7,49 +7,66 @@ using System.Windows;
 
 namespace OledProtect.UI.Services
 {
-    // The settings window lives as long as the app: closing it only sends it back to the tray.
-    // A real close happens only once the app is shutting down.
-    public class MainWindowService(
-        MainWindow window,
-        MainViewModel viewModel,
-        IOptions<ApplicationOptions> appOptions,
-        IMainWindowAccessor windowRegistry,
-        IUnsavedSettingsService pendingEditsGuard) : IMainWindowService
+    /// <summary>
+    /// The settings window is created once and kept for the whole session. The close button parks it
+    /// in the tray; only an exiting app lets the close go through.
+    /// </summary>
+    public sealed class MainWindowService : IMainWindowService
     {
-        private bool _exiting;
+        private readonly MainWindow _shell;
+        private readonly MainViewModel _model;
+        private readonly bool _beginInTray;
+        private readonly IMainWindowAccessor _accessor;
+        private readonly IUnsavedSettingsService _editGuard;
+
+        // Flipped once, when the app starts quitting; afterwards closes are no longer intercepted.
+        private bool _appIsQuitting;
+
+        public MainWindowService(
+            MainWindow window,
+            MainViewModel viewModel,
+            IOptions<ApplicationOptions> appOptions,
+            IMainWindowAccessor windowAccessor,
+            IUnsavedSettingsService unsavedSettings)
+        {
+            _shell = window;
+            _model = viewModel;
+            _beginInTray = appOptions.Value.StartHidden;
+            _accessor = windowAccessor;
+            _editGuard = unsavedSettings;
+        }
 
         public void SetupMainWindow()
         {
-            windowRegistry.SetMainWindow(window);
-            window.DataContext = viewModel;
-            window.Closing += InterceptClose;
+            _shell.Closing += ParkInsteadOfClosing;
+            _shell.DataContext = _model;
+            _accessor.SetMainWindow(_shell);
 
-            // Started from Windows' autostart the app normally goes straight to the tray.
-            if (!appOptions.Value.StartHidden)
-                ShowMainWindow();
-            else
-                window.Hide();
+            Action firstAppearance = _beginInTray ? _shell.Hide : ShowMainWindow;
+            firstAppearance();
         }
 
         public void ShowMainWindow()
         {
-            window.Show();
-            if (window.WindowState is WindowState.Minimized)
-                window.WindowState = WindowState.Normal;
-            window.Activate();
+            // Restore first, so the window never flashes up as a taskbar-only minimized entry.
+            if (_shell.WindowState is WindowState.Minimized)
+                _shell.WindowState = WindowState.Normal;
+
+            _shell.Show();
+            _shell.Activate();
         }
 
-        public void PrepareForShutdown() => _exiting = true;
+        public void PrepareForShutdown() => _appIsQuitting = true;
 
-        private void InterceptClose(object? sender, CancelEventArgs args)
+        private void ParkInsteadOfClosing(object? sender, CancelEventArgs e)
         {
-            if (_exiting)
-                return;
-
-            // Never close; hide instead, but only after pending edits have been saved or dropped.
-            args.Cancel = true;
-            if (pendingEditsGuard.ConfirmHide())
-                window.Hide();
+            if (!_appIsQuitting)
+            {
+                e.Cancel = true;
+                bool mayLeave = _editGuard.ConfirmHide();
+                if (mayLeave)
+                    _shell.Hide();
+            }
         }
     }
 }
