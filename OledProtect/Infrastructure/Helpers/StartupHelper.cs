@@ -15,13 +15,15 @@ namespace OledProtect.Infrastructure.Helpers
 
         public static bool IsRunAtStartupEnabled()
         {
-            TakeOverFormerEntry();
             using var run = Registry.CurrentUser.OpenSubKey(RunKey);
             return run?.GetValue(EntryName) is not null;
         }
 
-        private static void TakeOverFormerEntry()
+        // Called once at start by the installed build: replaces an autostart entry left by the former name.
+        public static void TakeOverFormerEntry()
         {
+            if (BuildMode.IsPortable)
+                return;
             try
             {
                 using var run = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);

@@ -34,12 +34,20 @@ namespace OledProtect.Storage
             return error is null;
         }
 
+        // Files that show a folder really holds this app's settings (and not, say, an unpacked program).
+        private static readonly string[] SettingsFiles = { "settings.json", "general.json", "flights.json" };
+
         private void TakeOverFormerFolder(string folder)
         {
-            if (fileSystem.DirectoryExists(folder) || Path.GetDirectoryName(folder) is not { } parent)
+            // Only the installed build: its folder sits directly in AppData. A portable build keeps its
+            // data next to the exe, where a folder with the former name may well be an old unpacked copy.
+            if (fileSystem.DirectoryExists(folder) || Path.GetDirectoryName(folder) is not { } parent
+                || !string.Equals(Path.TrimEndingDirectorySeparator(parent),
+                                  Path.TrimEndingDirectorySeparator(fileSystem.GetApplicationDataPath()),
+                                  StringComparison.OrdinalIgnoreCase))
                 return;
             string former = Path.Combine(parent, FormerFolderName);
-            if (!fileSystem.DirectoryExists(former))
+            if (!fileSystem.DirectoryExists(former) || !SettingsFiles.Any(f => fileSystem.FileExists(Path.Combine(former, f))))
                 return;
             try
             {

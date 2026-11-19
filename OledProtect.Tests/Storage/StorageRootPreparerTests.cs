@@ -63,6 +63,28 @@ namespace OledProtect.Tests.Storage
         }
 
         [Fact]
+        public void A_portable_copy_never_takes_over_a_folder_next_to_it()
+        {
+            // An unpacked old portable zip is a folder with the former name next to the new exe.
+            var disk = new FakeFileSystem { ExeFolder = @"C:\Tools" }
+                .With(@"C:\Tools\OLED-Space-Sleeper\settings.json", "old portable");
+
+            Assert.True(Run(disk, portable: true).Ok);
+
+            Assert.Equal("old portable", disk.ContentOf(@"C:\Tools\OLED-Space-Sleeper\settings.json"));
+        }
+
+        [Fact]
+        public void A_folder_without_settings_is_not_taken_over()
+        {
+            var disk = new FakeFileSystem().With(Legacy + @"\readme.txt", "something else");
+
+            Assert.True(Run(disk).Ok);
+
+            Assert.Equal("something else", disk.ContentOf(Legacy + @"\readme.txt"));
+        }
+
+        [Fact]
         public void An_existing_new_folder_wins_over_the_old_one()
         {
             var disk = new FakeFileSystem()

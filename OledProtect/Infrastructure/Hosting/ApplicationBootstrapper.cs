@@ -45,6 +45,7 @@ namespace OledProtect.Infrastructure.Hosting
             [
                 OpenStorageFolder,
                 Continue(() => LoggingConfigurator.Configure(_root!.DirectoryPath)),
+                Continue(StartupHelper.TakeOverFormerEntry), // autostart entry of the former name
                 ClaimSingleInstance,
                 Continue(() => _services = ServiceConfigurator.ConfigureServices(_options, _root!)),
                 Continue(() => (_engine = Resolve<IApplicationOrchestrator>()).Start()),

@@ -46,9 +46,8 @@ AllowNoIcons=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Setup and uninstall wait until the app has quit, so it restores monitor brightness itself first.
 AppMutex={#InstanceLock},{#FormerLock}
-; Install under the new name, not in the folder of an earlier "OLED Space Sleeper" install.
-UsePreviousAppDir=no
-UsePreviousGroup=no
+; Later updates go where OLED Protect was installed before; only a folder of the former name is
+; replaced by the new default (see InitializeWizard).
 ShowLanguageDialog=auto
 WizardStyle=modern
 Compression=lzma2/max
@@ -217,8 +216,18 @@ end;
 
 { ---------- event functions ---------- }
 
+// An update over "OLED Space Sleeper" would reuse its folder and Start menu group: use the new ones.
+procedure MoveAwayFromFormerName();
+begin
+  if CompareText(ExtractFileName(RemoveBackslashUnlessRoot(WizardDirValue)), '{#FormerName}') = 0 then
+    WizardForm.DirEdit.Text := ExpandConstant('{autopf}\{#AppName}');
+  if CompareText(WizardForm.GroupEdit.Text, '{#FormerName}') = 0 then
+    WizardForm.GroupEdit.Text := '{#AppName}';
+end;
+
 procedure InitializeWizard;
 begin
+  MoveAwayFromFormerName();
   RuntimeDownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
   // Pre-tick the startup task when this user already starts the app at sign-in, under either name
   // (set by an earlier setup or by the toggle inside the app).
