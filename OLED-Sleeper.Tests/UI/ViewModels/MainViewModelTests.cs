@@ -1,7 +1,5 @@
 using Moq;
 using OLED_Sleeper.Features.MonitorInformation.Models;
-using OLED_Sleeper.Features.UserSettings.Models;
-using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
 using OLED_Sleeper.Tests.TestDoubles;
 using OLED_Sleeper.UI.Services.Interfaces;
 using OLED_Sleeper.UI.ViewModels;
@@ -12,510 +10,342 @@ namespace OLED_Sleeper.Tests.UI.ViewModels
 {
     public class MainViewModelTests
     {
-        private readonly Mock<IWorkspaceService> _workspaceServiceMock;
-        private readonly Mock<IMonitorSettingsSaveService> _saveServiceMock;
-        private readonly ImmediateDispatcher _dispatcher;
-        private readonly MainViewModel _viewModel;
+        private readonly Mock<IWorkspaceService> _workspace = new();
+        private readonly Mock<IMonitorSettingsSaveService> _saver = new();
+        private readonly ImmediateDispatcher _ui = new();
+        private readonly MainViewModel _sut;
+        private bool _saveAccepted = true;
 
         public MainViewModelTests()
         {
-            _workspaceServiceMock = new Mock<IWorkspaceService>();
-            _saveServiceMock = new Mock<IMonitorSettingsSaveService>();
-            _dispatcher = new ImmediateDispatcher();
+            Returns();
+            _saver.Setup(s => s.TrySave(It.IsAny<IReadOnlyList<MonitorLayoutViewModel>>()))
+                  .Returns((IReadOnlyList<MonitorLayoutViewModel> tiles) =>
+                  {
+                      if (!_saveAccepted) return false;
+                      // The real save service resets the baseline of every screen it wrote.
+                      foreach (var tile in tiles) tile.Configuration.MarkAsSaved();
+                      return true;
+                  });
 
-            SetupWorkspace();
-            SetupSaveOutcome(true);
+            _sut = new MainViewModel(_workspace.Object, _saver.Object, _ui);
+        }
 
-            _viewModel = new MainViewModel(
-                _workspaceServiceMock.Object,
-                _saveServiceMock.Object,
-                _dispatcher);
+        // ---- building the overview ----
+
+        [Fact]
+        public void Layout_shows_the_tiles_the_workspace_built()
+        {
+            var a = Tile("A");
+            var b = Tile("B", 2);
+
+            Show(a, b);
+
+            Assert.Equal(new[] { a, b }, _sut.Monitors);
         }
 
         [Fact]
-        public void RecalculateLayout_PopulatesMonitors()
+        public void A_new_layout_replaces_the_old_tiles()
         {
-            // Arrange
-            var first = CreateMonitor("MON-1");
-            var second = CreateMonitor("MON-2", 2);
+            Show(Tile("A"), Tile("B", 2));
+            var c = Tile("C", 3);
 
-            // Act
-            LoadMonitors(first, second);
+            Show(c);
 
-            // Assert
-            Assert.Equal(new[] { first, second }, _viewModel.Monitors);
+            Assert.Equal(new[] { c }, _sut.Monitors);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenBuiltAgain_ReplacesPreviousMonitors()
+        public void Tiles_are_marshalled_to_the_ui_thread_exactly_once_when_needed()
         {
-            // Arrange
-            LoadMonitors(CreateMonitor("MON-1"), CreateMonitor("MON-2", 2));
-            var replacement = CreateMonitor("MON-3", 3);
+            _ui.IsOnUiThread = false;
+            var a = Tile("A");
 
-            // Act
-            LoadMonitors(replacement);
+            Show(a);
 
-            // Assert
-            Assert.Equal(new[] { replacement }, _viewModel.Monitors);
+            Assert.Equal(new[] { a }, _sut.Monitors);
+            Assert.Equal(1, _ui.InvokeCount);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenNotOnUiThread_MarshalsOnceAndStillPopulates()
+        public void The_dispatcher_is_skipped_on_the_ui_thread()
         {
-            // Arrange
-            _dispatcher.IsOnUiThread = false;
-            var monitor = CreateMonitor("MON-1");
+            Show(Tile("A"));
 
-            // Act
-            LoadMonitors(monitor);
-
-            // Assert
-            Assert.Equal(new[] { monitor }, _viewModel.Monitors);
-            Assert.Equal(1, _dispatcher.InvokeCount);
+            Assert.Single(_sut.Monitors);
+            Assert.Equal(0, _ui.InvokeCount);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenOnUiThread_DoesNotUseDispatcher()
+        public async Task Loading_flag_is_up_only_while_a_build_runs()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
+            var pending = Hold();
 
-            // Act
-            LoadMonitors(monitor);
+            _sut.RecalculateLayout(640, 480);
+            bool during = _sut.IsLoading;
+            pending.SetResult(Tiles(Tile("A")));
+            await pending.Task;
 
-            // Assert
-            Assert.Equal(new[] { monitor }, _viewModel.Monitors);
-            Assert.Equal(0, _dispatcher.InvokeCount);
+            Assert.True(during);
+            Assert.False(_sut.IsLoading);
         }
 
         [Fact]
-        public async Task RecalculateLayout_SetsLoadingWhileBuildingAndClearsItWhenDone()
+        public async Task A_build_that_finishes_after_a_newer_one_is_thrown_away()
         {
-            // Arrange
-            var pendingBuild = SetupPendingBuild();
+            var slow = Hold();
+            _sut.RecalculateLayout(640, 480);
+            var fresh = Tile("FRESH");
+            Returns(fresh);
+            _sut.RecalculateLayout(1280, 720);
 
-            // Act
-            _viewModel.RecalculateLayout(800, 600);
-            var loadingWhileBuilding = _viewModel.IsLoading;
-            pendingBuild.SetResult(Collect(CreateMonitor("MON-1")));
-            await pendingBuild.Task;
+            slow.SetResult(Tiles(Tile("OLD")));
+            await slow.Task;
 
-            // Assert
-            Assert.True(loadingWhileBuilding);
-            Assert.False(_viewModel.IsLoading);
+            Assert.Equal(new[] { fresh }, _sut.Monitors);
+            Assert.False(_sut.IsLoading);
         }
 
         [Fact]
-        public async Task RecalculateLayout_WhenSupersededByANewerBuild_DiscardsTheStaleResult()
+        public void Layout_asks_the_workspace_for_the_given_panel_size()
         {
-            // Arrange
-            var stale = CreateMonitor("STALE");
-            var current = CreateMonitor("CURRENT");
-            var pendingBuild = SetupPendingBuild();
-            _viewModel.RecalculateLayout(800, 600);
+            _sut.RecalculateLayout(640, 480);
 
-            // Act
-            SetupWorkspace(current);
-            _viewModel.RecalculateLayout(1024, 768);
-            pendingBuild.SetResult(Collect(stale));
-            await pendingBuild.Task;
+            _workspace.Verify(w => w.BuildWorkspaceAsync(640, 480), Times.Once);
+        }
 
-            // Assert
-            Assert.Equal(new[] { current }, _viewModel.Monitors);
-            Assert.False(_viewModel.IsLoading);
+        [Theory]
+        [InlineData(0, 480)]
+        [InlineData(640, 0)]
+        [InlineData(-1, -1)]
+        public void An_empty_panel_triggers_no_build(double width, double height)
+        {
+            _sut.RecalculateLayout(width, height);
+
+            Assert.False(_sut.IsLoading);
+            _workspace.Verify(w => w.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()), Times.Never);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenSelectionPreserved_RestoresSelectedMonitorByHardwareId()
+        public void A_failing_build_is_swallowed_and_stops_the_loading_flag()
         {
-            // Arrange
-            var original = CreateMonitor("MON-1");
-            LoadMonitors(original, CreateMonitor("MON-2", 2));
-            _viewModel.SelectMonitorCommand.Execute(original);
-            var rebuilt = CreateMonitor("MON-1");
+            _workspace.Setup(w => w.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()))
+                      .Returns(Task.FromException<ObservableCollection<MonitorLayoutViewModel>>(new InvalidOperationException("boom")));
 
-            // Act
-            LoadMonitors(CreateMonitor("MON-2", 2), rebuilt);
+            var thrown = Record.Exception(() => _sut.RecalculateLayout(640, 480));
 
-            // Assert
-            Assert.Same(rebuilt, _viewModel.SelectedMonitor);
-            Assert.True(rebuilt.IsSelected);
+            Assert.Null(thrown);
+            Assert.False(_sut.IsLoading);
         }
 
         [Fact]
-        public void RefreshMonitors_WhenSelectionNotPreserved_ClearsSelection()
+        public void Refresh_rescans_with_the_last_panel_size()
         {
-            // Arrange
-            var original = CreateMonitor("MON-1");
-            LoadMonitors(original);
-            _viewModel.SelectMonitorCommand.Execute(original);
-            SetupWorkspace(CreateMonitor("MON-1"));
+            _sut.RecalculateLayout(640, 480);
 
-            // Act
-            _viewModel.RefreshMonitors(false);
+            _sut.RefreshMonitors(false);
 
-            // Assert
-            Assert.Null(_viewModel.SelectedMonitor);
-            Assert.False(_viewModel.IsMonitorSelected);
+            _workspace.Verify(w => w.RefreshWorkspaceAsync(640, 480), Times.Once);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenMonitorConfigurationChanges_MarksViewModelDirty()
+        public void Refresh_before_any_layout_does_nothing()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
+            _sut.RefreshMonitors(true);
 
-            // Act
-            monitor.Configuration.DimLevel = 50;
-
-            // Assert
-            Assert.True(_viewModel.IsDirty);
-            Assert.Equal("OLED Space Sleeper*", _viewModel.WindowTitle);
+            _workspace.Verify(w => w.RefreshWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()), Times.Never);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenAReplacedMonitorChanges_LeavesTheViewModelClean()
+        public void Reload_command_rescans_the_screens()
         {
-            // Arrange
-            var replaced = CreateMonitor("MON-1");
-            LoadMonitors(replaced);
-            LoadMonitors(CreateMonitor("MON-2", 2));
+            _sut.RecalculateLayout(640, 480);
 
-            // Act
-            replaced.Configuration.DimLevel = 50;
+            _sut.ReloadMonitorsCommand.Execute(null);
 
-            // Assert
-            Assert.False(_viewModel.IsDirty);
+            _workspace.Verify(w => w.RefreshWorkspaceAsync(640, 480), Times.Once);
+        }
+
+        // ---- selection ----
+
+        [Fact]
+        public void Selecting_a_tile_moves_the_highlight()
+        {
+            var a = Tile("A");
+            var b = Tile("B", 2);
+            Show(a, b);
+
+            _sut.SelectMonitorCommand.Execute(a);
+            _sut.SelectMonitorCommand.Execute(b);
+
+            Assert.Same(b, _sut.SelectedMonitor);
+            Assert.False(a.IsSelected);
+            Assert.True(b.IsSelected);
         }
 
         [Fact]
-        public void IsDirty_WhenSetToSameValue_RaisesNoFurtherNotification()
+        public void Select_command_ignores_anything_but_a_tile()
         {
-            // Arrange
-            var notifications = 0;
-            _viewModel.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(MainViewModel.IsDirty)) { notifications++; }
-            };
+            var a = Tile("A");
+            Show(a);
+            _sut.SelectMonitorCommand.Execute(a);
 
-            // Act
-            _viewModel.IsDirty = true;
-            _viewModel.IsDirty = true;
+            _sut.SelectMonitorCommand.Execute(42);
+            _sut.SelectMonitorCommand.Execute(null);
 
-            // Assert
-            Assert.Equal(1, notifications);
+            Assert.Same(a, _sut.SelectedMonitor);
         }
 
         [Fact]
-        public void SelectMonitorCommand_SelectsMonitorAndDeselectsPrevious()
+        public void A_resize_keeps_the_same_screen_selected_by_hardware_id()
         {
-            // Arrange
-            var first = CreateMonitor("MON-1");
-            var second = CreateMonitor("MON-2", 2);
-            LoadMonitors(first, second);
+            var before = Tile("A");
+            Show(before, Tile("B", 2));
+            _sut.SelectMonitorCommand.Execute(before);
+            var after = Tile("A");
 
-            // Act
-            _viewModel.SelectMonitorCommand.Execute(first);
-            _viewModel.SelectMonitorCommand.Execute(second);
+            Show(Tile("B", 2), after);
 
-            // Assert
-            Assert.Same(second, _viewModel.SelectedMonitor);
-            Assert.False(first.IsSelected);
-            Assert.True(second.IsSelected);
-            Assert.True(_viewModel.IsMonitorSelected);
+            Assert.Same(after, _sut.SelectedMonitor);
+            Assert.True(after.IsSelected);
         }
 
         [Fact]
-        public void SelectMonitorCommand_WithUnrelatedParameter_KeepsCurrentSelection()
+        public void A_resize_clears_the_selection_when_the_screen_is_gone()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            _viewModel.SelectMonitorCommand.Execute(monitor);
+            var a = Tile("A");
+            Show(a);
+            _sut.SelectMonitorCommand.Execute(a);
 
-            // Act
-            _viewModel.SelectMonitorCommand.Execute("not a monitor");
+            Show(Tile("B", 2));
 
-            // Assert
-            Assert.Same(monitor, _viewModel.SelectedMonitor);
+            Assert.Null(_sut.SelectedMonitor);
         }
 
         [Fact]
-        public void RecalculateLayout_RequestsWorkspaceBuildForNewSize()
+        public void A_rescan_without_preserving_clears_the_selection()
         {
-            // Act
-            _viewModel.RecalculateLayout(800, 600);
+            var a = Tile("A");
+            Show(a);
+            _sut.SelectMonitorCommand.Execute(a);
+            Returns(Tile("A"));
 
-            // Assert
-            _workspaceServiceMock.Verify(x => x.BuildWorkspaceAsync(800, 600), Times.Once);
+            _sut.RefreshMonitors(false);
+
+            Assert.Null(_sut.SelectedMonitor);
+        }
+
+        // ---- dirty tracking, saving and discarding ----
+
+        [Fact]
+        public void Editing_a_screen_makes_the_whole_window_dirty()
+        {
+            var a = Tile("A");
+            Show(a);
+
+            a.Configuration.DimLevel = 55;
+
+            Assert.True(_sut.IsDirty);
         }
 
         [Fact]
-        public void RecalculateLayout_WithNonPositiveSize_RequestsNoBuild()
+        public void Edits_on_a_tile_that_was_replaced_are_ignored()
         {
-            // Act
-            _viewModel.RecalculateLayout(0, 600);
+            var gone = Tile("A");
+            Show(gone);
+            Show(Tile("B", 2));
 
-            // Assert
-            Assert.False(_viewModel.IsLoading);
-            _workspaceServiceMock.Verify(
-                x => x.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()),
-                Times.Never);
+            gone.Configuration.DimLevel = 55;
+
+            Assert.False(_sut.IsDirty);
         }
 
         [Fact]
-        public void RecalculateLayout_WhenWorkspaceTaskFaults_DoesNotThrowAndClearsLoading()
+        public void Dirty_is_announced_once_however_many_edits_follow()
         {
-            // Arrange
-            _workspaceServiceMock
-                .Setup(x => x.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()))
-                .Returns(Task.FromException<ObservableCollection<MonitorLayoutViewModel>>(
-                    new InvalidOperationException("Simulated workspace failure.")));
+            var a = Tile("A");
+            Show(a);
+            int raised = 0;
+            _sut.PropertyChanged += (_, e) => raised += e.PropertyName == nameof(MainViewModel.IsDirty) ? 1 : 0;
 
-            // Act
-            var exception = Record.Exception(() => _viewModel.RecalculateLayout(800, 600));
+            a.Configuration.DimLevel = 55;
+            a.Configuration.DimLevel = 60;
+            a.Configuration.IdleValue = 5;
 
-            // Assert
-            Assert.Null(exception);
-            Assert.False(_viewModel.IsLoading);
+            Assert.Equal(1, raised);
         }
 
         [Fact]
-        public void RefreshMonitors_RequestsWorkspaceRefreshForCurrentContainerSize()
+        public void Saving_successfully_clears_dirty()
         {
-            // Arrange
-            _viewModel.RecalculateLayout(800, 600);
+            var a = Tile("A");
+            Show(a);
+            a.Configuration.DimLevel = 55;
 
-            // Act
-            _viewModel.RefreshMonitors(false);
-
-            // Assert
-            _workspaceServiceMock.Verify(x => x.RefreshWorkspaceAsync(800, 600), Times.Once);
+            Assert.True(_sut.TrySaveChanges());
+            Assert.False(_sut.IsDirty);
+            _saver.Verify(s => s.TrySave(_sut.Monitors), Times.Once);
         }
 
         [Fact]
-        public void ReloadMonitorsCommand_RequestsWorkspaceRefresh()
+        public void A_rejected_save_reports_false_and_stays_dirty()
         {
-            // Arrange
-            _viewModel.RecalculateLayout(800, 600);
+            var a = Tile("A");
+            Show(a);
+            a.Configuration.DimLevel = 55;
+            _saveAccepted = false;
 
-            // Act
-            _viewModel.ReloadMonitorsCommand.Execute(null);
-
-            // Assert
-            _workspaceServiceMock.Verify(x => x.RefreshWorkspaceAsync(800, 600), Times.Once);
+            Assert.False(_sut.TrySaveChanges());
+            Assert.True(_sut.IsDirty);
         }
 
         [Fact]
-        public void DiscardChangesCommand_RevertsEachMonitorAndKeepsTheSelection()
+        public void Discarding_reverts_every_screen_without_rescanning()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            _viewModel.SelectMonitorCommand.Execute(monitor);
-            var savedDimLevel = monitor.Configuration.DimLevel;
-            monitor.Configuration.DimLevel = 50;
+            var a = Tile("A");
+            Show(a);
+            _sut.SelectMonitorCommand.Execute(a);
+            double original = a.Configuration.DimLevel;
+            a.Configuration.DimLevel = 55;
 
-            // Act
-            _viewModel.DiscardChangesCommand.Execute(null);
+            _sut.DiscardChanges();
 
-            // Assert
-            Assert.Equal(savedDimLevel, monitor.Configuration.DimLevel);
-            Assert.False(_viewModel.IsDirty);
-            Assert.Same(monitor, _viewModel.SelectedMonitor);
-            _workspaceServiceMock.Verify(x => x.RefreshWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()), Times.Never);
+            Assert.Equal(original, a.Configuration.DimLevel);
+            Assert.False(_sut.IsDirty);
+            Assert.Same(a, _sut.SelectedMonitor);
+            _workspace.Verify(w => w.RefreshWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()), Times.Never);
         }
 
-        [Fact]
-        public void TrySaveChanges_WhenSaveSucceeds_ClearsDirtyStateWithoutTouchingTheButton()
+        // ---- helpers ----
+
+        private void Show(params MonitorLayoutViewModel[] tiles)
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            monitor.Configuration.DimLevel = 50;
-
-            // Act
-            var saved = _viewModel.TrySaveChanges();
-
-            // Assert
-            Assert.True(saved);
-            Assert.False(_viewModel.IsDirty);
-            Assert.Equal("Opslaan", _viewModel.SaveButtonText);
+            Returns(tiles);
+            _sut.RecalculateLayout(640, 480);
         }
 
-        [Fact]
-        public void TrySaveChanges_WhenSaveIsRejected_ReportsFailureAndKeepsDirtyState()
+        // Both workspace calls complete immediately with the given tiles.
+        private void Returns(params MonitorLayoutViewModel[] tiles)
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            monitor.Configuration.DimLevel = 50;
-            SetupSaveOutcome(false);
-
-            // Act
-            var saved = _viewModel.TrySaveChanges();
-
-            // Assert
-            Assert.False(saved);
-            Assert.True(_viewModel.IsDirty);
+            _workspace.Setup(w => w.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>())).ReturnsAsync(() => Tiles(tiles));
+            _workspace.Setup(w => w.RefreshWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>())).ReturnsAsync(() => Tiles(tiles));
         }
 
-        [Fact]
-        public void SaveSettingsCommand_WhenSaveSucceeds_ClearsDirtyStateAndConfirmsOnTheButton()
+        // The next layout build stays pending until the test completes the returned source.
+        private TaskCompletionSource<ObservableCollection<MonitorLayoutViewModel>> Hold()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            monitor.Configuration.DimLevel = 50;
-            Assert.True(_viewModel.IsDirty);
-
-            // Act
-            _viewModel.SaveSettingsCommand.Execute(null);
-
-            // Assert
-            _saveServiceMock.Verify(x => x.TrySave(_viewModel.Monitors), Times.Once);
-            Assert.False(_viewModel.IsDirty);
-            Assert.Equal("Saved!", _viewModel.SaveButtonText);
+            var source = new TaskCompletionSource<ObservableCollection<MonitorLayoutViewModel>>();
+            _workspace.Setup(w => w.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>())).Returns(source.Task);
+            return source;
         }
 
-        [Fact]
-        public void SaveSettingsCommand_WhenSaveIsRejected_KeepsDirtyStateAndLeavesTheButtonAlone()
+        private static ObservableCollection<MonitorLayoutViewModel> Tiles(params MonitorLayoutViewModel[] tiles) => new(tiles);
+
+        private static MonitorLayoutViewModel Tile(string id, int number = 1)
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-            monitor.Configuration.DimLevel = 50;
-            SetupSaveOutcome(false);
-
-            // Act
-            _viewModel.SaveSettingsCommand.Execute(null);
-
-            // Assert
-            Assert.Equal("Opslaan", _viewModel.SaveButtonText);
-            Assert.True(_viewModel.IsDirty);
-        }
-
-        [Fact]
-        public void SaveAndDiscardCommands_WhenNothingIsDirty_CannotExecute()
-        {
-            // Arrange
-            LoadMonitors(CreateMonitor("MON-1"));
-
-            // Act
-            var canSave = _viewModel.SaveSettingsCommand.CanExecute(null);
-            var canDiscard = _viewModel.DiscardChangesCommand.CanExecute(null);
-
-            // Assert
-            Assert.False(canSave);
-            Assert.False(canDiscard);
-        }
-
-        [Fact]
-        public void SaveAndDiscardCommands_WhenAMonitorIsDirty_CanExecute()
-        {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            LoadMonitors(monitor);
-
-            // Act
-            monitor.Configuration.DimLevel = 50;
-
-            // Assert
-            Assert.True(_viewModel.SaveSettingsCommand.CanExecute(null));
-            Assert.True(_viewModel.DiscardChangesCommand.CanExecute(null));
-        }
-
-        /// <summary>
-        /// Makes both workspace builds return the supplied monitors as soon as they are awaited.
-        /// </summary>
-        /// <param name="monitors">The monitors each build should produce.</param>
-        private void SetupWorkspace(params MonitorLayoutViewModel[] monitors)
-        {
-            _workspaceServiceMock
-                .Setup(x => x.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()))
-                .ReturnsAsync(() => Collect(monitors));
-            _workspaceServiceMock
-                .Setup(x => x.RefreshWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()))
-                .ReturnsAsync(() => Collect(monitors));
-        }
-
-        /// <summary>
-        /// Makes the next build hang until the returned source is completed, so a second build can
-        /// be started while the first is still in flight.
-        /// </summary>
-        /// <returns>The source that completes the pending build.</returns>
-        private TaskCompletionSource<ObservableCollection<MonitorLayoutViewModel>> SetupPendingBuild()
-        {
-            var pending = new TaskCompletionSource<ObservableCollection<MonitorLayoutViewModel>>();
-            _workspaceServiceMock
-                .Setup(x => x.BuildWorkspaceAsync(It.IsAny<double>(), It.IsAny<double>()))
-                .Returns(pending.Task);
-
-            return pending;
-        }
-
-        /// <summary>
-        /// Builds the workspace with the supplied monitors and applies the result, as a resize does.
-        /// </summary>
-        /// <param name="monitors">The monitors the build should produce.</param>
-        private void LoadMonitors(params MonitorLayoutViewModel[] monitors)
-        {
-            SetupWorkspace(monitors);
-            _viewModel.RecalculateLayout(800, 600);
-        }
-
-        /// <summary>
-        /// Makes the save service accept or reject the settings. A successful save marks each monitor
-        /// as saved, as the real service does.
-        /// </summary>
-        /// <param name="succeeds">Whether the save service should report the settings as written.</param>
-        private void SetupSaveOutcome(bool succeeds)
-        {
-            _saveServiceMock
-                .Setup(x => x.TrySave(It.IsAny<IReadOnlyList<MonitorLayoutViewModel>>()))
-                .Returns<IReadOnlyList<MonitorLayoutViewModel>>(monitors =>
-                {
-                    if (!succeeds) return false;
-
-                    foreach (var monitor in monitors)
-                    {
-                        monitor.Configuration.MarkAsSaved();
-                    }
-
-                    return true;
-                });
-        }
-
-        /// <summary>
-        /// Wraps the supplied monitors in the collection type a workspace build returns.
-        /// </summary>
-        /// <param name="monitors">The monitors to wrap.</param>
-        /// <returns>A new collection holding the supplied monitors.</returns>
-        private static ObservableCollection<MonitorLayoutViewModel> Collect(params MonitorLayoutViewModel[] monitors)
-        {
-            return new ObservableCollection<MonitorLayoutViewModel>(monitors);
-        }
-
-        /// <summary>
-        /// Builds a layout view model over a 1920x1080 monitor with the supplied hardware ID.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID for the monitor.</param>
-        /// <param name="displayNumber">The display number for the monitor.</param>
-        /// <returns>A layout view model over the described monitor.</returns>
-        private static MonitorLayoutViewModel CreateMonitor(string hardwareId, int displayNumber = 1)
-        {
-            var bounds = new Rect(0, 0, 1920, 1080);
-            var monitorInfo = new MonitorInfo
-            {
-                HardwareId = hardwareId,
-                DisplayNumber = displayNumber,
-                DeviceName = $@"\\.\DISPLAY{displayNumber}",
-                Bounds = bounds
-            };
-
-            return new MonitorLayoutViewModel(monitorInfo, 1.0, bounds, 0, 0);
+            var area = new Rect(0, 0, 2560, 1440);
+            var info = new MonitorInfo { HardwareId = id, DisplayNumber = number, DeviceName = $@"\\.\DISPLAY{number}", Bounds = area };
+            return new MonitorLayoutViewModel(info, 0.5, area, 0, 0);
         }
     }
 }

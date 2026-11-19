@@ -3,14 +3,11 @@
 namespace OLED_Sleeper.UI.Views
 {
     /// <summary>
-    /// Represents the code-behind for the MonitorConfigurationView UserControl.
-    /// Handles initialization and interaction logic for the monitor configuration UI.
+    /// Per-screen settings panel. Pure data binding against <see cref="ViewModels.MonitorConfigurationViewModel"/>;
+    /// there is no logic in the code-behind.
     /// </summary>
     public partial class MonitorConfigurationView : UserControl
     {
-        public MonitorConfigurationView()
-        {
-            InitializeComponent();
-        }
+        public MonitorConfigurationView() => InitializeComponent();
     }
 }
