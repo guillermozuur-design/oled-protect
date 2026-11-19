@@ -107,29 +107,23 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 var
   RuntimeDownloadPage: TDownloadWizardPage;
 
-{ ---------- autostart entry ---------- }
+{ ---------- sign-in autostart (HKCU Run values) ---------- }
 
-function AutostartPresent(): Boolean;
+// Is there a Run value with this name? Setup only ever looks at the current and the former app name.
+function HasRunValue(ValueName: String): Boolean;
 begin
-  Result := RegValueExists(HKEY_CURRENT_USER, '{#RunKey}', '{#AppName}')
-         or RegValueExists(HKEY_CURRENT_USER, '{#RunKey}', '{#FormerName}');
+  Result := RegValueExists(HKEY_CURRENT_USER, '{#RunKey}', ValueName);
 end;
 
-// Also used on uninstall: the app's own toggle can create the value without the setup task.
-procedure DropAutostart();
+// Removes one Run value when it is there; a missing value is not an error.
+procedure ClearRunValue(ValueName: String);
 begin
-  if AutostartPresent() then
-  begin
-    Log('Deleting the autostart value under HKCU\{#RunKey}.');
-    RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', '{#AppName}');
-  end;
-end;
-
-// The entry of the former name points at a program that is removed; [Registry] writes the new one.
-procedure DropFormerAutostart();
-begin
-  if RegValueExists(HKEY_CURRENT_USER, '{#RunKey}', '{#FormerName}') then
-    RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', '{#FormerName}');
+  if not HasRunValue(ValueName) then
+    Exit;
+  if RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', ValueName) then
+    Log('Run value "' + ValueName + '" removed.')
+  else
+    Log('Run value "' + ValueName + '" could not be removed.');
 end;
 
 { ---------- .NET 8 Desktop Runtime ---------- }
@@ -226,8 +220,9 @@ end;
 procedure InitializeWizard;
 begin
   RuntimeDownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
-  // Reflect the current state, whether autostart was set by an earlier setup or from inside the app.
-  if AutostartPresent() then
+  // Pre-tick the startup task when this user already starts the app at sign-in, under either name
+  // (set by an earlier setup or by the toggle inside the app).
+  if HasRunValue('{#AppName}') or HasRunValue('{#FormerName}') then
     WizardSelectTasks('{#StartupTask}');
 end;
 
@@ -243,13 +238,13 @@ end;
 
 procedure CurStepChanged(Step: TSetupStep);
 begin
-  // An unticked task means "no autostart"; a ticked one is (re)written by [Registry].
-  if Step = ssInstall then
-  begin
-    if not WizardIsTaskSelected('{#StartupTask}') then
-      DropAutostart();
-    DropFormerAutostart();
-  end;
+  if Step <> ssInstall then
+    Exit;
+  // The former name's value starts a program this update removes; [Registry] adds the new value
+  // when the task is ticked, so an unticked task has to clear it here.
+  ClearRunValue('{#FormerName}');
+  if not WizardIsTaskSelected('{#StartupTask}') then
+    ClearRunValue('{#AppName}');
 end;
 
 procedure OfferToRemoveUserData();
@@ -269,8 +264,9 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   case CurUninstallStep of
+    // uninsdeletevalue only covers a value setup wrote; the in-app toggle can create one too.
     usUninstall:
-      DropAutostart();
+      ClearRunValue('{#AppName}');
     usPostUninstall:
       if not UninstallSilent then
         OfferToRemoveUserData();
