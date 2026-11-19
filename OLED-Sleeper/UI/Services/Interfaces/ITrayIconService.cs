@@ -1,15 +1,9 @@
 namespace OLED_Sleeper.UI.Services.Interfaces
 {
-    /// <summary>
-    /// Provides functionality for managing the tray icon and its context menu.
-    /// </summary>
+    // The notification-area icon with its menu, quick panel and hotkey.
     public interface ITrayIconService : IDisposable
     {
-        /// <summary>
-        /// Initializes and displays the tray icon and its context menu.
-        /// </summary>
-        /// <param name="showMainWindowAction">Action to show the main window.</param>
-        /// <param name="exitApplicationAction">Action to exit the application.</param>
-        void Initialize(Action showMainWindowAction, Action exitApplicationAction);
+        // Creates the icon. The callbacks open the settings window and quit the app.
+        void Initialize(Action openSettings, Action quit);
     }
 }

@@ -2,24 +2,19 @@ using OLED_Sleeper.Features.MonitorInformation.Models;
 
 namespace OLED_Sleeper.UI.Helpers
 {
-    /// <summary>
-    /// Builds the title a monitor is shown under. This is a static helper class and does not hold any state.
-    /// </summary>
+    // The name a monitor gets in the UI, numbered like Windows' own display settings.
     public static class MonitorTitleFormatter
     {
-        /// <summary>
-        /// Titles a monitor the way Windows titles it: the display number, or the numbers of every panel
-        /// showing the surface when it is duplicated, such as <c>Monitor 1|2</c>.
-        /// </summary>
-        /// <param name="monitor">The monitor to title.</param>
-        /// <returns>The title, marked as the primary display where applicable.</returns>
+        // A duplicated (cloned) surface carries a topology label such as "1|2" listing every panel that
+        // shows it; a normal monitor just uses its display number.
         public static string Format(MonitorInfo monitor)
         {
-            string number = string.IsNullOrEmpty(monitor.TopologyLabel)
-                ? monitor.DisplayNumber.ToString()
-                : monitor.TopologyLabel;
+            var label = monitor.TopologyLabel is { Length: > 0 } topology
+                ? topology
+                : monitor.DisplayNumber.ToString();
 
-            return monitor.IsPrimary ? $"Scherm {number} (hoofdscherm)" : $"Scherm {number}";
+            var title = "Scherm " + label;
+            return monitor.IsPrimary ? title + " (hoofdscherm)" : title;
         }
     }
 }

@@ -2,20 +2,12 @@ using System.Windows;
 
 namespace OLED_Sleeper.UI.Services.Interfaces
 {
-    /// <summary>
-    /// Defines the contract for reaching the window the application treats as its main window.
-    /// </summary>
+    // Indirection over Application.MainWindow so services can be tested without a WPF application.
     public interface IMainWindowAccessor
     {
-        /// <summary>
-        /// Registers the window as the application's main window. Must be called on the UI thread.
-        /// </summary>
-        /// <param name="window">The window to register.</param>
-        void SetMainWindow(Window window);
-
-        /// <summary>
-        /// The registered main window, or null before one has been registered. Must be read on the UI thread.
-        /// </summary>
+        // Null until SetMainWindow has run. UI thread only.
         Window? MainWindow { get; }
+
+        void SetMainWindow(Window shell);
     }
 }

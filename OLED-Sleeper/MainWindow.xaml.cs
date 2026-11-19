@@ -19,12 +19,11 @@ using System.Windows.Threading;
 
 namespace OLED_Sleeper
 {
-    /// <summary>
-    /// The main window: a personal header (current state, work-mode button) and four tabs — Schermen
-    /// (per-screen settings), Sterrenhemel (live preview, bezel gap), Vliegtuigen (pin, radius, live preview)
-    /// and Algemeen (hotkey, general timer, apps, start with Windows). Screen settings are saved automatically as soon as they are valid.
-    /// </summary>
-    public partial class MainWindow : Window
+    // The settings window: a personal header (current state, work-mode button) and four tabs — Schermen
+    // (per-screen settings), Sterrenhemel (live preview, bezel gap), Vliegtuigen (pin, radius, live preview)
+    // and Algemeen (hotkey, general timer, apps, start with Windows). Screen settings are saved automatically
+    // as soon as they are valid. The window has no system frame; the title bar below is drawn in XAML.
+    public partial class MainWindow
     {
         private readonly GlobalHotkeyService _hotkeyService;
         private readonly PanoramaSettings _panorama;
@@ -592,18 +591,20 @@ namespace OLED_Sleeper
             menu.IsOpen = true;
         }
 
-        // ================= title bar =================
+        // ---- custom title bar (WindowStyle=None, so moving and the caption buttons are ours) ----
 
-        private void TitleBar_MouseDown(object sender, MouseButtonEventArgs e)
+        private void OnTitleBarPressed(object sender, MouseButtonEventArgs e)
         {
-            if (e.ChangedButton == MouseButton.Left) DragMove();
+            if (e.LeftButton == MouseButtonState.Pressed && e.ChangedButton is MouseButton.Left)
+                DragMove();
         }
 
-        private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+        private void OnMinimizeClicked(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
-        private void MaximizeButton_Click(object sender, RoutedEventArgs e) =>
-            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        private void OnMaximizeToggled(object sender, RoutedEventArgs e) =>
+            WindowState = WindowState is WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
-        private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+        // Goes through Closing, where MainWindowService turns it into "hide to tray".
+        private void OnCloseClicked(object sender, RoutedEventArgs e) => Close();
     }
 }

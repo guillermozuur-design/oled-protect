@@ -1,159 +1,85 @@
 using Moq;
-using OLED_Sleeper.Features.MonitorBehavior.Models;
-using OLED_Sleeper.Features.MonitorInformation.Models;
 using OLED_Sleeper.Features.UserSettings.Models;
 using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
-using OLED_Sleeper.UI.Models;
+using OLED_Sleeper.Tests.UI.Helpers;
 using OLED_Sleeper.UI.Services;
 using OLED_Sleeper.UI.Services.Interfaces;
 using OLED_Sleeper.UI.ViewModels;
-using System.Windows;
 
 namespace OLED_Sleeper.Tests.UI.Services
 {
     public class MonitorSettingsSaveServiceTests
     {
-        private readonly Mock<IMonitorSettingsFileService> _settingsServiceMock;
-        private readonly Mock<IDialogService> _dialogServiceMock;
-        private readonly MonitorSettingsSaveService _service;
-
-        /// <summary>The settings handed to the settings file service, or null when it was never called.</summary>
-        private List<MonitorSettings>? _writtenSettings;
+        private readonly Mock<IMonitorSettingsFileService> _file = new();
+        private readonly Mock<IDialogService> _dialogs = new();
+        private readonly List<List<MonitorSettings>> _writes = new();
+        private readonly MonitorSettingsSaveService _sut;
 
         public MonitorSettingsSaveServiceTests()
         {
-            _settingsServiceMock = new Mock<IMonitorSettingsFileService>();
-            _dialogServiceMock = new Mock<IDialogService>();
-
-            _settingsServiceMock
-                .Setup(x => x.SaveSettings(It.IsAny<List<MonitorSettings>>()))
-                .Callback<List<MonitorSettings>>(settings => _writtenSettings = settings);
-
-            _service = new MonitorSettingsSaveService(
-                _settingsServiceMock.Object,
-                _dialogServiceMock.Object);
+            _file.Setup(f => f.SaveSettings(It.IsAny<List<MonitorSettings>>()))
+                 .Callback<List<MonitorSettings>>(_writes.Add);
+            _sut = new MonitorSettingsSaveService(_file.Object, _dialogs.Object);
         }
 
         [Fact]
-        public void TrySave_WhenSettingsAreValid_WritesThemAndReportsSuccess()
+        public void A_valid_configuration_is_written_once_with_its_values()
         {
-            // Arrange
-            var monitor = CreateManagedMonitor("MON-1");
-            monitor.Configuration.DimLevel = 50;
+            var tile = TestMonitors.ValidManagedTile(1);
+            tile.Configuration.DimLevel = 50;
 
-            // Act
-            var saved = _service.TrySave(new[] { monitor });
+            Assert.True(_sut.TrySave(new[] { tile }));
 
-            // Assert
-            Assert.True(saved);
-            Assert.NotNull(_writtenSettings);
-            var entry = Assert.Single(_writtenSettings!);
-            Assert.Equal("MON-1", entry.HardwareId);
-            Assert.Equal(50, entry.DimLevel);
+            var written = Assert.Single(Assert.Single(_writes));
+            Assert.Equal("MON-1", written.HardwareId);
+            Assert.Equal(50, written.DimLevel);
         }
 
         [Fact]
-        public void TrySave_WhenSettingsAreValid_MarksEveryMonitorAsSaved()
+        public void Every_monitor_is_clean_after_a_save()
         {
-            // Arrange
-            var first = CreateManagedMonitor("MON-1");
-            var second = CreateManagedMonitor("MON-2", 2);
-            first.Configuration.DimLevel = 50;
-            Assert.True(first.Configuration.IsDirty);
+            var edited = TestMonitors.ValidManagedTile(1);
+            var untouched = TestMonitors.ValidManagedTile(2);
+            edited.Configuration.DimLevel = 50;
+            Assert.True(edited.Configuration.IsDirty);
 
-            // Act
-            _service.TrySave(new[] { first, second });
+            _sut.TrySave(new[] { edited, untouched });
 
-            // Assert
-            Assert.False(first.Configuration.IsDirty);
-            Assert.False(second.Configuration.IsDirty);
+            Assert.False(edited.Configuration.IsDirty);
+            Assert.False(untouched.Configuration.IsDirty);
         }
 
         [Fact]
-        public void TrySave_WhenAManagedMonitorIsInvalid_ShowsTheErrorAndWritesNothing()
+        public void An_invalid_managed_monitor_blocks_the_write_and_is_reported()
         {
-            // Arrange
-            var monitor = CreateManagedMonitor("MON-1");
-            monitor.Configuration.IdleValue = 0;
+            var tile = TestMonitors.ValidManagedTile(1);
+            tile.Configuration.IdleValue = 0;
 
-            // Act
-            var saved = _service.TrySave(new[] { monitor });
+            Assert.False(_sut.TrySave(new[] { tile }));
 
-            // Assert
-            Assert.False(saved);
-            _dialogServiceMock.Verify(x => x.ShowError(It.IsAny<string>(), "Instellingen niet compleet"), Times.Once);
-            _settingsServiceMock.Verify(x => x.SaveSettings(It.IsAny<List<MonitorSettings>>()), Times.Never);
+            Assert.Empty(_writes);
+            _dialogs.Verify(d => d.ShowError(It.Is<string>(m => m.Contains("Scherm 1")), "Instellingen niet compleet"), Times.Once);
+            Assert.True(tile.Configuration.IsDirty);
         }
 
         [Fact]
-        public void TrySave_WhenAMonitorIsInvalidButUnmanaged_SavesAnyway()
+        public void An_invalid_unmanaged_monitor_does_not_block_the_write()
         {
-            // Arrange
-            var monitor = CreateMonitor("MON-1");
-            monitor.Configuration.IdleValue = 0;
+            var tile = TestMonitors.Tile(1);
+            tile.Configuration.IdleValue = 0;
 
-            // Act
-            var saved = _service.TrySave(new[] { monitor });
+            Assert.True(_sut.TrySave(new[] { tile }));
 
-            // Assert
-            Assert.True(saved);
-            _dialogServiceMock.Verify(x => x.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-            _settingsServiceMock.Verify(x => x.SaveSettings(It.IsAny<List<MonitorSettings>>()), Times.Once);
+            Assert.Single(_writes);
+            _dialogs.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
-        public void TrySave_WithNoMonitors_WritesAnEmptyList()
+        public void Saving_no_monitors_writes_an_empty_list()
         {
-            // Act
-            var saved = _service.TrySave(Array.Empty<MonitorLayoutViewModel>());
+            Assert.True(_sut.TrySave(Array.Empty<MonitorLayoutViewModel>()));
 
-            // Assert
-            Assert.True(saved);
-            Assert.NotNull(_writtenSettings);
-            Assert.Empty(_writtenSettings!);
-        }
-
-        /// <summary>
-        /// Builds a managed monitor whose configuration is otherwise valid.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID for the monitor.</param>
-        /// <param name="displayNumber">The display number for the monitor.</param>
-        /// <returns>A layout view model over the described monitor.</returns>
-        private static MonitorLayoutViewModel CreateManagedMonitor(string hardwareId, int displayNumber = 1)
-        {
-            var monitor = CreateMonitor(hardwareId, displayNumber);
-            monitor.Configuration.ApplySettings(new MonitorSettings
-            {
-                HardwareId = hardwareId,
-                IsManaged = true,
-                Behavior = MonitorBehaviorType.Blackout,
-                IdleValue = 5,
-                IdleUnit = TimeUnit.Minutes,
-                IsActiveOnInput = true
-            });
-            monitor.Configuration.MarkAsSaved();
-
-            return monitor;
-        }
-
-        /// <summary>
-        /// Builds a layout view model over a 1920x1080 monitor with the supplied hardware ID.
-        /// </summary>
-        /// <param name="hardwareId">The hardware ID for the monitor.</param>
-        /// <param name="displayNumber">The display number for the monitor.</param>
-        /// <returns>A layout view model over the described monitor.</returns>
-        private static MonitorLayoutViewModel CreateMonitor(string hardwareId, int displayNumber = 1)
-        {
-            var bounds = new Rect(0, 0, 1920, 1080);
-            var monitorInfo = new MonitorInfo
-            {
-                HardwareId = hardwareId,
-                DisplayNumber = displayNumber,
-                DeviceName = $@"\\.\DISPLAY{displayNumber}",
-                Bounds = bounds
-            };
-
-            return new MonitorLayoutViewModel(monitorInfo, 1.0, bounds, 0, 0);
+            Assert.Empty(Assert.Single(_writes));
         }
     }
 }

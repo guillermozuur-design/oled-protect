@@ -1,6 +1,4 @@
-﻿using OLED_Sleeper.Features.MonitorInformation.Models;
-using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
-using OLED_Sleeper.Features.UserSettings.Models;
+﻿using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
 using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
 using OLED_Sleeper.UI.Services.Interfaces;
 using OLED_Sleeper.UI.ViewModels;
@@ -8,62 +6,39 @@ using System.Collections.ObjectModel;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Provides workspace management functionality, including monitor discovery, settings loading,
-    /// and layout ViewModel construction for the main application UI.
-    /// </summary>
-    public class WorkspaceService : IWorkspaceService
+    // Combines three sources into what the settings window shows: the monitors Windows reports,
+    // their positions as tiles, and the configuration saved for each (matched by hardware id).
+    public class WorkspaceService(
+        IMonitorInfoManager monitorSource,
+        IMonitorSettingsFileService settingsFile,
+        IMonitorLayoutService layout) : IWorkspaceService
     {
-        private readonly IMonitorInfoManager _monitorManager;
-        private readonly IMonitorSettingsFileService _settingsService;
-        private readonly IMonitorLayoutService _monitorLayoutService;
-
-        public WorkspaceService(
-            IMonitorInfoManager monitorManager,
-            IMonitorSettingsFileService settingsService,
-            IMonitorLayoutService monitorLayoutService)
+        public async Task<ObservableCollection<MonitorLayoutViewModel>> BuildWorkspaceAsync(double canvasWidth, double canvasHeight)
         {
-            _monitorManager = monitorManager;
-            _settingsService = settingsService;
-            _monitorLayoutService = monitorLayoutService;
-        }
+            var monitors = (await monitorSource.GetCurrentMonitorsAsync()).ToList();
+            var saved = settingsFile.LoadSettings();
 
-        /// <inheritdoc />
-        public async Task<ObservableCollection<MonitorLayoutViewModel>> BuildWorkspaceAsync(double containerWidth, double containerHeight)
-        {
-            var monitorInfos = await _monitorManager.GetCurrentMonitorsAsync();
+            var tiles = layout.CreateLayout(monitors, canvasWidth, canvasHeight);
 
-            var savedSettings = _settingsService.LoadSettings();
-            var monitorLayoutViewModels = _monitorLayoutService.CreateLayout(monitorInfos.ToList(), containerWidth, containerHeight);
-            ApplySettingsToViewModels(monitorLayoutViewModels, savedSettings);
-
-            return monitorLayoutViewModels;
-        }
-
-        /// <inheritdoc />
-        public async Task<ObservableCollection<MonitorLayoutViewModel>> RefreshWorkspaceAsync(double containerWidth, double containerHeight)
-        {
-            await _monitorManager.RefreshMonitorsAsync();
-
-            return await BuildWorkspaceAsync(containerWidth, containerHeight);
-        }
-
-        /// <summary>
-        /// Applies saved settings to the corresponding monitor layout view models.
-        /// </summary>
-        /// <param name="viewModels">The collection of monitor layout view models.</param>
-        /// <param name="savedSettings">The list of saved monitor settings.</param>
-        private static void ApplySettingsToViewModels(ObservableCollection<MonitorLayoutViewModel> viewModels, System.Collections.Generic.List<MonitorSettings> savedSettings)
-        {
-            foreach (var viewModel in viewModels)
+            foreach (var tile in tiles)
             {
-                var setting = savedSettings.FirstOrDefault(s => s.HardwareId == viewModel.HardwareId);
-                if (setting != null)
-                {
-                    viewModel.Configuration.ApplySettings(setting);
-                    viewModel.Configuration.MarkAsSaved();
-                }
+                // A file edited by hand may list a monitor twice; the first entry wins.
+                var settings = saved.Find(s => s.HardwareId == tile.HardwareId);
+                if (settings is null)
+                    continue;
+
+                // Loaded values are by definition what is on disk, so the tile starts out clean.
+                tile.Configuration.ApplySettings(settings);
+                tile.Configuration.MarkAsSaved();
             }
+
+            return tiles;
+        }
+
+        public async Task<ObservableCollection<MonitorLayoutViewModel>> RefreshWorkspaceAsync(double canvasWidth, double canvasHeight)
+        {
+            await monitorSource.RefreshMonitorsAsync();
+            return await BuildWorkspaceAsync(canvasWidth, canvasHeight);
         }
     }
 }

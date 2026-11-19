@@ -4,16 +4,12 @@ using System.Windows;
 
 namespace OLED_Sleeper.UI.Services
 {
-    /// <summary>
-    /// Reaches the main window through <see cref="Application.MainWindow"/>.
-    /// </summary>
+    // Thin wrapper; Application.Current is null outside a running WPF app (unit tests), hence the check.
     [ExcludeFromCodeCoverage]
     public class MainWindowAccessor : IMainWindowAccessor
     {
-        /// <inheritdoc />
-        public void SetMainWindow(Window window) => Application.Current.MainWindow = window;
+        public Window? MainWindow => Application.Current is { } app ? app.MainWindow : null;
 
-        /// <inheritdoc />
-        public Window? MainWindow => Application.Current?.MainWindow;
+        public void SetMainWindow(Window shell) => Application.Current.MainWindow = shell;
     }
 }

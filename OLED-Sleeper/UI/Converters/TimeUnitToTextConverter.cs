@@ -4,17 +4,24 @@ using System.Windows.Data;
 
 namespace OLED_Sleeper.UI.Converters
 {
-    /// <summary>Shows a <see cref="TimeUnit"/> in Dutch: seconden, minuten, uren.</summary>
+    // Dutch labels for the idle-time unit picker.
     public class TimeUnitToTextConverter : IValueConverter
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => value switch
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            TimeUnit.Seconds => "seconden",
-            TimeUnit.Minutes => "minuten",
-            TimeUnit.Hours => "uren",
-            _ => value?.ToString() ?? string.Empty
-        };
+            if (value is not TimeUnit unit)
+                return value?.ToString() ?? string.Empty;
 
+            return unit switch
+            {
+                TimeUnit.Seconds => "seconden",
+                TimeUnit.Minutes => "minuten",
+                TimeUnit.Hours => "uren",
+                _ => unit.ToString()
+            };
+        }
+
+        // One-way only.
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
             throw new NotSupportedException();
     }

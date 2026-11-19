@@ -1,6 +1,5 @@
-<Application x:Class="OLED_Sleeper.App"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+<!-- Application-wide look: the colour palette and the shared control styles every window uses. -->
+<Application x:Class="OLED_Sleeper.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <!-- ===== Palette: near-black (OLED-friendly) with a soft moonlight accent ===== -->
         <SolidColorBrush x:Key="PrimaryBackgroundColor" Color="#08090C" />
