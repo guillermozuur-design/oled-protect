@@ -417,6 +417,57 @@
                                     </StackPanel>
                                 </Border>
 
+                                <!-- One brightness schedule for all screens -->
+                                <Border x:Name="ScheduleCard" Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <CheckBox AutomationProperties.Name="Helderheid op tijden" DockPanel.Dock="Right" Style="{StaticResource Switch}"
+                                                      IsChecked="{Binding Enabled}" VerticalAlignment="Center" />
+                                            <StackPanel>
+                                                <TextBlock Text="Helderheid op tijden" Style="{StaticResource CardTitle}" />
+                                                <TextBlock Style="{StaticResource CardText}"
+                                                           Text="Voor alle schermen. Vanaf elke tijd geldt die helderheid, tot de volgende tijd. Wat je zelf verandert (snelmenu of knoppen op het scherm) blijft staan tot het volgende tijdstip." />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <WrapPanel Margin="0,12,0,0" IsEnabled="{Binding Enabled}">
+                                            <ItemsControl ItemsSource="{Binding Entries}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="6" Padding="8,5" Margin="0,0,8,6">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="vanaf" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                                <TextBox x:Name="StartBox" Style="{StaticResource Field}" Width="62" Text="{Binding Start, UpdateSourceTrigger=PropertyChanged}"
+                                                                         AutomationProperties.Name="Tijd" />
+                                                                <TextBox Style="{StaticResource Field}" Width="48" Margin="6,0,0,0" Text="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}"
+                                                                         AutomationProperties.Name="Helderheid in procent" />
+                                                                <TextBlock Text="%" Foreground="{StaticResource PrimaryForegroundColor}" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                                                <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Width="24" Height="24" Margin="6,0,0,0"
+                                                                        Style="{StaticResource FlatButton}" Foreground="{StaticResource SecondaryForegroundColor}" ToolTip="Verwijderen"
+                                                                        AutomationProperties.Name="Tijd verwijderen"
+                                                                        Command="{Binding DataContext.RemoveEntryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                        CommandParameter="{Binding}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding IsStartValid}" Value="False">
+                                                                <Setter TargetName="StartBox" Property="BorderBrush" Value="{StaticResource DestructiveColorBrush}" />
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <Button Content="+ tijd" Style="{StaticResource SubtleButton}" Margin="0,0,0,6" Command="{Binding AddEntryCommand}" />
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding Error}" Foreground="{StaticResource DestructiveColorBrush}" FontSize="12" Margin="0,4,0,0" />
+                                        <TextBlock Text="{Binding Status}" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" />
+                                    </StackPanel>
+                                </Border>
+
                                 <Border Style="{StaticResource Card}">
                                     <DockPanel>
                                         <CheckBox x:Name="StartupCheck" AutomationProperties.Name="Starten met Windows" DockPanel.Dock="Right" Style="{StaticResource Switch}" Click="Startup_Click" VerticalAlignment="Center" />

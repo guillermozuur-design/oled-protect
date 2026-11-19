@@ -35,17 +35,21 @@ namespace OLED_Sleeper
         private readonly ScreensaverPreview _preview;
         private readonly KeepAwakeAppsSettings _keepAwakeApps;
         private readonly FlightsSettings _flights;
+        private readonly GlobalBrightnessSchedule _brightnessSchedule;
         private FlightsView? _flightsPreview;
         private readonly DispatcherTimer _headerTimer;
         private readonly DispatcherTimer _autoSaveTimer;
 
         public MainWindow(GlobalHotkeyService hotkeyService, PanoramaSettings panorama, IMonitorInfoManager monitorInfoManager,
                           GlobalIdleSettings globalIdle, IWorkModeService workMode, IMonitorSettingsFileService settingsFile,
-                          ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps, FlightsSettings flights)
+                          ScreensaverPreview preview, KeepAwakeAppsSettings keepAwakeApps, FlightsSettings flights,
+                          GlobalBrightnessSchedule brightnessSchedule)
         {
             _keepAwakeApps = keepAwakeApps;
             _flights = flights;
+            _brightnessSchedule = brightnessSchedule;
             InitializeComponent();
+            ScheduleCard.DataContext = new UI.ViewModels.BrightnessScheduleEditorViewModel(_brightnessSchedule);
             _hotkeyService = hotkeyService;
             _panorama = panorama;
             _monitorInfoManager = monitorInfoManager;
@@ -129,9 +133,8 @@ namespace OLED_Sleeper
 
             HotkeyHint.Text = _hotkeyService.IsRegistered ? $"of {_hotkeyService.HotkeyText} voor het snelmenu" : "";
 
-            // Next step of a brightness schedule, if one is on.
-            var next = settings.Where(s => s.UseBrightnessSchedule)
-                .SelectMany(s => s.BrightnessSchedule ?? new())
+            // Next step of the brightness schedule, if it is on.
+            var next = (_brightnessSchedule.Enabled ? _brightnessSchedule.Entries : new())
                 .Select(e => (Time: BrightnessScheduleCalculator.ParseTime(e.Start), e.Brightness))
                 .Where(e => e.Time.HasValue)
                 .Select(e => (Time: e.Time!.Value, e.Brightness))

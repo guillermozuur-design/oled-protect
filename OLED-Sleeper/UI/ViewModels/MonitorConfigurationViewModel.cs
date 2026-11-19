@@ -305,6 +305,8 @@ namespace OLED_Sleeper.UI.ViewModels
         }
 
         // --- Brightness schedule ---
+        // No longer shown per screen (one schedule for all screens lives in the Algemeen tab, see
+        // GlobalBrightnessSchedule); the stored per-screen values are only carried along unchanged.
         private bool _useBrightnessSchedule;
         private bool _initialUseBrightnessSchedule;
         private string _initialScheduleSignature = string.Empty;

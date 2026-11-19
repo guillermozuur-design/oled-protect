@@ -1,6 +1,5 @@
 using OLED_Sleeper.Features.MonitorDimming.Services.Interfaces;
 using OLED_Sleeper.Features.MonitorInformation.Services.Interfaces;
-using OLED_Sleeper.Features.UserSettings.Services.Interfaces;
 using Serilog;
 using System.Diagnostics.CodeAnalysis;
 
@@ -30,15 +29,15 @@ namespace OLED_Sleeper.Features.BrightnessSchedule.Services
 
         private readonly IMonitorDimmingService _dimming;
         private readonly IMonitorInfoManager _monitors;
-        private readonly IMonitorSettingsFileService _settings;
+        private readonly GlobalBrightnessSchedule _schedule;
         private int? _current;
         private CancellationTokenSource? _pending;
 
-        public ManualBrightnessService(IMonitorDimmingService dimming, IMonitorInfoManager monitors, IMonitorSettingsFileService settings)
+        public ManualBrightnessService(IMonitorDimmingService dimming, IMonitorInfoManager monitors, GlobalBrightnessSchedule schedule)
         {
             _dimming = dimming;
             _monitors = monitors;
-            _settings = settings;
+            _schedule = schedule;
         }
 
         /// <summary>The brightness now: the last one chosen by hand, else what the schedule says, else 100%.</summary>
@@ -47,12 +46,7 @@ namespace OLED_Sleeper.Features.BrightnessSchedule.Services
             get
             {
                 if (_current is { } c) return c;
-                var now = TimeOnly.FromDateTime(DateTime.Now);
-                var scheduled = _settings.LoadSettings()
-                    .Where(s => s.UseBrightnessSchedule)
-                    .Select(s => BrightnessScheduleCalculator.GetTargetBrightness(s.BrightnessSchedule, now))
-                    .FirstOrDefault(v => v != null);
-                return scheduled ?? ManualBrightness.Highest;
+                return _schedule.TargetAt(TimeOnly.FromDateTime(DateTime.Now)) ?? ManualBrightness.Highest;
             }
         }
 

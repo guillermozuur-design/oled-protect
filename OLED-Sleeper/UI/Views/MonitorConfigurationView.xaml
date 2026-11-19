@@ -482,60 +482,6 @@
                 </Grid>
             </StackPanel>
 
-            <!-- Brightness Schedule Section -->
-            <Separator Background="{StaticResource SeparatorColorBrush}" Margin="0,18,0,12" />
-            <StackPanel IsEnabled="{Binding IsDimBehaviorEnabled}" ToolTipService.InitialShowDelay="200" ToolTipService.ShowOnDisabled="True">
-                <StackPanel.ToolTip>
-                    <ToolTip Content="{Binding ScheduleTooltip}" />
-                </StackPanel.ToolTip>
-                <StackPanel Orientation="Horizontal">
-                    <CheckBox Style="{StaticResource ModernCheckBox}" Content="Helderheid op tijden"
-                              IsChecked="{Binding UseBrightnessSchedule, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBlock Text="{Binding ScheduleError}" Foreground="{StaticResource DestructiveColorBrush}" FontSize="12"
-                               Margin="15,0,0,0" VerticalAlignment="Center"
-                               Visibility="{Binding ScheduleError, Converter={StaticResource ErrorVisibilityConverter}}" />
-                </StackPanel>
-
-                <WrapPanel Margin="26,10,0,0" IsEnabled="{Binding UseBrightnessSchedule}">
-                    <ItemsControl ItemsSource="{Binding ScheduleEntries}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="4" Padding="6,4" Margin="0,0,8,6">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="vanaf" Foreground="{StaticResource SecondaryForegroundColor}" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBox x:Name="StartBox" Width="58" Height="26" FontSize="13" Padding="4,2"
-                                                 Style="{StaticResource ModernTextBox}"
-                                                 Text="{Binding Start, UpdateSourceTrigger=PropertyChanged}" />
-                                        <TextBox Width="42" Height="26" FontSize="13" Padding="4,2" Margin="6,0,0,0"
-                                                 Style="{StaticResource ModernTextBox}"
-                                                 Text="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}" />
-                                        <TextBlock Text="%" Foreground="{StaticResource PrimaryForegroundColor}" VerticalAlignment="Center" Margin="4,0,0,0" />
-                                        <Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Width="22" Height="22" Margin="6,0,0,0"
-                                                Style="{StaticResource FlatButton}"
-                                                Foreground="{StaticResource SecondaryForegroundColor}" ToolTip="Verwijderen"
-                                                Command="{Binding DataContext.RemoveScheduleEntryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                CommandParameter="{Binding}" />
-                                    </StackPanel>
-                                </Border>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding IsStartValid}" Value="False">
-                                        <Setter TargetName="StartBox" Property="BorderBrush" Value="{StaticResource DestructiveColorBrush}" />
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <Button Content="+ tijd" Height="34" Padding="12,0" Margin="0,0,0,6" FontSize="13"
-                            Style="{StaticResource FlatButton}"
-                            BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1"
-                            Command="{Binding AddScheduleEntryCommand}" />
-                </WrapPanel>
-            </StackPanel>
         </StackPanel>
     </Grid>
 </UserControl>

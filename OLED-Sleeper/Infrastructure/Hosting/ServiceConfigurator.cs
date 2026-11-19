@@ -85,6 +85,7 @@ namespace OLED_Sleeper.Infrastructure.Hosting
             services.AddSingleton<ScreensaverPreview>();
             services.AddSingleton<IBrightnessScheduleService, BrightnessScheduleService>();
             services.AddSingleton<ManualBrightnessService>();
+            services.AddSingleton<GlobalBrightnessSchedule>();
             services.AddSingleton<IOverlayWindowFactory, OverlayWindowFactory>();
             services.AddSingleton<IMonitorBlackoutService, MonitorBlackoutService>();
             services.AddSingleton<IApplicationOrchestrator, ApplicationOrchestrator>();
