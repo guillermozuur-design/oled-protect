@@ -1,153 +1,254 @@
-﻿; Inno Setup installer script for OLED Space Sleeper (a fork of OLED Sleeper by Quorthon13)
-; Builds a single installer supporting both x64 and x86 deployments.
+﻿; OLED Space Sleeper - per-user Inno Setup 6 script.
+; One setup carries both payloads (x64 and x86) and picks the right one on the target machine.
+; build.ps1 compiles this with /DAppVersion=<MinVer version> and /DArtifactsDir=<output folder>.
 
-#include "CodeDependencies.iss"
+#define AppName      "OLED Space Sleeper"
+#define AppExe       "OLED-Sleeper.exe"
+#define RepoUrl      "https://github.com/guillermozuur-design/oled-space-sleeper"
+; Named mutex held by the running app (ApplicationInstanceManager); must match the app.
+#define InstanceLock "OLED-Sleeper-Mutex"
+; HKCU autostart entry; the app's own "start with Windows" toggle writes the same value.
+#define RunKey       "Software\Microsoft\Windows\CurrentVersion\Run"
+#define UserData     "{userappdata}\OLED-Space-Sleeper"
+#define ProjectDir   "..\OLED-Sleeper"
+#define StartupTask  "startup"
 
-; The build script passes the MinVer-derived version as /DAppVersion=. This fallback only applies to a
-; compile started from the Inno Setup IDE.
 #ifndef AppVersion
-  #define AppVersion "0.0.0-dev"
+  ; Only reached when compiling straight from the Inno Setup IDE.
+  #define AppVersion "0.0.0-ide"
+#endif
+#ifndef ArtifactsDir
+  #define ArtifactsDir "..\artifacts"
 #endif
 
 [Setup]
-; Unique application identifier used by Windows for installation tracking.
+; Never change AppId, not even the doubled closing brace: existing installs are registered under exactly
+; this value, and an update is only recognised when it matches.
 AppId={{644E3FA9-9DF7-4CB4-B061-821BA60FC20D}}
-
-; Application metadata shown in the installer and system UI.
-AppName=OLED Space Sleeper
-UninstallDisplayName=OLED Space Sleeper
+AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=guillermozuur-design
-AppPublisherURL=https://github.com/guillermozuur-design/oled-space-sleeper
-AppSupportURL=https://github.com/guillermozuur-design/oled-space-sleeper/issues
-
-; Installation runs without elevation.
+AppPublisherURL={#RepoUrl}
+AppSupportURL={#RepoUrl}/issues
+UninstallDisplayName={#AppName}
+UninstallDisplayIcon={app}\{#AppExe}
+SetupIconFile={#ProjectDir}\Assets\icon.ico
+; Per-user install: no UAC prompt, {autopf} resolves to %LOCALAPPDATA%\Programs.
 PrivilegesRequired=lowest
-
-; The mutex ApplicationInstanceManager holds. Setup and uninstall both wait for the application to be closed,
-; so its own shutdown restores monitor brightness before any file is replaced or removed.
-AppMutex=OLED-Sleeper-Mutex
-
-; Output installer configuration.
-OutputBaseFilename=OLED-Space-Sleeper-{#AppVersion}-Setup
-SourceDir=.
-OutputDir=..\artifacts
-
-; Default installation directory.
-DefaultDirName={autopf}\OLED Space Sleeper
-
-; Enables 64-bit installation mode when running on x64 systems.
-ArchitecturesInstallIn64BitMode=x64compatible
-
-; Installer and uninstall entry icons.
-SetupIconFile=..\OLED-Sleeper\Assets\icon.ico
-UninstallDisplayIcon={app}\OLED-Sleeper.exe
-
-; General installer UI and compression settings.
-DefaultGroupName=OLED Space Sleeper
+DefaultDirName={autopf}\{#AppName}
+DefaultGroupName={#AppName}
 AllowNoIcons=yes
-Compression=lzma
-SolidCompression=yes
+; Arm64 machines take the x64 payload too; they run it under emulation.
+ArchitecturesInstallIn64BitMode=x64compatible
+; Setup and uninstall wait until the app has quit, so it restores monitor brightness itself first.
+AppMutex={#InstanceLock}
+ShowLanguageDialog=auto
 WizardStyle=modern
+Compression=lzma2/max
+SolidCompression=yes
+OutputDir={#ArtifactsDir}
+OutputBaseFilename=OLED-Space-Sleeper-{#AppVersion}-Setup
 
 [Languages]
-; Default language configuration.
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "nl"; MessagesFile: "compiler:Languages\Dutch.isl"
+
+[CustomMessages]
+en.AutostartTask=Start %1 automatically when I sign in to Windows
+nl.AutostartTask=%1 automatisch starten als ik me aanmeld bij Windows
+en.AutostartGroup=Startup:
+nl.AutostartGroup=Opstarten:
+en.RuntimeInstalling=Installing the .NET 8 Desktop Runtime...
+nl.RuntimeInstalling=De .NET 8 Desktop Runtime wordt geïnstalleerd...
+en.RuntimeCancelled=The download of the .NET 8 Desktop Runtime was cancelled. %1 needs it to run.
+nl.RuntimeCancelled=Het downloaden van de .NET 8 Desktop Runtime is afgebroken. %1 heeft die nodig om te werken.
+en.RuntimeFailed=The .NET 8 Desktop Runtime could not be installed (%1). Install it from https://dotnet.microsoft.com/download/dotnet/8.0 and run this setup again.
+nl.RuntimeFailed=De .NET 8 Desktop Runtime kon niet worden geïnstalleerd (%1). Installeer hem via https://dotnet.microsoft.com/download/dotnet/8.0 en start deze setup daarna opnieuw.
 
 [Tasks]
-; Optional installation tasks presented to the user.
-Name: "startup"; Description: "Launch OLED Space Sleeper when Windows starts"; GroupDescription: "Additional options:";
-Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional shortcuts:";
+; Task names are remembered between installs; keep them stable.
+Name: "{#StartupTask}"; Description: "{cm:AutostartTask,{#AppName}}"; GroupDescription: "{cm:AutostartGroup}"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [InstallDelete]
-; Settings are KEPT on install and update: the settings file stays compatible between versions (schema 1;
-; new options get their default). Only a recorded brightness is cleared — setup waits for the app to close,
-; and the app restores brightness itself when it closes. Logs are kept as well.
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json"
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json.bak"
-Type: files; Name: "{userappdata}\OLED-Space-Sleeper\brightness_state.json.tmp"
+; Settings survive an update (the file format is forward compatible). Only the remembered brightness is
+; dropped: the app already put the original brightness back when setup made it quit. The wildcard also
+; catches the .bak and .tmp siblings. Logs stay.
+Type: files; Name: "{#UserData}\brightness_state.json*"
 
 [Files]
-; Install platform-specific binaries based on system architecture.
-Source: "..\artifacts\publish\x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: Is64BitInstallMode
-Source: "..\artifacts\publish\x86\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: not Is64BitInstallMode
+Source: "{#ArtifactsDir}\publish\x64\*"; DestDir: "{app}"; Check: Is64BitInstallMode; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#ArtifactsDir}\publish\x86\*"; DestDir: "{app}"; Check: not Is64BitInstallMode; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-; Start Menu and optional Desktop shortcuts.
-Name: "{group}\OLED Space Sleeper"; Filename: "{app}\OLED-Sleeper.exe"
-Name: "{autodesktop}\OLED Space Sleeper"; Filename: "{app}\OLED-Sleeper.exe"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; Optional autostart entry created when the startup task is selected.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OLED Space Sleeper"; ValueData: """{app}\OLED-Sleeper.exe"" -h"; Flags: uninsdeletevalue; Tasks: startup
+; -h starts the app hidden in the tray.
+Root: HKCU; Subkey: "{#RunKey}"; ValueName: "{#AppName}"; ValueType: string; ValueData: """{app}\{#AppExe}"" -h"; Tasks: startup; Flags: uninsdeletevalue
 
 [Run]
-; Optionally launch the application after installation completes.
-Filename: "{app}\OLED-Sleeper.exe"; Description: "{cm:LaunchProgram,OLED Space Sleeper}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: postinstall nowait skipifsilent
 
 [Code]
-
-// Reports whether the application's autostart registry entry exists.
-function StartupIsEnabled(): Boolean;
-begin
-  Result := RegValueExists(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'OLED Space Sleeper');
-end;
-
-// Ticks the startup task when autostart is already enabled, whether it was enabled here or from the
-// application's own toggle. Unlisted tasks keep their state.
-procedure InitializeWizard();
-begin
-  if StartupIsEnabled() then
-  begin
-    WizardSelectTasks('startup');
-  end;
-end;
-
-// Removes the application's autostart registry entry if present.
-procedure RemoveStartupKey();
-begin
-  if RegValueExists(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'OLED Space Sleeper') then
-  begin
-    Log('Removing startup registry key.');
-    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'OLED Space Sleeper');
-  end;
-end;
-
-// Clears the autostart entry during installation only when the startup task was left unticked. The
-// [Registry] entry writes it back when the task is ticked.
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if (CurStep = ssInstall) and (not WizardIsTaskSelected('startup')) then
-  begin
-    RemoveStartupKey();
-  end;
-end;
-
-// Runs during uninstallation to ensure the autostart entry is removed.
-procedure CurUninstallStepChanged(UninstallStep: TUninstallStep);
 var
-  DataDir: String;
+  RuntimeDownloadPage: TDownloadWizardPage;
+
+{ ---------- autostart entry ---------- }
+
+function AutostartPresent(): Boolean;
 begin
-  if UninstallStep = usUninstall then
+  Result := RegValueExists(HKEY_CURRENT_USER, '{#RunKey}', '{#AppName}');
+end;
+
+// Also used on uninstall: the app's own toggle can create the value without the setup task.
+procedure DropAutostart();
+begin
+  if AutostartPresent() then
   begin
-    RemoveStartupKey();
-  end;
-  // Settings (including the place of the pin), logs and stored map tiles: ask whether they may go too.
-  if (UninstallStep = usPostUninstall) and not UninstallSilent then
-  begin
-    DataDir := ExpandConstant('{userappdata}\OLED-Space-Sleeper');
-    if DirExists(DataDir) then
-      if MsgBox('Wil je ook je instellingen verwijderen?' + #13#10#13#10 +
-                'Dat zijn je schermkeuzes, de plek van je speldje, de logboeken en de opgeslagen kaarten (' + DataDir + ').' + #13#10 +
-                'Kies Nee als je de app later opnieuw wilt installeren met dezelfde instellingen.',
-                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-        DelTree(DataDir, True, True, True);
+    Log('Deleting the autostart value under HKCU\{#RunKey}.');
+    RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', '{#AppName}');
   end;
 end;
 
-// Requests download of required runtime dependencies before installation begins.
-function InitializeSetup(): Boolean;
+{ ---------- .NET 8 Desktop Runtime ---------- }
+
+// The runtime has to match the payload we install.
+function RuntimeArchitecture(): String;
 begin
-  Dependency_AddDotNet80Desktop;
-  Result := True;
+  if Is64BitInstallMode then
+    Result := 'x64'
+  else
+    Result := 'x86';
+end;
+
+// The .NET installers record their folder in the 32-bit registry view; Program Files is the default.
+function DotNetRoot(): String;
+var
+  Registered: String;
+begin
+  if RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\' + RuntimeArchitecture(),
+                         'InstallLocation', Registered) then
+    if DirExists(Registered) then
+    begin
+      Result := Registered;
+      Exit;
+    end;
+  if Is64BitInstallMode then
+    Result := ExpandConstant('{commonpf64}\dotnet')
+  else
+    Result := ExpandConstant('{commonpf32}\dotnet');
+end;
+
+// Any 8.x Desktop Runtime is enough: the app rolls forward to the newest installed 8.0 patch.
+function HasDesktopRuntime8(): Boolean;
+var
+  Hit: TFindRec;
+begin
+  Result := False;
+  if not FindFirst(AddBackslash(DotNetRoot()) + 'shared\Microsoft.WindowsDesktop.App\8.*', Hit) then
+    Exit;
+  try
+    repeat
+      Result := (Hit.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0;
+    until Result or not FindNext(Hit);
+  finally
+    FindClose(Hit);
+  end;
+end;
+
+// Microsoft's aka.ms link always points at the latest 8.0 servicing release on builds.dotnet.microsoft.com.
+function RuntimeDownloadUrl(): String;
+begin
+  Result := 'https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-' + RuntimeArchitecture() + '.exe';
+end;
+
+// Downloads and runs the runtime installer without UI. Returns '' when it worked, otherwise why setup
+// has to stop. The runtime installer asks for elevation on its own.
+function InstallDesktopRuntime(): String;
+var
+  LocalCopy: String;
+  Code: Integer;
+begin
+  Result := '';
+  LocalCopy := 'windowsdesktop-runtime-8-' + RuntimeArchitecture() + '.exe';
+  RuntimeDownloadPage.Clear;
+  RuntimeDownloadPage.Add(RuntimeDownloadUrl(), LocalCopy, '');
+  RuntimeDownloadPage.Show;
+  try
+    try
+      RuntimeDownloadPage.Download;
+      RuntimeDownloadPage.SetText(CustomMessage('RuntimeInstalling'), '');
+      if not ShellExec('', ExpandConstant('{tmp}\') + LocalCopy, '/install /quiet /norestart', '',
+                       SW_HIDE, ewWaitUntilTerminated, Code) then
+        Result := FmtMessage(CustomMessage('RuntimeFailed'), [SysErrorMessage(Code)])
+      else
+      begin
+        Log(Format('.NET Desktop Runtime installer exit code: %d', [Code]));
+        // 3010/1641: a reboot is pending, 1638: a newer build is already there. All fine for the app.
+        if (Code <> 0) and (Code <> 3010) and (Code <> 1641) and (Code <> 1638) then
+          Result := FmtMessage(CustomMessage('RuntimeFailed'), [IntToStr(Code)]);
+      end;
+    except
+      if RuntimeDownloadPage.AbortedByUser then
+        Result := FmtMessage(CustomMessage('RuntimeCancelled'), ['{#AppName}'])
+      else
+        Result := FmtMessage(CustomMessage('RuntimeFailed'), [GetExceptionMessage]);
+    end;
+  finally
+    RuntimeDownloadPage.Hide;
+  end;
+end;
+
+{ ---------- event functions ---------- }
+
+procedure InitializeWizard;
+begin
+  RuntimeDownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+  // Reflect the current state, whether autostart was set by an earlier setup or from inside the app.
+  if AutostartPresent() then
+    WizardSelectTasks('{#StartupTask}');
+end;
+
+// Runs in silent installs too, right before files are copied.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if HasDesktopRuntime8() then
+    Log('.NET 8 Desktop Runtime found.')
+  else
+    Result := InstallDesktopRuntime();
+end;
+
+procedure CurStepChanged(Step: TSetupStep);
+begin
+  // An unticked task means "no autostart"; a ticked one is (re)written by [Registry].
+  if (Step = ssInstall) and not WizardIsTaskSelected('{#StartupTask}') then
+    DropAutostart();
+end;
+
+procedure OfferToRemoveUserData();
+var
+  Folder: String;
+begin
+  Folder := ExpandConstant('{#UserData}');
+  if not DirExists(Folder) then
+    Exit;
+  if MsgBox('Wil je ook je instellingen verwijderen?' + #13#10#13#10 +
+            'Dat zijn je schermkeuzes, de plek van je speldje, de logboeken en de opgeslagen kaarten (' + Folder + ').' + #13#10 +
+            'Kies Nee als je de app later opnieuw wilt installeren met dezelfde instellingen.',
+            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    DelTree(Folder, True, True, True);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  case CurUninstallStep of
+    usUninstall:
+      DropAutostart();
+    usPostUninstall:
+      if not UninstallSilent then
+        OfferToRemoveUserData();
+  end;
 end;
