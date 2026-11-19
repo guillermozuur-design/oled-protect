@@ -40,35 +40,48 @@
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
-        <Style x:Key="ModernSlider" TargetType="Slider">
-            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
+
+        <!-- ===== Value slider: accent rail up to a round knob, dim rail after it ===== -->
+        <!-- The rail halves are plain decoration: without a command, clicking them does not move the value. -->
+        <ControlTemplate x:Key="SliderRailHalf" TargetType="RepeatButton">
+            <Border Height="4" CornerRadius="2" Background="{TemplateBinding Background}" VerticalAlignment="Center" />
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="SliderKnob" TargetType="Thumb">
+            <Grid Width="18" Height="18" Background="Transparent">
+                <Ellipse x:Name="Glow" Fill="{StaticResource AccentColorBrush}" Opacity="0" />
+                <Ellipse Margin="3" Fill="{StaticResource PrimaryForegroundColor}" />
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Glow" Property="Opacity" Value="0.35" />
+                </Trigger>
+                <Trigger Property="IsDragging" Value="True">
+                    <Setter TargetName="Glow" Property="Opacity" Value="0.6" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style x:Key="RailSlider" TargetType="Slider">
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocus}" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="Slider">
-                        <Grid>
-                            <Border x:Name="Track" Height="4" Background="{StaticResource TertiaryBackgroundColor}" CornerRadius="2" />
-                            <Canvas>
-                                <Border x:Name="PART_SelectionRange" Background="{StaticResource AccentColorBrush}" Height="4" CornerRadius="2" />
-                            </Canvas>
-                            <Track x:Name="PART_Track">
-                                <Track.Thumb>
-                                    <Thumb x:Name="Thumb" Width="16" Height="16" Background="{StaticResource PrimaryForegroundColor}" BorderBrush="{StaticResource SecondaryForegroundColor}" BorderThickness="1">
-                                        <Thumb.Template>
-                                            <ControlTemplate TargetType="Thumb">
-                                                <Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" />
-                                            </ControlTemplate>
-                                        </Thumb.Template>
-                                    </Thumb>
-                                </Track.Thumb>
-                            </Track>
-                        </Grid>
+                    <ControlTemplate TargetType="{x:Type Slider}">
+                        <Track x:Name="PART_Track" MinHeight="18">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Template="{StaticResource SliderRailHalf}" Background="{StaticResource AccentColorBrush}" Focusable="False" IsTabStop="False" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Template="{StaticResource SliderRailHalf}" Background="{StaticResource TertiaryBackgroundColor}" Focusable="False" IsTabStop="False" />
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Template="{StaticResource SliderKnob}" />
+                            </Track.Thumb>
+                        </Track>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.5" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Thumb" Property="BorderBrush" Value="{StaticResource AccentColorBrush}" />
+                                <Setter TargetName="PART_Track" Property="Opacity" Value="0.5" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -237,7 +250,7 @@
 
                                             <DockPanel Margin="0,14,0,0">
                                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <Slider x:Name="SceneSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="10" Maximum="60" TickFrequency="5" IsSnapToTickEnabled="True"
+                                                    <Slider x:Name="SceneSlider" Style="{StaticResource RailSlider}" Width="200" Minimum="10" Maximum="60" TickFrequency="5" IsSnapToTickEnabled="True"
                                                             VerticalAlignment="Center" ValueChanged="SceneSlider_ValueChanged" />
                                                     <TextBlock x:Name="SceneText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
                                                 </StackPanel>
@@ -272,7 +285,7 @@
                                 <Border Style="{StaticResource Card}">
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Slider x:Name="RadiusSlider" Style="{StaticResource ModernSlider}" Width="200" Minimum="15" Maximum="80" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            <Slider x:Name="RadiusSlider" Style="{StaticResource RailSlider}" Width="200" Minimum="15" Maximum="80" TickFrequency="5" IsSnapToTickEnabled="True"
                                                     VerticalAlignment="Center" ValueChanged="RadiusSlider_ValueChanged" />
                                             <TextBlock x:Name="RadiusText" Width="56" Margin="12,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{StaticResource PrimaryForegroundColor}" />
                                         </StackPanel>
