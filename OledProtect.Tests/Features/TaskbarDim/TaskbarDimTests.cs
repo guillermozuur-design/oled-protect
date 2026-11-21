@@ -25,6 +25,14 @@ namespace OledProtect.Tests.Features.TaskbarDim
         }
 
         [Fact]
+        public void MouseAtOneTaskbarCountsForAll()
+        {
+            var second = new Rect(2560, 1392, 2560, 48);
+            Assert.True(TaskbarDimRules.IsNearAny(new[] { Bottom, second }, new Point(3000, 1420)));  // on the second screen's
+            Assert.False(TaskbarDimRules.IsNearAny(new[] { Bottom, second }, new Point(3000, 600)));  // away from both
+        }
+
+        [Fact]
         public void HiddenTaskbarIsNotDimmed()
         {
             Assert.True(TaskbarDimRules.IsShown(Bottom, Monitor));

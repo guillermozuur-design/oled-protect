@@ -372,7 +372,7 @@
                                         <StackPanel>
                                             <TextBlock Text="Taakbalk dimmen" Style="{StaticResource CardTitle}" />
                                             <TextBlock Style="{StaticResource CardText}"
-                                                       Text="De taakbalk staat altijd op dezelfde plek en brandt daardoor het snelst in. Staat de muis 5 seconden niet bij de taakbalk, dan wordt hij donkerder; ga je er met de muis heen, dan is hij meteen weer gewoon. Klikken werkt altijd. Niet bij een programma op volledig scherm." />
+                                                       Text="De taakbalk staat altijd op dezelfde plek en brandt daardoor het snelst in. Staat de muis 5 seconden niet bij de taakbalk, dan wordt hij donkerder; ga je met de muis naar een taakbalk, dan lichten ze op alle schermen tegelijk op (en worden ze ook weer samen donker). Klikken werkt altijd. Niet bij een programma op volledig scherm." />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>

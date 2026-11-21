@@ -44,7 +44,8 @@ Beide screensavers lopen over twee schermen naast elkaar als **één panorama**,
 - **Werkmodus**: alle schermen blijven aan (video, lezen over twee schermen), ook voor een uur.
 - **Helderheid op tijden**: één schema voor alle schermen, bijvoorbeeld 08:00 → 80 %, 19:00 → 50 %, 23:00 → 30 %.
 - **Taakbalk dimmen**: staat de muis 5 seconden niet bij de taakbalk, dan wordt die donkerder; je klikt er gewoon
-  doorheen en met de muis erheen is hij meteen weer normaal.
+  doorheen. Ga je met de muis naar een taakbalk, dan lichten ze op alle schermen tegelijk op en worden ze ook
+  samen weer donker.
 - **Alle schermen uit als je weg bent**, behalve het scherm waarop een video speelt.
 - **Apps die het scherm aan houden**: zolang zo'n app openstaat (VLC, Netflix, OBS, Zoom, Teams of een eigen keuze)
   blijft het scherm waarop hij staat aan, of alle schermen.

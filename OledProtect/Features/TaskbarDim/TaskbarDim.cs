@@ -67,20 +67,25 @@ namespace OledProtect.Features.TaskbarDim
             return !visible.IsEmpty && Math.Min(visible.Width, visible.Height) >= 16;
         }
 
+        /// <summary>The mouse at any taskbar counts for all of them: they light up and go dark together.</summary>
+        public static bool IsNearAny(IEnumerable<Rect> taskbars, Point cursor) => taskbars.Any(t => IsNear(t, cursor));
+
         public static bool ShouldDim(DateTime lastNearUtc, DateTime nowUtc) => nowUtc - lastNearUtc >= After;
     }
 
     /// <summary>
-    /// Lays a dark, see-through strip over each taskbar after <see cref="TaskbarDimRules.After"/> without the
-    /// mouse near it, so its icons and clock wear an OLED screen less. Clicks go straight through; when the
-    /// mouse comes near it is gone at once. Nothing happens while a program is full screen.
+    /// Lays a dark, see-through strip over every taskbar after <see cref="TaskbarDimRules.After"/> without the
+    /// mouse near one, so their icons and clocks wear an OLED screen less. All taskbars move together: the mouse
+    /// at any of them lights them all up at once, and they go dark again together. Clicks go straight through.
+    /// Nothing happens while a program is full screen.
     /// </summary>
     [ExcludeFromCodeCoverage]
     public sealed class TaskbarDimmer
     {
         private readonly TaskbarDimSettings _settings;
         private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(200) };
-        private readonly Dictionary<nint, (Window Shade, DateTime LastNear, bool Dimmed)> _shades = new();
+        private readonly Dictionary<nint, (Window Shade, bool Dimmed)> _shades = new();
+        private DateTime _lastNear = DateTime.UtcNow; // the mouse at any taskbar, shared by all of them
 
         public TaskbarDimmer(TaskbarDimSettings settings)
         {
@@ -119,14 +124,16 @@ namespace OledProtect.Features.TaskbarDim
                 _shades.Remove(gone);
             }
 
+            bool near = TaskbarDimRules.IsNearAny(taskbars.Values.Select(t => t.Rect), cursor);
+            if (near) _lastNear = now;
+            bool dimAll = !near && !fullScreen && TaskbarDimRules.ShouldDim(_lastNear, now);
+
             foreach (var (handle, (rect, monitor)) in taskbars)
             {
                 if (!_shades.TryGetValue(handle, out var entry))
-                    entry = (CreateShade(), now, false);
+                    entry = (CreateShade(), false);
 
-                bool near = TaskbarDimRules.IsNear(rect, cursor);
-                if (near) entry.LastNear = now;
-                bool dim = !near && !fullScreen && TaskbarDimRules.IsShown(rect, monitor) && TaskbarDimRules.ShouldDim(entry.LastNear, now);
+                bool dim = dimAll && TaskbarDimRules.IsShown(rect, monitor);
 
                 if (dim && !entry.Dimmed) Show(entry.Shade, rect);
                 else if (!dim && entry.Dimmed) Hide(entry.Shade);
